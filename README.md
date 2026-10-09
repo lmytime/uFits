@@ -32,7 +32,8 @@ Time spent in the core alone, measured on a 4-core Linux VM:
 
 - The first HDU that holds an image or a plottable table (an empty primary HDU
   followed by `SCI`, as in HST/JWST files, works as expected). When a file has more,
-  a menu in the preview's bar switches between them (`SCI`, `ERR`, `DQ`, ...).
+  a menu in the preview's bar switches between them (`SCI`, `ERR`, `DQ`, ...); it also
+  lists every other table, and picking one shows its rows in the header view.
 - Every BITPIX, with `BSCALE`/`BZERO` (unsigned integers included) and `BLANK`/NaN
   as transparent pixels, so mosaics keep their footprint shape.
 - An automatic midtone stretch (median/MAD based, like PixInsight's STF) that shows faint
@@ -49,6 +50,11 @@ Time spent in the core alone, measured on a 4-core Linux VM:
   magnitudes (drawn with bright up), SDSS spectra (`flux` against `loglam`), HST/JWST
   `x1d` spectra (array columns), X-ray spectra (`COUNTS` against `CHANNEL`), and other
   tables whose columns are named like these. Only the two columns plotted are decoded.
+- Catalogs as a map of their sky positions: `RA`/`DEC` (also `ra`/`dec`,
+  `RAJ2000`/`DEJ2000`, `ALPHA_J2000`/`DELTA_J2000`, `GLON`/`GLAT` and other common
+  pairs), right ascension growing to the left, fields across RA = 0 kept in one piece,
+  placeholder values such as -999 skipped. Crowded catalogs are shaded by density. A
+  5-million-row catalog plots in about 0.15 s.
 - Tile-compressed images (`fpack`, `.fz`): `RICE_1`, `GZIP_1`, `GZIP_2`, `PLIO_1`,
   `NOCOMPRESS`, with all three quantization/dithering modes.
 - Gzipped files (`.fits.gz`) when built with `GZIP=1` (see below).

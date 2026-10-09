@@ -141,8 +141,15 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     double xlo = MIN(x0, x1), xhi = MAX(x0, x1);
     for (NSNumber *n in FQNiceTicks(xlo, xhi, 8)) {
         double t = n.doubleValue;
-        CGFloat x = NSMinX(plot) + (CGFloat)((t - x0) / (x1 - x0)) * NSWidth(plot);
-        NSString *label = [NSString stringWithFormat:@"%.6g", t];
+        CGFloat k = (CGFloat)((t - x0) / (x1 - x0)) * NSWidth(plot);
+        CGFloat x = img->x_flip ? NSMaxX(plot) - k : NSMinX(plot) + k;   // RA grows leftwards
+        double v = t;
+        if (img->x_wrap) {   // a field across RA = 0: label -10 as 350
+            v = fmod(t, 360.0);
+            if (v < 0)
+                v += 360;
+        }
+        NSString *label = [NSString stringWithFormat:@"%.6g", v];
         NSSize sz = [label sizeWithAttributes:attrs];
         [label drawAtPoint:NSMakePoint(x - sz.width / 2, NSMinY(plot) - 6 - sz.height)
             withAttributes:attrs];
@@ -213,7 +220,9 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     NSArray<FQHDUItem *> *_hdus;
     int _hdu;             // HDU asked for, -1 = automatic
     long long _plane;     // cube plane asked for, -1 = automatic
-    BOOL _headerLoaded;
+    BOOL _headerLoaded, _headerReady;   // listing asked for; in the text view
+    int _headerTarget;    // HDU to scroll the listing to, -1 = none
+    BOOL _headerTargetRows;   // to its table rows rather than its cards
     BOOL _busy, _again;   // a render is running; another one is wanted after it
     NSInteger _generation;
     NSSize _fitting;
@@ -227,6 +236,7 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
         _fitting = NSMakeSize(800, 600);
         _hdu = -1;
         _plane = -1;
+        _headerTarget = -1;
     }
     return self;
 }
@@ -358,7 +368,8 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
 {
     (void)self.view;
     _path = [path copy];
-    _headerLoaded = NO;
+    _headerLoaded = _headerReady = NO;
+    _headerTarget = -1;
     _hdu = -1;
     _plane = -1;
     _hdus = nil;
@@ -476,11 +487,7 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
         _fitting = NSMakeSize(MAX(MAX(round(w * s), 360), bar), round(h * s) + kBarHeight);
         self.preferredContentSize = _fitting;
     }
-    if (r) {
-        NSInteger i = [_hduMenu indexOfItemWithRepresentedObject:@(r.info.hdu)];
-        if (i >= 0)
-            [_hduMenu selectItemAtIndex:i];
-    }
+    [self selectRenderedHDU];
     [self updatePlaneControls];
     [self showHeader:_mode.selectedSegment == 1];
 }
@@ -569,6 +576,17 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     _info.frame = NSMakeRect(10, floor((kBarHeight - ih) / 2), MAX(0, x - 10), ih);
 }
 
+/// Selects the HDU on show in the HDU menu (which may show a table picked
+/// for the header listing).
+- (void)selectRenderedHDU
+{
+    if (!_rendering)
+        return;
+    NSInteger i = [_hduMenu indexOfItemWithRepresentedObject:@(_rendering.info.hdu)];
+    if (i >= 0)
+        [_hduMenu selectItemAtIndex:i];
+}
+
 - (void)showHeader:(BOOL)header
 {
     int kind = _rendering ? _rendering.kind : FQ_KIND_NONE;
@@ -585,11 +603,39 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
             NSString *text = FQHeaderListing(path);
             dispatch_async(dispatch_get_main_queue(), ^{
-                if ([path isEqualToString:self->_path])
-                    self->_headerText.string = text;
+                if (![path isEqualToString:self->_path])
+                    return;
+                self->_headerText.string = text;
+                self->_headerReady = YES;
+                [self scrollHeaderToTarget];
             });
         });
+    } else if (header) {
+        [self scrollHeaderToTarget];
     }
+}
+
+/// Scrolls the header listing to the rows of table _headerTarget, or to
+/// its header cards, once the listing is there.
+- (void)scrollHeaderToTarget
+{
+    if (!_headerReady || _headerTarget < 0)
+        return;
+    NSString *text = _headerText.string;
+    NSRange r = NSMakeRange(NSNotFound, 0);
+    if (_headerTargetRows)
+        r = [text rangeOfString:[NSString stringWithFormat:@"——— HDU %d table ———", _headerTarget]];
+    if (r.location == NSNotFound)   // also when the listing was cut short
+        r = [text rangeOfString:[NSString stringWithFormat:@"——— HDU %d ———", _headerTarget]];
+    _headerTarget = -1;
+    if (r.location == NSNotFound)
+        return;
+    NSLayoutManager *lm = _headerText.layoutManager;
+    NSRange glyphs = [lm glyphRangeForCharacterRange:r actualCharacterRange:NULL];
+    NSRect box = [lm boundingRectForGlyphRange:glyphs inTextContainer:_headerText.textContainer];
+    CGFloat y = NSMinY(box) + _headerText.textContainerOrigin.y - 6;
+    [_headerText scrollPoint:NSMakePoint(0, MAX(0, y))];
+    [_headerText showFindIndicatorForRange:r];
 }
 
 #pragma mark Actions
@@ -598,6 +644,8 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
 {
     (void)sender;
     BOOL header = _mode.selectedSegment == 1;
+    if (!header)
+        [self selectRenderedHDU];
     [self showHeader:header];
     if (header)
         [self.view.window makeFirstResponder:_headerText];
@@ -615,9 +663,28 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
 {
     (void)sender;
     NSNumber *n = _hduMenu.selectedItem.representedObject;
-    if (!n || n.intValue == _hdu || (_hdu < 0 && _rendering && n.intValue == _rendering.info.hdu))
+    if (!n)
         return;
-    _hdu = n.intValue;
+    int hdu = n.intValue, kind = FQ_KIND_NONE;
+    for (FQHDUItem *item in _hdus)
+        if (item.hdu == hdu)
+            kind = item.kind;
+    // Opening the header later shows this HDU's part of the listing.
+    _headerTarget = hdu;
+    _headerTargetRows = kind == FQ_KIND_TABLE;
+    if (kind == FQ_KIND_TABLE) {   // nothing to draw: show its rows
+        _mode.selectedSegment = 1;
+        [self showHeader:YES];
+        [self.view.window makeFirstResponder:_headerText];
+        return;
+    }
+    if (_mode.selectedSegment == 1) {
+        _mode.selectedSegment = 0;
+        [self showHeader:NO];
+    }
+    if (hdu == _hdu || (_hdu < 0 && _rendering && hdu == _rendering.info.hdu))
+        return;
+    _hdu = hdu;
     _plane = -1;
     [self requestRender];
 }

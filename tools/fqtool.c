@@ -94,17 +94,23 @@ static int write_spectrum_png(const char *path, const fq_image *img)
         lo = img->y_max;
         hi = img->y_min;
     }
-    if (img->dots) {   /* time series: the dot grid */
+    if (img->dots) {   /* points: the grid, darker where it is crowded */
         for (int c = 0; c < img->spec_n; c++)
             for (int r = 0; r < img->dot_rows; r++) {
-                if (!img->dots[(size_t)c * img->dot_rows + r])
+                int k = img->dots[(size_t)c * img->dot_rows + r];
+                if (!k)
                     continue;
+                uint8_t ink = (uint8_t)(k >= 16 ? 0 : 160 - 10 * k);
                 int x = (int)((int64_t)c * (w - 2) / img->spec_n);
                 int y = (int)((int64_t)r * (h - 2) / img->dot_rows);
+                if (img->x_flip)
+                    x = w - 2 - x;
                 if (!img->y_flip)
                     y = h - 2 - y;
                 for (int dy = 0; dy < 2; dy++)
-                    memset(px + (size_t)(y + dy) * w + x, 0, 2);
+                    for (int dx = 0; dx < 2; dx++)
+                        if (px[(size_t)(y + dy) * w + x + dx] > ink)
+                            px[(size_t)(y + dy) * w + x + dx] = ink;
             }
         int rc = write_png(path, px, w, h, 1, (size_t)w);
         free(px);
@@ -207,11 +213,11 @@ static void print_info(const fq_info *in)
 static void print_plot(const fq_image *img)
 {
     printf("n=%d\npoints=%lld\ny_min=%.17g\ny_max=%.17g\nhas_x=%d\nx_first=%.17g\nx_last=%.17g\n"
-           "x_log=%d\ny_flip=%d\ndots=%d\ndot_rows=%d\nx_label=%s\ny_label=%s\nx_unit=%s\n"
-           "y_unit=%s\n",
+           "x_log=%d\nx_flip=%d\nx_wrap=%d\ny_flip=%d\ndots=%d\ndot_rows=%d\nx_label=%s\n"
+           "y_label=%s\nx_unit=%s\ny_unit=%s\n",
            img->spec_n, (long long)img->spec_points, img->y_min, img->y_max, img->has_x,
-           img->x_first, img->x_last, img->x_log, img->y_flip, img->points, img->dot_rows,
-           img->x_label, img->y_label, img->x_unit, img->y_unit);
+           img->x_first, img->x_last, img->x_log, img->x_flip, img->x_wrap, img->y_flip,
+           img->points, img->dot_rows, img->x_label, img->y_label, img->x_unit, img->y_unit);
 }
 
 int main(int argc, char **argv)
@@ -246,7 +252,10 @@ int main(int argc, char **argv)
         fq_hdu_entry e[64];
         int n = fq_list_hdus(f, e, 64);
         for (int i = 0; i < n; i++)
-            printf("%d %s %lld %s | %s\n", e[i].hdu, e[i].kind == FQ_KIND_PLOT ? "plot" : "image",
+            printf("%d %s %lld %s | %s\n", e[i].hdu,
+                   e[i].kind == FQ_KIND_PLOT    ? "plot"
+                   : e[i].kind == FQ_KIND_TABLE ? "table"
+                                                : "image",
                    (long long)e[i].nplanes, e[i].extname[0] ? e[i].extname : "-", e[i].desc);
     } else if (!strcmp(cmd, "table")) {
         int hdu = argc > 3 ? atoi(argv[3]) : 1, rows = argc > 4 ? atoi(argv[4]) : 20;
@@ -340,11 +349,12 @@ int main(int argc, char **argv)
                 print_info(&img->info);
                 printf("open %.2f ms, render %.2f ms (best of %d)\n", t_open, best, repeat);
                 if (img->info.kind == FQ_KIND_PLOT) {
-                    printf("plot n=%d points=%lld y=[%g, %g] x=%d [%g, %g] log=%d flip=%d dots=%d"
-                           " %s [%s] vs %s [%s]\n",
+                    printf("plot n=%d points=%lld y=[%g, %g] x=%d [%g, %g] log=%d xflip=%d wrap=%d"
+                           " flip=%d dots=%d %s [%s] vs %s [%s]\n",
                            img->spec_n, (long long)img->spec_points, img->y_min, img->y_max,
-                           img->has_x, img->x_first, img->x_last, img->x_log, img->y_flip,
-                           img->points, img->y_label, img->y_unit, img->x_label, img->x_unit);
+                           img->has_x, img->x_first, img->x_last, img->x_log, img->x_flip,
+                           img->x_wrap, img->y_flip, img->points, img->y_label, img->y_unit,
+                           img->x_label, img->x_unit);
                     write_spectrum_png(argv[3], img);
                 } else {
                     /* Output statistics: median grey of the opaque pixels and

@@ -1904,6 +1904,13 @@ int fq_list_hdus(fq_file *f, fq_hdu_entry *out, int max)
         } else if (fqi_table_plot_spec(f, i, &ps)) {
             e.kind = FQ_KIND_PLOT;
             snprintf(e.desc, sizeof e.desc, "%s vs %s", ps.yname, ps.xname);
+        } else if ((h = fqi_get_hdu(f, i))->naxis == 2 && !h->zimage &&
+                   (!strcmp(h->xtension, "BINTABLE") || !strcmp(h->xtension, "TABLE"))) {
+            int64_t ncol = 0, nrow = h->naxes[1];
+            fqi_kw_int(f, h, "TFIELDS", &ncol);
+            e.kind = FQ_KIND_TABLE;
+            snprintf(e.desc, sizeof e.desc, "%lld row%s x %lld column%s", (long long)nrow,
+                     nrow == 1 ? "" : "s", (long long)ncol, ncol == 1 ? "" : "s");
         } else {
             continue;
         }

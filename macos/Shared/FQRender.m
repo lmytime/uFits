@@ -251,23 +251,78 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
 
 @end
 
-/// Dots of a time series from the core's grid: round where there are few,
-/// square (much faster to fill) where there are very many.
+/// Horizontal position of plot column c of n; x_flip puts the first
+/// column on the right (right ascension grows to the left).
+static CGFloat FQColumnX(const fq_image *img, CGRect rect, int c)
+{
+    int n = img->spec_n;
+    CGFloat off = n > 1 ? (CGFloat)c * rect.size.width / (CGFloat)(n - 1) : rect.size.width / 2;
+    return img->x_flip ? CGRectGetMaxX(rect) - off : CGRectGetMinX(rect) + off;
+}
+
+/// Crowded plots (big catalogs): each cell of the core's grid is shaded by
+/// how many points fall in it, on a log scale, so structure shows.
+static void FQDrawDensity(CGContextRef ctx, CGRect rect, const fq_image *img, int peak)
+{
+    const int n = img->spec_n, rows = img->dot_rows;
+    uint8_t *mask = malloc((size_t)n * (size_t)rows);
+    if (!mask)
+        return;
+    const double k = 195.0 / log((double)peak);
+    for (int r = 0; r < rows; r++) {   // mask row 0 is the top of the plot
+        int gr = img->y_flip ? r : rows - 1 - r;
+        uint8_t *out = mask + (size_t)r * (size_t)n;
+        for (int c = 0; c < n; c++) {
+            int gc = img->x_flip ? n - 1 - c : c;
+            int count = img->dots[(size_t)gc * (size_t)rows + (size_t)gr];
+            out[c] = count ? (uint8_t)(60 + k * log((double)count)) : 0;
+        }
+    }
+    CGDataProviderRef dp = CGDataProviderCreateWithData(NULL, mask, (size_t)n * (size_t)rows, FQReleasePixels);
+    if (!dp) {
+        free(mask);
+        return;
+    }
+    CGColorSpaceRef gray = CGColorSpaceCreateDeviceGray();
+    CGImageRef im = CGImageCreate((size_t)n, (size_t)rows, 8, 8, (size_t)n, gray,
+                                  (CGBitmapInfo)kCGImageAlphaNone, dp, NULL, true, kCGRenderingIntentDefault);
+    CGColorSpaceRelease(gray);
+    CGDataProviderRelease(dp);
+    if (!im)
+        return;
+    CGContextSaveGState(ctx);
+    CGContextClipToMask(ctx, rect, im);   // white cells paint, black ones do not
+    CGContextFillRect(ctx, rect);
+    CGContextRestoreGState(ctx);
+    CGImageRelease(im);
+}
+
+/// Points from the core's grid: one dot per occupied cell, round where
+/// there are few and square (much faster to fill) where there are many;
+/// a density map when the plot is crowded.
 static void FQDrawDots(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat size)
 {
     const int n = img->spec_n, rows = img->dot_rows;
     const size_t cells = (size_t)n * (size_t)rows;
     size_t count = 0;
+    int peak = 0;
     for (size_t i = 0; i < cells; i++)
-        count += img->dots[i];
+        if (img->dots[i]) {
+            count++;
+            if (img->dots[i] > peak)
+                peak = img->dots[i];
+        }
+    if (count > cells / 8 && peak > 1) {
+        FQDrawDensity(ctx, rect, img, peak);
+        return;
+    }
     const BOOL ellipses = count <= 20000;
     CGMutablePathRef path = CGPathCreateMutable();
     CGRect batch[256];
     int nb = 0;
     for (int c = 0; c < n; c++) {
         const uint8_t *col = img->dots + (size_t)c * (size_t)rows;
-        CGFloat x = rect.origin.x +
-                    (n > 1 ? (CGFloat)c * rect.size.width / (CGFloat)(n - 1) : rect.size.width / 2);
+        CGFloat x = FQColumnX(img, rect, c);
         for (int r = 0; r < rows; r++) {
             if (!col[r])
                 continue;
@@ -325,8 +380,7 @@ void FQDrawSpectrum(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat 
             continue;
         }
         gap = 0;
-        CGFloat x = rect.origin.x +
-                    (n > 1 ? (CGFloat)c * rect.size.width / (CGFloat)(n - 1) : rect.size.width / 2);
+        CGFloat x = FQColumnX(img, rect, c);
         CGFloat y0 = (CGFloat)((a - lo) * sy), y1 = (CGFloat)((b - lo) * sy);
         y0 = flip ? CGRectGetMaxY(rect) - y0 : CGRectGetMinY(rect) + y0;
         y1 = flip ? CGRectGetMaxY(rect) - y1 : CGRectGetMinY(rect) + y1;

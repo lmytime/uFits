@@ -1,6 +1,6 @@
 // uitest - drive the preview UI (FQPreviewController) in a window the way a
-// user would: switch HDUs, move the cube plane slider, open the header and
-// its find bar. Prints the state of the bar after every step and captures
+// user would: switch HDUs (images, plots, tables), move the cube plane
+// slider, open the header and its find bar. Prints the state of the bar after every step and captures
 // the window to OUTDIR/ui-<step>.png.
 //
 // Usage: uitest OUTDIR TESTDATA_DIR
@@ -104,6 +104,42 @@ static void act(NSControl *c)
     spin(1.0);
 }
 
+/// Picks item i of the HDU menu, as a user would.
+static void pickHDU(NSView *root, NSInteger i)
+{
+    NSPopUpButton *menu = findView(root, NSPopUpButton.class, ^BOOL(id p) {
+        return [[p titleOfSelectedItem] hasPrefix:@"HDU"];
+    });
+    if (!menu || i >= menu.numberOfItems) {
+        printf("FAIL no HDU menu item %ld\n", (long)i);
+        gFailures++;
+        return;
+    }
+    [menu selectItemAtIndex:i];
+    act(menu);
+}
+
+/// Checks that the part of the header listing in view shows text.
+static void expectListing(NSString *step, NSString *text)
+{
+    NSTextView *tv = findView(gWindow.contentView, NSTextView.class, ^BOOL(id v) {
+        return ![v isEditable];
+    });
+    NSString *shown = @"";
+    if (tv) {
+        NSRange g = [tv.layoutManager glyphRangeForBoundingRect:tv.visibleRect
+                                                inTextContainer:tv.textContainer];
+        shown = [tv.string substringWithRange:[tv.layoutManager characterRangeForGlyphRange:g
+                                                                           actualGlyphRange:NULL]];
+    }
+    BOOL ok = [shown rangeOfString:text].location != NSNotFound;
+    if (!ok)
+        gFailures++;
+    NSString *top = [shown componentsSeparatedByString:@"\n"].firstObject ?: @"";
+    printf("%s %s: listing at \"%s\" (want \"%s\" in view)\n", ok ? "ok  " : "FAIL", step.UTF8String,
+           top.UTF8String, text.UTF8String);
+}
+
 int main(int argc, const char *argv[])
 {
     @autoreleasepool {
@@ -126,13 +162,7 @@ int main(int argc, const char *argv[])
         // Multi-extension file: the HDU menu switches between SCI, ERR and DQ.
         load(vc, [data stringByAppendingPathComponent:@"mef.fits"]);
         capture(@"mef", @"menu=\"HDU 1  SCI");
-        NSPopUpButton *hdus = findView(root, NSPopUpButton.class, ^BOOL(id p) {
-            return [[p titleOfSelectedItem] hasPrefix:@"HDU"];
-        });
-        if (hdus) {
-            [hdus selectItemAtIndex:2];
-            act(hdus);
-        }
+        pickHDU(root, 2);
         capture(@"mef-dq", @"HDU 3 DQ");
 
         // Cube: the slider picks the plane.
@@ -153,10 +183,29 @@ int main(int argc, const char *argv[])
         load(vc, [data stringByAppendingPathComponent:@"spec_sdss.fits"]);
         capture(@"sdss", @"flux vs wavelength");
 
+        // Its second table has nothing to plot: the menu shows its rows, and
+        // going back to the plot puts the menu back on the plotted HDU.
+        pickHDU(root, 1);
+        capture(@"sdss-specobj", @"mode=1");
+        expectListing(@"sdss-specobj", @"——— HDU 2 table ———");
+        NSSegmentedControl *mode = findView(root, NSSegmentedControl.class, nil);
+        if (mode) {
+            mode.selectedSegment = 0;
+            act(mode);
+        }
+        capture(@"sdss-back", @"menu=\"HDU 1  COADD");
+
+        // A catalog: sky positions, a field across RA = 0.
+        load(vc, [data stringByAppendingPathComponent:@"catalog_wrap.fits"]);
+        capture(@"catalog", @"DEC vs RA");
+
         // A file of tables that cannot be plotted opens on its header and
-        // rows; Cmd-F opens the find bar.
+        // rows; the menu jumps between tables; Cmd-F opens the find bar.
         load(vc, [data stringByAppendingPathComponent:@"tables_mixed.fits"]);
-        capture(@"tables", @"mode=1");
+        capture(@"tables", @"menu=\"HDU 1  MIXED — 6 rows × 11 columns\" (2 items)");
+        pickHDU(root, 1);
+        expectListing(@"tables-ascii", @"——— HDU 2 table ———");
+        capture(@"tables-ascii", @"mode=1");
         NSEvent *cmdF = [NSEvent keyEventWithType:NSEventTypeKeyDown
                                          location:NSZeroPoint
                                     modifierFlags:NSEventModifierFlagCommand

@@ -73,6 +73,10 @@ SP_X = ["WAVELENGTH", "WAVE", "LAMBDA", "LAM", "LOGLAM", "FREQUENCY", "FREQ", "E
         "VELO", "CHANNEL"]
 SP_Y = ["FLUX", "FLUX_DENSITY", "FLAM", "F_LAMBDA", "FNU", "F_NU", "SPEC", "SPECTRUM", "INTENSITY",
         "COUNTS", "RATE", "DATA"]
+SKY = [("RA", "DEC"), ("RAJ2000", "DEJ2000"), ("_RAJ2000", "_DEJ2000"), ("RA_ICRS", "DE_ICRS"),
+       ("RAJ2000", "DECJ2000"), ("RA_J2000", "DEC_J2000"), ("ALPHA_J2000", "DELTA_J2000"),
+       ("ALPHAWIN_J2000", "DELTAWIN_J2000"), ("RAMEAN", "DECMEAN"), ("RA_OBJ", "DEC_OBJ"),
+       ("TARGET_RA", "TARGET_DEC"), ("RA_DEG", "DEC_DEG"), ("RADEG", "DECDEG"), ("GLON", "GLAT")]
 
 
 def plot_spec(h):
@@ -101,7 +105,13 @@ def plot_spec(h):
                         return None
                     return dict(x=cols[i][0], y=cols[j][0], dots=dots,
                                 xlog=cols[i][0].upper() == "LOGLAM",
-                                flip=cols[j][0].upper().startswith("MAG"))
+                                flip=cols[j][0].upper().startswith("MAG"), sky=False)
+    for xn, yn in SKY:
+        i, j = find(xn), find(yn)
+        if i >= 0 and j >= 0 and cols[i][1] == cols[j][1]:
+            if h.header["NAXIS2"] * cols[i][1] < 2:
+                return None
+            return dict(x=cols[i][0], y=cols[j][0], dots=True, xlog=False, flip=False, sky=True)
     return None
 
 
@@ -130,7 +140,15 @@ def check_plot(fn, path, h, idx, spec):
         with np.errstate(over="ignore"):
             x = 10.0 ** x
     ok = np.isfinite(x) & np.isfinite(y)
+    wrap = False
+    if spec["sky"]:   # placeholders off the sphere are skipped; fields across RA = 0 wrap
+        with np.errstate(invalid="ignore"):
+            ok &= (x >= -360) & (x <= 360) & (y >= -90) & (y <= 90)
+        w = np.where(x[ok] > 180, x[ok] - 360, x[ok])
+        wrap = w.max() - w.min() < x[ok].max() - x[ok].min()
     x, y = x[ok], y[ok]
+    if wrap:
+        x = np.where(x > 180, x - 360, x)
     xmin, xmax = x.min(), x.max()
     ncol = min(ncol_max, len(x)) if xmax > xmin else 1
     span = xmax - xmin
@@ -145,6 +163,7 @@ def check_plot(fn, path, h, idx, spec):
     want = {
         "n": str(ncol), "points": str(len(x)), "has_x": "1", "dots": str(int(spec["dots"])),
         "y_flip": str(int(spec["flip"])), "y_label": spec["y"],
+        "x_flip": str(int(spec["sky"])), "x_wrap": str(int(wrap)),
         "x_label": ("wavelength" if spec["x"][0].islower() else "WAVELENGTH") if spec["xlog"] else spec["x"],
     }
     bad = [f"{k}={info.get(k)!r} (want {v!r})" for k, v in want.items() if info.get(k) != v]
@@ -167,12 +186,14 @@ def check_plot(fn, path, h, idx, spec):
         ymin, ymax = float(info["y_min"]), float(info["y_max"])
         r = (y - ymin) * (rows / (ymax - ymin))
         on = (r >= 0) & (r < rows)
-        grid = np.zeros((ncol, rows), np.uint8)
-        grid[c[on], r[on].astype(np.int64)] = 1
+        grid = np.zeros((ncol, rows), np.int64)
+        np.add.at(grid, (c[on], r[on].astype(np.int64)), 1)
+        grid = grid.clip(0, 255).astype(np.uint8)
         if dots is None or dots.shape != grid.shape or not np.array_equal(dots, grid):
-            failures.append(f"{fn} plot dots differ ({0 if dots is None else int(dots.sum())} vs {int(grid.sum())})")
+            failures.append(f"{fn} plot dots differ ({0 if dots is None else int((dots > 0).sum())} vs "
+                            f"{int((grid > 0).sum())} cells)")
         else:
-            print(f"  ok  {fn} plot dots ({int(grid.sum())} cells)")
+            print(f"  ok  {fn} plot dots ({int((grid > 0).sum())} cells, up to {int(grid.max())} points)")
     elif dots is not None:
         failures.append(f"{fn} plot: dots for a line plot")
 
@@ -199,7 +220,10 @@ def check_listings():
     expect("cube5.fits hdus", hdus("cube5.fits"), ["0 image 5 -"])
     expect("lc_tess.fits hdus", hdus("lc_tess.fits"), ["1 plot 1 LIGHTCURVE", "2 image 1 APERTURE"])
     expect("spec_rows.fits hdus", hdus("spec_rows.fits"), ["0 plot 1 -"])
-    expect("table_only.fits hdus", hdus("table_only.fits"), [])
+    expect("table_only.fits hdus", hdus("table_only.fits"), ["1 table 1 CAT"])
+    expect("tables_mixed.fits hdus", hdus("tables_mixed.fits"), ["1 table 1 MIXED", "2 table 1 ASCII"])
+    expect("spec_sdss.fits hdus", hdus("spec_sdss.fits"), ["1 plot 1 COADD", "2 table 1 SPECOBJ"])
+    expect("catalog_wrap.fits hdus", hdus("catalog_wrap.fits"), ["1 plot 1 CATALOG"])
     r = rows("tables_mixed.fits", 1)
     expect("tables_mixed.fits row 0", r and r[0][:7] if r else r,
            ["alpha", "T", "0x0000", "0", "1", "0", "[0 1 2]"])

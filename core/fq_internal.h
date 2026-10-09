@@ -68,12 +68,14 @@ typedef struct {
     char cmptype[24];
 } imgdesc;
 
-/* A binary table with columns worth plotting. */
+/* A binary table with columns worth plotting: a light curve, a spectrum
+   or positions on the sky. */
 typedef struct {
     int xcol, ycol;            /* column indexes */
     int xlog;                  /* x holds log10 values (loglam) */
     int yflip;                 /* y is a magnitude: brighter is up */
     int points;                /* a time series: draw points, not a line */
+    int sky;                   /* positions on the sky: RA/Dec or l/b */
     int64_t nrows, repeat;     /* rows, values per row and column */
     char xname[32], yname[32];
 } fqi_plotspec;

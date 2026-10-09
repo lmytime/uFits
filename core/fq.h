@@ -25,7 +25,12 @@ extern "C" {
 
 typedef struct fq_file fq_file;
 
-enum { FQ_KIND_NONE = 0, FQ_KIND_IMAGE = 1, FQ_KIND_PLOT = 2 };
+enum {
+    FQ_KIND_NONE = 0,
+    FQ_KIND_IMAGE = 1,
+    FQ_KIND_PLOT = 2,  /* spectra, light curves, sky positions */
+    FQ_KIND_TABLE = 3  /* fq_list_hdus only: a table with nothing to plot */
+};
 enum { FQ_COLOR_MONO = 0, FQ_COLOR_RGB = 1, FQ_COLOR_BAYER = 2 };
 enum {
     FQ_STRETCH_AUTO = 0,   /* robust midtone stretch (median/MAD based) */
@@ -89,12 +94,15 @@ typedef struct {
     int has_x;                 /* x axis from WCS keywords or a column */
     double x_first, x_last;    /* x of the first and last column */
     int x_log;                 /* x values are log10 of the wavelength */
+    int x_flip;                /* x grows to the left (right ascension) */
+    int x_wrap;                /* x is an angle shown modulo 360: the data
+                                  straddle 0, so x runs from below 0 */
     char x_unit[24], y_unit[24];
     char x_label[32], y_label[32]; /* axis names: table columns or CTYPE1 */
     int y_flip;                /* magnitudes: smaller values belong on top */
     int points;                /* a time series: draw points, not a line */
-    /* For points: which cells of a grid of spec_n columns by dot_rows rows
-       (row 0 at y_min, column after column) hold at least one point. */
+    /* For points: how many points fall in each cell (at most 255) of a grid
+       of spec_n columns by dot_rows rows, row 0 at y_min, column by column. */
     int dot_rows;
     uint8_t *dots;
 } fq_image;
@@ -122,13 +130,15 @@ int fq_hdu_count(fq_file *f);
 
 typedef struct {
     int hdu;
-    int kind;                 /* FQ_KIND_IMAGE or FQ_KIND_PLOT */
+    int kind;                 /* FQ_KIND_IMAGE, FQ_KIND_PLOT or FQ_KIND_TABLE */
     int64_t nplanes;          /* planes of a cube */
     char extname[72];
-    char desc[96];            /* "4096 x 4096 float32", "PDCSAP_FLUX vs TIME" */
+    char desc[96];            /* "4096 x 4096 float32", "PDCSAP_FLUX vs TIME",
+                                 "120 rows x 8 columns" */
 } fq_hdu_entry;
 
-/* The HDUs uFits can show, in file order; returns how many (at most max). */
+/* The HDUs uFits can show (images, plots) or list (tables), in file order;
+   returns how many (at most max). */
 int fq_list_hdus(fq_file *f, fq_hdu_entry *out, int max);
 /* Columns and first rows of a table HDU as text. malloc'd, NULL if the HDU
    is not a table. */

@@ -204,6 +204,29 @@ def main(out):
         fits.Column("CHANNEL", "I", array=chan), fits.Column("COUNTS", "J", unit="count", array=counts),
     ], name="SPECTRUM")], p("pha.fits"))
 
+    # Catalogs: RA/Dec positions, one field across RA = 0 with placeholder
+    # values (-999) and NaNs to skip, one with Gaia-style lower-case names.
+    n = 3000
+    ra = rng.uniform(-6, 6, n)
+    dec = rng.uniform(-4, 4, n)
+    ra[:600] = rng.normal(2, 0.4, 600)          # a cluster
+    dec[:600] = rng.normal(1, 0.3, 600)
+    ra %= 360
+    ra[600:610] = -999
+    dec[610:620] = -999
+    ra[620:625] = np.nan
+    write([fits.PrimaryHDU(), fits.BinTableHDU.from_columns([
+        fits.Column("ID", "J", array=np.arange(n)), fits.Column("RA", "D", unit="deg", array=ra),
+        fits.Column("DEC", "D", unit="deg", array=dec), fits.Column("MAG", "E", array=rng.normal(20, 1, n)),
+        fits.Column("NAME", "10A", array=np.array([f"src{i}" for i in range(n)])),
+    ], name="CATALOG")], p("catalog_wrap.fits"))
+    write([fits.PrimaryHDU(), fits.BinTableHDU.from_columns([
+        fits.Column("source_id", "K", array=np.arange(2000) * 7919),
+        fits.Column("ra", "D", unit="deg", array=rng.uniform(120, 140, 2000)),
+        fits.Column("dec", "D", unit="deg", array=rng.uniform(20, 30, 2000)),
+        fits.Column("phot_g_mean_mag", "E", array=rng.normal(17, 1.5, 2000)),
+    ], name="GAIA")], p("catalog_gaia.fits"))
+
     k = 6
     mixed = fits.BinTableHDU.from_columns([
         fits.Column("NAME", "12A", array=np.array(["alpha", "beta", "gamma", "delta", "", "zeta"])),

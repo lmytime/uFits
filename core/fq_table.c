@@ -1,10 +1,10 @@
 /*
  * fq_table.c - uFits core: binary tables.
  *
- * Tables that hold a light curve (a time column and a flux column) or a
- * spectrum (wavelength and flux columns) are plotted like 1-D images, and
- * any table can be listed as text, first rows only. Only the bytes of the
- * columns used are read.
+ * Tables that hold a light curve (a time column and a flux column), a
+ * spectrum (wavelength and flux columns) or a catalog (RA and Dec columns)
+ * are plotted, and any table can be listed as text, first rows only. Only
+ * the bytes of the columns used are read.
  */
 #define _DEFAULT_SOURCE 1
 #define _DARWIN_C_SOURCE 1
@@ -199,6 +199,17 @@ static const char *const sp_x[] = { "WAVELENGTH", "WAVE", "LAMBDA", "LAM", "LOGL
 static const char *const sp_y[] = { "FLUX", "FLUX_DENSITY", "FLAM", "F_LAMBDA", "FNU", "F_NU", "SPEC",
                                     "SPECTRUM", "INTENSITY", "COUNTS", "RATE", "DATA", NULL };
 
+/* Catalog positions: right ascension and declination as names go
+   (SDSS/Gaia, VizieR, SExtractor, Pan-STARRS, DESI, ...), then galactic. */
+static const char *const sky_xy[][2] = {
+    { "RA", "DEC" },           { "RAJ2000", "DEJ2000" },     { "_RAJ2000", "_DEJ2000" },
+    { "RA_ICRS", "DE_ICRS" },  { "RAJ2000", "DECJ2000" },    { "RA_J2000", "DEC_J2000" },
+    { "ALPHA_J2000", "DELTA_J2000" }, { "ALPHAWIN_J2000", "DELTAWIN_J2000" },
+    { "RAMEAN", "DECMEAN" },   { "RA_OBJ", "DEC_OBJ" },      { "TARGET_RA", "TARGET_DEC" },
+    { "RA_DEG", "DEC_DEG" },   { "RADEG", "DECDEG" },        { "GLON", "GLAT" },
+    { NULL, NULL }
+};
+
 static int pick(const tcol *cols, int n, const char *const *xs, const char *const *ys, int *xc, int *yc)
 {
     for (const char *const *x = xs; *x; x++) {
@@ -233,6 +244,13 @@ int fqi_table_plot_spec(fq_file *f, int idx, fqi_plotspec *ps)
         ps->points = 1;
     } else if (pick(cols, n, sp_x, sp_y, &xc, &yc)) {
         ok = 1;
+    } else {
+        for (int k = 0; sky_xy[k][0] && !ok; k++) {
+            xc = find_col(cols, n, sky_xy[k][0]);
+            yc = find_col(cols, n, sky_xy[k][1]);
+            ok = xc >= 0 && yc >= 0 && cols[xc].repeat == cols[yc].repeat;
+        }
+        ps->points = ps->sky = ok;
     }
     if (ok) {
         ps->xcol = xc;
@@ -248,6 +266,30 @@ int fqi_table_plot_spec(fq_file *f, int idx, fqi_plotspec *ps)
     }
     free(cols);
     return ok;
+}
+
+/* Element e of a numeric column, scaled; NaN for nulls. */
+static double cell_value(const uint8_t *row, const tcol *t, int64_t e);
+
+/* The point at element e of a row, as plotted; 0 if it is not plotted.
+   Sky positions outside the sphere's ranges are placeholders (-999 and
+   the like); with wrap, right ascensions above 180 become negative. */
+static int plot_point(const fqi_plotspec *ps, const tcol *tx, const tcol *ty, const uint8_t *row,
+                      int64_t e, int wrap, double *x, double *y)
+{
+    *x = cell_value(row, tx, e);
+    *y = cell_value(row, ty, e);
+    if (ps->xlog)
+        *x = pow(10.0, *x);
+    if (!isfinite(*x) || !isfinite(*y))
+        return 0;
+    if (ps->sky) {
+        if (*x < -360 || *x > 360 || *y < -90 || *y > 90)
+            return 0;
+        if (wrap && *x > 180)
+            *x -= 360;
+    }
+    return 1;
 }
 
 /* Element e of a numeric column, scaled; NaN for nulls. */
@@ -317,18 +359,21 @@ int fqi_table_plot(fq_file *f, int idx, const fq_opts *o, fq_image *img, char *e
         return -1;
     }
 
-    /* Pass 1: x range and a subsample of y for the plot range. */
-    double xmin = INFINITY, xmax = -INFINITY;
+    /* Pass 1: x range and a subsample of y for the plot range. For sky
+       positions also the range with right ascension in -180...180, which
+       is smaller when the field straddles RA = 0. */
+    double xmin = INFINITY, xmax = -INFINITY, wmin = INFINITY, wmax = -INFINITY;
     int64_t nvalid = 0, ns = 0;
     for (int64_t k = 0; k < total; k += step) {
         const uint8_t *row = base + (k / rep) * rowlen;
-        double x = cell_value(row, &tx, k % rep), y = cell_value(row, &ty, k % rep);
-        if (ps.xlog)
-            x = pow(10.0, x);
-        if (!isfinite(x) || !isfinite(y))
+        double x, y;
+        if (!plot_point(&ps, &tx, &ty, row, k % rep, 0, &x, &y))
             continue;
         if (x < xmin) xmin = x;
         if (x > xmax) xmax = x;
+        double w = x > 180 ? x - 360 : x;
+        if (w < wmin) wmin = w;
+        if (w > wmax) wmax = w;
         if (nvalid++ % sstep == 0)
             samp[ns++] = (float)y;
     }
@@ -336,6 +381,11 @@ int fqi_table_plot(fq_file *f, int idx, const fq_opts *o, fq_image *img, char *e
         free(samp);
         fqi_seterr(err, errlen, "no valid values in %s and %s", ps.xname, ps.yname);
         return -1;
+    }
+    const int wrap = ps.sky && wmax - wmin < xmax - xmin;
+    if (wrap) {
+        xmin = wmin;
+        xmax = wmax;
     }
 
     /* Pass 2: min/max of y in evenly spaced x columns. */
@@ -358,8 +408,8 @@ int fqi_table_plot(fq_file *f, int idx, const fq_opts *o, fq_image *img, char *e
     fqi_plot_range(samp, ns, &img->y_min, &img->y_max);
     free(samp);
 
-    /* Time series are drawn as dots: mark the cells of a grid that hold a
-       point, so sparse and dense stretches both look right. */
+    /* Time series and sky positions are drawn as dots: count the points in
+       the cells of a grid, so that sparse and crowded parts both show. */
     int nrow = 0;
     if (ps.points) {
         nrow = ncol * 3 / 4;
@@ -376,10 +426,8 @@ int fqi_table_plot(fq_file *f, int idx, const fq_opts *o, fq_image *img, char *e
     const double span = xmax - xmin, per = ncol > 1 ? ncol / span : 0;
     for (int64_t k = 0; k < total; k += step) {
         const uint8_t *row = base + (k / rep) * rowlen;
-        double x = cell_value(row, &tx, k % rep), y = cell_value(row, &ty, k % rep);
-        if (ps.xlog)
-            x = pow(10.0, x);
-        if (!isfinite(x) || !isfinite(y))
+        double x, y;
+        if (!plot_point(&ps, &tx, &ty, row, k % rep, wrap, &x, &y))
             continue;
         int c = ncol > 1 ? (int)((x - xmin) * per) : 0;
         if (c >= ncol)
@@ -393,8 +441,11 @@ int fqi_table_plot(fq_file *f, int idx, const fq_opts *o, fq_image *img, char *e
             img->spec_hi[c] = v;
         if (nrow) {
             double r = (y - img->y_min) * rowper;   /* off the plot: no dot */
-            if (r >= 0 && r < nrow)
-                img->dots[(size_t)c * (size_t)nrow + (size_t)r] = 1;
+            if (r >= 0 && r < nrow) {
+                uint8_t *cell = &img->dots[(size_t)c * (size_t)nrow + (size_t)r];
+                if (*cell < 255)
+                    (*cell)++;
+            }
         }
     }
 
@@ -409,6 +460,8 @@ int fqi_table_plot(fq_file *f, int idx, const fq_opts *o, fq_image *img, char *e
     }
     img->y_flip = ps.yflip;
     img->points = ps.points;
+    img->x_flip = ps.sky;   /* east is left on the sky */
+    img->x_wrap = wrap;
     if (ps.xlog) {   /* SDSS: log10 of the wavelength in Angstrom */
         fqi_scopy(img->x_label, sizeof img->x_label,
                   islower((unsigned char)ps.xname[0]) ? "wavelength" : "WAVELENGTH");
