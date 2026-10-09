@@ -1,0 +1,214 @@
+name: build
+
+# Branches in this repository are tested on push (a pull request shows those
+# runs too); superseded runs of the same branch are cancelled. Pushing a tag
+# vX.Y.Z, or running the workflow by hand with a release tag, also publishes
+# release X.Y.Z with the disk image once every test has passed.
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Publish this commit as a release, e.g. v0.0.1 (empty to only test)
+        required: false
+        default: ""
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Core tests (Linux, sanitizers, fuzz)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/workflows/build.yml
+      - run: pip install numpy astropy
+      - name: Decode and binning vs astropy
+        run: make test
+      - name: AddressSanitizer + UBSan, damaged files
+        run: |
+          gcc -std=c99 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+              -Icore -o build/fqtool-asan tools/fqtool.c core/*.c -lz -lm -lpthread
+          python3 tests/test_core.py build/fqtool-asan build/testdata > /dev/null
+          python3 tests/fuzz.py build/fqtool-asan build/testdata 500
+
+  macos:
+    name: macOS app + Quick Look
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          # A release sets the version; otherwise the Makefile's is used.
+          tag=$RELEASE
+          if [ "$GITHUB_REF_TYPE" = tag ]; then tag=$GITHUB_REF_NAME; fi
+          if [ -n "$tag" ]; then
+            echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "not a release tag: $tag"; exit 1; }
+            echo "VERSION=${tag#v}" >> "$GITHUB_ENV"
+          fi
+      - name: Build
+        run: |
+          # Whatever clang and codesign come first on PATH (Homebrew, conda,
+          # Nix, ...) must not be used: put broken ones there.
+          mkdir -p /tmp/badbin
+          for tool in clang codesign; do
+            printf '#!/bin/sh\necho "the %s on PATH was used" >&2\nexit 1\n' $tool > /tmp/badbin/$tool
+            chmod +x /tmp/badbin/$tool
+          done
+          PATH=/tmp/badbin:$PATH make app
+      - name: Bundle contents
+        run: |
+          find build/uFits.app -type f | sort
+          lipo -info build/uFits.app/Contents/MacOS/uFits build/uFits.app/Contents/PlugIns/*.appex/Contents/MacOS/*
+          codesign -d --entitlements - build/uFits.app/Contents/PlugIns/uFitsPreview.appex
+          du -sh build/uFits.app
+      - name: Disk image
+        run: |
+          make dmg
+          dmg=$(ls build/uFits-*.dmg)
+          hdiutil verify "$dmg"
+          mkdir -p /tmp/dmg
+          hdiutil attach -nobrowse -readonly -mountpoint /tmp/dmg "$dmg"
+          ls -la /tmp/dmg
+          test "$(readlink /tmp/dmg/Applications)" = /Applications
+          codesign --verify --deep --strict /tmp/dmg/uFits.app
+          version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' /tmp/dmg/uFits.app/Contents/Info.plist)
+          echo "version $version"
+          test "$dmg" = "build/uFits-$version.dmg"
+          diff -r build/uFits.app /tmp/dmg/uFits.app   # the app tested below
+          hdiutil detach /tmp/dmg
+          ls -l "$dmg"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/workflows/build.yml
+      - run: pip install numpy astropy
+      - name: Core tests (Apple clang, GCD)
+        run: make test
+      - name: Install and register the extensions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          make install
+          # The one-command installer over that: the latest release, downloaded,
+          # then the disk image built above, which the tests below use.
+          sh install.sh
+          UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh
+          pluginkit -m -v -i io.github.lmytime.uFits.Preview
+          pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
+            | grep -B2 -A8 "gov.nasa.gsfc.fits" | head -40 || true
+      - name: Quick Look thumbnails (QLThumbnailGenerator)
+        timeout-minutes: 4
+        run: |
+          make qltools
+          cd build/testdata
+          ../qlthumb ../ql f32.fits u16.fits rgb.fits bayer_rggb.fits rice_f32_sd1.fits \
+            footprint_f32.fits mef.fits spec1d.fits cube5.fits lc_tess.fits lc_mag.fits spec_sdss.fits pha.fits \
+            catalog_wrap.fits catalog_gaia.fits
+      - name: Quick Look preview (QLPreviewView)
+        if: always()
+        timeout-minutes: 4
+        run: |
+          cd build/testdata
+          ../qlpreview ../ql f32.fits spec1d.fits mef.fits lc_tess.fits catalog_gaia.fits tables_mixed.fits
+      - name: Preview UI (HDU menu, plane slider, plots, tables, find bar, timings)
+        if: always()
+        timeout-minutes: 6
+        run: |
+          python3 tests/macos/make_big_files.py build/testdata
+          build/uitest build/ql build/testdata
+      - name: App windows (best effort)
+        if: always()
+        timeout-minutes: 2
+        run: |
+          open /Applications/uFits.app
+          sleep 4
+          screencapture -x build/ql/app-setup.png || true
+          open -a /Applications/uFits.app build/testdata/rgb.fits
+          sleep 4
+          screencapture -x build/ql/app-viewer.png || true
+          osascript -e 'quit app "uFits"' || true
+      - name: Crash reports
+        if: always()
+        run: |
+          ls ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i ufits || echo "no uFits crash reports"
+          for f in ~/Library/Logs/DiagnosticReports/*uFits*; do [ -f "$f" ] && head -150 "$f"; done; true
+      - name: Quick Look logs
+        if: always()
+        run: |
+          log show --last 5m --style compact \
+            --predicate 'process BEGINSWITH "uFits" OR (subsystem CONTAINS "quicklook" AND messageType >= 16)' \
+            | tail -60 || true
+      - name: Uninstall
+        run: |
+          sh install.sh --uninstall
+          test ! -e /Applications/uFits.app
+          pluginkit -m -i io.github.lmytime.uFits.Preview || true
+      - name: Images for review (base64)
+        if: always()
+        run: tests/macos/print_images.sh build/ql
+      - name: Package
+        if: always()
+        run: make zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uFits
+          path: |
+            build/uFits.zip
+            build/ql/*.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uFits-dmg
+          path: build/uFits-*.dmg
+          if-no-files-found: error
+
+  release:
+    name: Release
+    if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || inputs.release != ''
+    needs: [core, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: uFits-dmg
+          path: dist
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release }}
+        run: |
+          cd dist
+          dmg=$(ls uFits-*.dmg)
+          test "$dmg" = "uFits-${TAG#v}.dmg"
+          sha256sum "$dmg" | tee "$dmg.sha256"
+          # The installer installs the release it comes with.
+          sed "/^VERSION=/s/@VERSION@/${TAG#v}/" ../install.sh > install.sh
+          grep "^VERSION=" install.sh | grep -qF "${TAG#v}"
+          sed "s/@TAG@/$TAG/g" ../.github/release-notes.md > notes.md
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # Published already: its disk image stays as it is; the installer
+            # and the notes are brought up to date.
+            gh release upload "$TAG" install.sh --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          else
+            # Tags this commit, unless the tag was pushed.
+            gh release create "$TAG" "$dmg" "$dmg.sha256" install.sh --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "uFits ${TAG#v}" --notes-file notes.md
+          fi
