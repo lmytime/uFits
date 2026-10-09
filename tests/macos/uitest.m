@@ -54,19 +54,45 @@ static NSString *barState(NSView *root)
         else if ([v isKindOfClass:NSSlider.class])
             [parts addObject:[NSString stringWithFormat:@"slider=%g of %g", ((NSSlider *)v).doubleValue,
                                                         ((NSSlider *)v).maxValue]];
-        else if ([v isKindOfClass:NSSegmentedControl.class])
-            [parts addObject:[NSString stringWithFormat:@"mode=%ld",
-                                                        (long)((NSSegmentedControl *)v).selectedSegment]];
+        else if ([v isKindOfClass:NSSegmentedControl.class]) {
+            NSSegmentedControl *sc = (NSSegmentedControl *)v;
+            NSMutableArray<NSString *> *segs = [NSMutableArray array];
+            for (NSInteger i = 0; i < sc.segmentCount; i++)
+                [segs addObject:[NSString stringWithFormat:@"%@%@", [sc labelForSegment:i],
+                                                           [sc isEnabledForSegment:i] ? @"" : @"(off)"]];
+            [parts addObject:[NSString stringWithFormat:@"mode=%ld [%@]", (long)sc.selectedSegment,
+                                                        [segs componentsJoinedByString:@"|"]]];
+        }
         else if ([v isKindOfClass:NSTextField.class] && ((NSTextField *)v).stringValue.length)
             [parts addObject:[NSString stringWithFormat:@"\"%@\"", ((NSTextField *)v).stringValue]];
     }
     return [parts componentsJoinedByString:@"  "];
 }
 
+/// The table view, if on screen: rows, column titles, first cell.
+static NSString *gridState(NSView *root)
+{
+    NSTableView *tv = findView(root, NSTableView.class, nil);
+    if (!tv)
+        return @"";
+    NSMutableArray<NSString *> *titles = [NSMutableArray array];
+    for (NSTableColumn *c in tv.tableColumns)
+        [titles addObject:c.title];
+    NSString *first = @"";
+    if (tv.numberOfRows > 0 && tv.numberOfColumns > 1) {
+        NSView *cell = [tv viewAtColumn:1 row:0 makeIfNecessary:YES];
+        if ([cell isKindOfClass:NSTextField.class])
+            first = ((NSTextField *)cell).stringValue;
+    }
+    return [NSString stringWithFormat:@"grid=%ld rows [%@] first=\"%@\"", (long)tv.numberOfRows,
+                                      [titles componentsJoinedByString:@","], first];
+}
+
 static void capture(NSString *step, NSString *expect)
 {
     spin(0.6);
-    NSString *state = barState(gWindow.contentView);
+    NSString *state = [NSString stringWithFormat:@"%@  %@", barState(gWindow.contentView),
+                                                 gridState(gWindow.contentView)];
     BOOL ok = !expect || [state rangeOfString:expect].location != NSNotFound;
     if (!ok)
         gFailures++;
@@ -102,6 +128,19 @@ static void act(NSControl *c)
 {
     [c sendAction:c.action to:c.target];
     spin(1.0);
+}
+
+/// Clicks segment i of the mode switch (Image/Plot, Table, Header).
+static void pickMode(NSView *root, NSInteger i)
+{
+    NSSegmentedControl *mode = findView(root, NSSegmentedControl.class, nil);
+    if (!mode) {
+        printf("FAIL no mode switch\n");
+        gFailures++;
+        return;
+    }
+    mode.selectedSegment = i;
+    act(mode);
 }
 
 /// Picks item i of the HDU menu, as a user would.
@@ -175,37 +214,46 @@ int main(int argc, const char *argv[])
         }
         capture(@"cube-plane1", @"plane 1 of 5");
 
-        // Tables: light curves (points; magnitudes upside down) and spectra.
+        // Tables: light curves (points; magnitudes upside down) and spectra,
+        // each with its rows in the Table view.
         load(vc, [data stringByAppendingPathComponent:@"lc_tess.fits"]);
         capture(@"lightcurve", @"PDCSAP_FLUX vs TIME");
+        pickMode(root, 1);
+        capture(@"lightcurve-table", @"grid=2000 rows [#,TIME,TIMECORR");
         load(vc, [data stringByAppendingPathComponent:@"lc_mag.fits"]);
         capture(@"magnitudes", @"MAG vs MJD");
         load(vc, [data stringByAppendingPathComponent:@"spec_sdss.fits"]);
-        capture(@"sdss", @"flux vs wavelength");
+        capture(@"sdss", @"mode=0 [Plot|Table|Header]");
+        pickMode(root, 1);
+        capture(@"sdss-table", @"grid=3000 rows [#,flux,loglam,ivar,and_mask]");
 
-        // Its second table has nothing to plot: the menu shows its rows, and
-        // going back to the plot puts the menu back on the plotted HDU.
+        // Its second table has nothing to plot: the menu shows its rows; the
+        // first one's rows, then its plot, come back the same way.
         pickHDU(root, 1);
-        capture(@"sdss-specobj", @"mode=1");
-        expectListing(@"sdss-specobj", @"GALAXY");   // its one row, the end of the listing
-        NSSegmentedControl *mode = findView(root, NSSegmentedControl.class, nil);
-        if (mode) {
-            mode.selectedSegment = 0;
-            act(mode);
-        }
-        capture(@"sdss-back", @"menu=\"HDU 1  COADD");
+        capture(@"sdss-specobj", @"grid=1 rows [#,CLASS,Z] first=\"GALAXY\"");
+        capture(@"sdss-specobj-switch", @"mode=1 [Image(off)|Table|Header]");
+        pickHDU(root, 0);
+        capture(@"sdss-coadd", @"grid=3000 rows");
+        pickMode(root, 0);
+        capture(@"sdss-plot", @"mode=0 [Plot|Table|Header]");
 
-        // A catalog: sky positions, a field across RA = 0.
+        // A catalog: sky positions, a field across RA = 0, and its rows.
         load(vc, [data stringByAppendingPathComponent:@"catalog_wrap.fits"]);
         capture(@"catalog", @"DEC vs RA");
+        pickMode(root, 1);
+        capture(@"catalog-table", @"grid=3000 rows [#,ID,RA,DEC,MAG,NAME]");
 
-        // A file of tables that cannot be plotted opens on its header and
-        // rows; the menu jumps between tables; Cmd-F opens the find bar.
+        // A file of tables that cannot be plotted opens on its first table;
+        // the menu switches tables; the header opens at the table picked, and
+        // Cmd-F opens its find bar.
         load(vc, [data stringByAppendingPathComponent:@"tables_mixed.fits"]);
         capture(@"tables", @"menu=\"HDU 1  MIXED — 6 rows × 11 columns\" (2 items)");
+        capture(@"tables-grid", @"grid=6 rows [#,NAME,FLAG,BITS");
         pickHDU(root, 1);
-        expectListing(@"tables-ascii", @"——— HDU 2 table ———");
-        capture(@"tables-ascii", @"mode=1");
+        capture(@"tables-ascii", @"grid=4 rows [#,ID,RA,NOTE] first=\"0\"");
+        pickMode(root, 2);
+        expectListing(@"tables-header", @"——— HDU 2 ———");
+        capture(@"tables-header", @"mode=2");
         NSEvent *cmdF = [NSEvent keyEventWithType:NSEventTypeKeyDown
                                          location:NSZeroPoint
                                     modifierFlags:NSEventModifierFlagCommand

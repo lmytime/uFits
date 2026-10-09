@@ -236,6 +236,32 @@ def check_listings():
     expect("lc_scaled.fits scaled value", r and r[1][1] if r else r, "15.207")
     expect("image HDU is not a table", fqtool("table", os.path.join(DATA, "mef.fits"), "1")[0], 1)
 
+    # Browsing a table row by row (the preview's table view).
+    def cells(fn, hdu, first, n):
+        rc, out = fqtool("rows", fn, str(hdu), str(first), str(n))
+        lines = out.split("\n")
+        return (lines[0], lines[1].split("\t"), [l.split("\t") for l in lines[2:2 + n]]) if rc == 0 else None
+
+    cat = os.path.join(DATA, "catalog_wrap.fits")
+    with fits.open(cat) as hl:
+        ref = hl[1].data
+        rowlen = hl[1].header["NAXIS1"]
+        data_off = hl[1]._data_offset
+    head, names, rws = cells(cat, 1, 2998, 3)
+    expect("table rows: size and names", (head, names), ("rows=3000 cols=5", ["ID", "RA", "DEC", "MAG", "NAME"]))
+    ok = all(math.isclose(float(rws[i][1]), ref["RA"][2998 + i], rel_tol=1e-11) and
+             rws[i][4] == ref["NAME"][2998 + i] for i in range(2))
+    expect("table rows: the last rows match astropy", ok, True)
+    expect("table rows: past the end is empty", rws[2], [""] * 5)
+    with tempfile.TemporaryDirectory() as tmp:
+        cut = os.path.join(tmp, "cut.fits")
+        open(cut, "wb").write(open(cat, "rb").read()[:data_off + 1000 * rowlen + rowlen // 2])
+        expect("table rows: truncated file", cells(cut, 1, 999, 2)[0::2],
+               ("rows=1000 cols=5", [cells(cat, 1, 999, 1)[2][0], [""] * 5]))
+    head, names, rws = cells(os.path.join(DATA, "tables_mixed.fits"), 1, 1, 1)
+    expect("table rows: null, VLA and a long array", [rws[0][4], rws[0][10], rws[0][7]],
+           ["null", "(1 values)", "[1 1 1 1 1 1 1 1 ...]"])
+
 
 def is_image(i, h):
     if isinstance(h, fits.CompImageHDU):
@@ -422,8 +448,31 @@ def check_image(fn, path, hl, idx, extra):
         compare(f"{fn} bin f={f} k={kk}", res[0], exp, 2e-5)
 
 
+def check_restretch():
+    """Changing the stretch of a kept rendering gives the same pixels as
+    rendering with that stretch."""
+    with tempfile.TemporaryDirectory() as tmp:
+        for fn in ("f32.fits", "rgb.fits", "bayer_rggb.fits", "nan_f32.fits", "rice_f32_sd1.fits",
+                   "cube5.fits", "all_nan.fits"):
+            path = os.path.join(DATA, fn)
+            if not os.path.exists(path):
+                continue
+            for a, b in (("auto", "linear"), ("linear", "minmax"), ("minmax", "auto")):
+                direct, re_ = os.path.join(tmp, "a.png"), os.path.join(tmp, "b.png")
+                r1 = subprocess.run([FQ, "render", path, direct, "--max", "300", "--stretch", b],
+                                    capture_output=True, text=True)
+                r2 = subprocess.run([FQ, "render", path, re_, "--max", "300", "--stretch", a, "--then", b],
+                                    capture_output=True, text=True)
+                if r1.returncode or r2.returncode or open(direct, "rb").read() != open(re_, "rb").read():
+                    failures.append(f"{fn}: restretch {a} -> {b} differs from rendering with {b}")
+                    break
+            else:
+                print(f"  ok  {fn} restretch")
+
+
 def main():
     check_stretch()
+    check_restretch()
     check_listings()
     files = sorted(f for f in os.listdir(DATA) if f.endswith((".fits", ".fits.gz")))
     for fn in files:

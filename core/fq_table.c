@@ -563,10 +563,11 @@ static void fmt_number(const uint8_t *row, const tcol *t, int64_t e, char *out, 
         snprintf(out, n, t->type == 'D' || scaled ? "%.12g" : "%.7g", v);
 }
 
-/* One table cell as text, at most CELL characters. */
-static void fmt_cell(const uint8_t *row, const tcol *t, char *out)
+/* One table cell as text in out (n bytes, n >= 32). Arrays show their
+   first values; wider cells show more of them. */
+static void fmt_cell(const uint8_t *row, const tcol *t, char *out, size_t n)
 {
-    const size_t n = CELL + 1;
+    const size_t max = n - 1;
     const uint8_t *p = row + t->off;
     out[0] = 0;
     if (t->repeat == 0)
@@ -584,14 +585,14 @@ static void fmt_cell(const uint8_t *row, const tcol *t, char *out)
         while (b > a && p[b - 1] == ' ')
             b--;
         size_t k = 0;
-        for (int64_t i = a; i < b && k < CELL; i++)
+        for (int64_t i = a; i < b && k < max; i++)
             out[k++] = (p[i] >= 32 && p[i] < 127) ? (char)p[i] : '?';
         out[k] = 0;
         return;
     }
     case 'A': {
         size_t k = 0;
-        for (int64_t i = 0; i < t->repeat && p[i] && k < CELL; i++)
+        for (int64_t i = 0; i < t->repeat && p[i] && k < max; i++)
             out[k++] = (p[i] >= 32 && p[i] < 127) ? (char)p[i] : '?';
         while (k > 0 && out[k - 1] == ' ')
             k--;
@@ -600,7 +601,7 @@ static void fmt_cell(const uint8_t *row, const tcol *t, char *out)
     }
     case 'L': {
         size_t k = 0;
-        for (int64_t i = 0; i < t->repeat && k + 2 < CELL; i++) {
+        for (int64_t i = 0; i < t->repeat && k + 2 < max; i++) {
             out[k++] = p[i] == 'T' ? 'T' : p[i] == 'F' ? 'F' : '-';
             if (i + 1 < t->repeat)
                 out[k++] = ' ';
@@ -610,7 +611,7 @@ static void fmt_cell(const uint8_t *row, const tcol *t, char *out)
     }
     case 'X': {
         size_t k = (size_t)snprintf(out, n, "0x");
-        for (int64_t i = 0; i < t->width && k + 2 < CELL; i++)
+        for (int64_t i = 0; i < t->width && k + 2 < max; i++)
             k += (size_t)snprintf(out + k, n - k, "%02x", p[i]);
         return;
     }
@@ -639,25 +640,109 @@ static void fmt_cell(const uint8_t *row, const tcol *t, char *out)
         fmt_number(row, t, 0, out, n);
         return;
     }
+    const int64_t shown = max >= 64 ? 8 : 3;
     size_t k = 0;
     out[k++] = '[';
-    for (int64_t i = 0; i < t->repeat && i < 3; i++) {
-        char v[CELL + 1];
+    for (int64_t i = 0; i < t->repeat && i < shown; i++) {
+        char v[48];
         fmt_number(row, t, i, v, sizeof v);
         size_t vl = strlen(v);
-        if (k + vl + 6 > CELL)
+        if (k + vl + 6 > max)
             break;
         if (i)
             out[k++] = ' ';
         memcpy(out + k, v, vl);
         k += vl;
     }
-    if (t->repeat > 3 && k + 4 <= CELL) {
+    if (t->repeat > shown && k + 4 <= max) {
         memcpy(out + k, " ...", 4);
         k += 4;
     }
     out[k++] = ']';
     out[k] = 0;
+}
+
+/* ------------------------------------------------------------- browsing */
+
+struct fq_table {
+    fq_file *f;
+    int64_t data_off, rowlen, rows;
+    int nc;
+    tcol *cols;
+    fq_column *info;
+};
+
+fq_table *fq_table_open(fq_file *f, int idx)
+{
+    hdu_t *h = fqi_get_hdu(f, idx);
+    if (!h || h->naxis != 2 || h->zimage ||
+        (strcmp(h->xtension, "BINTABLE") != 0 && strcmp(h->xtension, "TABLE") != 0))
+        return NULL;
+    const int64_t rowlen = h->naxes[0], nrows = h->naxes[1];
+    fqi_need(f, fqi_add_sat(h->data_off, fqi_mul_sat(rowlen, nrows)));
+    h = fqi_get_hdu(f, idx);
+    fq_table *t = calloc(1, sizeof *t);
+    if (!t)
+        return NULL;
+    t->nc = read_columns(f, h, &t->cols);
+    t->info = t->nc > 0 ? calloc((size_t)t->nc, sizeof *t->info) : NULL;
+    if (!t->info) {
+        if (t->nc > 0)
+            free(t->cols);
+        free(t);
+        return NULL;
+    }
+    for (int c = 0; c < t->nc; c++) {
+        const tcol *tc = &t->cols[c];
+        fq_column *ci = &t->info[c];
+        if (tc->name[0])
+            fqi_scopy(ci->name, sizeof ci->name, tc->name);
+        else
+            snprintf(ci->name, sizeof ci->name, "col%d", c + 1);
+        fqi_scopy(ci->unit, sizeof ci->unit, tc->unit);
+        fqi_scopy(ci->form, sizeof ci->form, tc->form);
+        ci->numeric = tc->type == 'a' ? toupper((unsigned char)tc->form[0]) != 'A'
+                                      : tc->type != 'A' && tc->type != 'L';
+    }
+    t->f = f;
+    t->data_off = h->data_off;
+    t->rowlen = rowlen;
+    int64_t avail = f->size - h->data_off;
+    t->rows = rowlen < 1 ? nrows : avail > 0 ? avail / rowlen : 0;
+    if (t->rows > nrows)
+        t->rows = nrows;
+    return t;
+}
+
+void fq_table_close(fq_table *t)
+{
+    if (!t)
+        return;
+    free(t->cols);
+    free(t->info);
+    free(t);
+}
+
+int64_t fq_table_rows(const fq_table *t) { return t ? t->rows : 0; }
+
+int fq_table_ncols(const fq_table *t) { return t ? t->nc : 0; }
+
+const fq_column *fq_table_column(const fq_table *t, int col)
+{
+    return t && col >= 0 && col < t->nc ? &t->info[col] : NULL;
+}
+
+void fq_table_cell(const fq_table *t, int64_t row, int col, char *out, size_t n)
+{
+    if (!out || !n)
+        return;
+    out[0] = 0;
+    if (!t || row < 0 || row >= t->rows || col < 0 || col >= t->nc)
+        return;
+    char buf[200];
+    fmt_cell(t->f->data + t->data_off + row * t->rowlen, &t->cols[col], buf,
+             n < 32 ? 32 : n < sizeof buf ? n : sizeof buf);
+    fqi_scopy(out, n, buf);
 }
 
 char *fq_table_text(fq_file *f, int idx, int maxrows, size_t *len)
@@ -707,7 +792,7 @@ char *fq_table_text(fq_file *f, int idx, int maxrows, size_t *len)
     for (int64_t r = 0; r < show; r++)
         for (int c = 0; c < shown; c++) {
             char *cell = cells + (r * shown + c) * (CELL + 1);
-            fmt_cell(base + r * rowlen, &cols[c], cell);
+            fmt_cell(base + r * rowlen, &cols[c], cell, CELL + 1);
             int w = (int)strlen(cell);
             if (w > width[c])
                 width[c] = w;

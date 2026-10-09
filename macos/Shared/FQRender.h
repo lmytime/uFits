@@ -11,8 +11,10 @@ NS_ASSUME_NONNULL_BEGIN
 /// One HDU a viewer can switch to (an image, or a table that is plotted).
 @interface FQHDUItem : NSObject
 @property(nonatomic, readonly) int hdu;
-@property(nonatomic, readonly) int kind;            // FQ_KIND_IMAGE or FQ_KIND_PLOT
+@property(nonatomic, readonly) int kind;            // FQ_KIND_IMAGE, _PLOT or _TABLE
+@property(nonatomic, readonly) BOOL isTable;        // a table, plotted or not
 @property(nonatomic, readonly) long long nplanes;
+@property(nonatomic, readonly, copy) NSString *extname;
 @property(nonatomic, readonly, copy) NSString *title; // "HDU 1  SCI — 4096 × 4096 float32"
 @end
 
@@ -35,14 +37,20 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Same, for a given HDU and cube plane (-1 = automatic). With hdus, also
 /// lists the HDUs that can be shown, whether or not rendering succeeds.
+/// With keep, the binned values are kept so -restretch: is quick.
 + (nullable instancetype)renderFile:(NSString *)path
                           maxPixels:(int)maxPixels
                             samples:(int)samples
                             stretch:(int)stretch
                                 hdu:(int)hdu
                               plane:(long long)plane
+                               keep:(BOOL)keep
                                hdus:(NSArray<FQHDUItem *> *_Nullable *_Nullable)hdus
                               error:(NSString *_Nullable *_Nullable)error;
+
+/// Stretches an image rendered with keep again, without reading the file
+/// (a few milliseconds). NO if that is not possible.
+- (BOOL)restretch:(int)stretch;
 @end
 
 /// Draws a plot envelope inside rect (Core Graphics coordinates): a line,

@@ -1499,7 +1499,7 @@ static void make_stretch(float *v, float *d, int64_t n, int mode, stretch_t *st)
 /* ------------------------------------------------------------- mapping */
 
 typedef struct {
-    const plan_t *P;
+    int w, h, nch, flip;
     const float *bin;
     const stretch_t *st;
     uint8_t *px;
@@ -1519,20 +1519,19 @@ static inline uint8_t stretch_byte(const stretch_t *st, float v)
 static void map_task(void *ctx, size_t ci)
 {
     mapjob *J = ctx;
-    const plan_t *P = J->P;
-    const int w = P->w, h = P->h;
+    const int w = J->w, h = J->h;
     int r0 = (int)((int64_t)h * (int64_t)ci / J->nchunks);
     int r1 = (int)((int64_t)h * (int64_t)(ci + 1) / J->nchunks);
     const size_t plane = (size_t)w * h;
     for (int r = r0; r < r1; r++) {
-        int sy = P->flip ? h - 1 - r : r;
+        int sy = J->flip ? h - 1 - r : r;
         uint8_t *o = J->px + (size_t)r * J->row_bytes;
         const float *b0 = J->bin + (size_t)sy * w;
         if (J->comps == 1) {
             const stretch_t st = J->st[0];
             for (int x = 0; x < w; x++)
                 o[x] = stretch_byte(&st, b0[x]);
-        } else if (P->nch == 1) {
+        } else if (J->nch == 1) {
             const stretch_t st = J->st[0];
             for (int x = 0; x < w; x++) {
                 float v = b0[x];
@@ -1768,6 +1767,65 @@ float *fq_decode_float(fq_file *f, const fq_opts *opts, int *w, int *h, int *nch
     return out;
 }
 
+/* Binned values kept for fq_restretch: nch planes of w * h floats, values
+   relative to ref. */
+struct fq_kept {
+    float *bin;
+    int w, h, nch, flip, has_nan;
+    double ref;
+};
+
+static void kept_free(fq_kept *k)
+{
+    if (k) {
+        free(k->bin);
+        free(k);
+    }
+}
+
+/* Stretch the binned values per channel and map them to img's pixels
+   (allocated here), filling in the display part of img->info. */
+static int stretch_map(fq_image *img, const fq_kept *k, int mode, int threads)
+{
+    stretch_t st[3];
+    const size_t plane = (size_t)k->w * k->h;
+    const int64_t cap = STAT_SAMPLES + k->w + k->h + 16;
+    float *sv = malloc((size_t)cap * sizeof(float));
+    float *sd = malloc((size_t)cap * sizeof(float));
+    if (!sv || !sd) {
+        free(sv);
+        free(sd);
+        return -1;
+    }
+    int any_valid = 0;
+    for (int c = 0; c < k->nch; c++) {
+        int64_t n = gather(k->bin + c * plane, k->w, k->h, sv, STAT_SAMPLES);
+        make_stretch(sv, sd, n, mode, &st[c]);
+        any_valid |= st[c].valid;
+    }
+    free(sv);
+    free(sd);
+    img->info.median = st[0].med + k->ref;
+    img->info.sigma = st[0].sig;
+    img->info.black = st[0].lo + k->ref;
+    img->info.white = st[0].hi + k->ref;
+    img->info.empty = !any_valid;
+    const int has_nan = k->has_nan || !any_valid;
+
+    img->width = k->w;
+    img->height = k->h;
+    img->components = (k->nch == 1 && !has_nan) ? 1 : 4;
+    img->row_bytes = (size_t)k->w * img->components;
+    img->pixels = malloc(img->row_bytes * k->h);
+    if (!img->pixels)
+        return -1;
+    int nchunks = k->h < 128 ? k->h : 128;
+    mapjob M = { k->w, k->h, k->nch, k->flip, k->bin, st, img->pixels, img->row_bytes,
+                 img->components, nchunks };
+    par_for((size_t)nchunks, threads, &M, map_task);
+    return 0;
+}
+
 fq_image *fq_render(fq_file *f, const fq_opts *opts, char *err, size_t errlen)
 {
     fq_opts o;
@@ -1815,54 +1873,34 @@ fq_image *fq_render(fq_file *f, const fq_opts *opts, char *err, size_t errlen)
     }
     plan_free(&P);
 
-    /* Stretch per channel. */
-    stretch_t st[3];
-    size_t plane = (size_t)P.w * P.h;
-    int64_t cap = STAT_SAMPLES + P.w + P.h + 16;
-    float *sv = malloc((size_t)cap * sizeof(float));
-    float *sd = malloc((size_t)cap * sizeof(float));
-    if (!sv || !sd) {
-        free(sv);
-        free(sd);
+    fq_kept *k = calloc(1, sizeof *k);
+    if (!k) {
         free(bin);
         fq_image_free(img);
         fqi_seterr(err, errlen, "out of memory");
         return NULL;
     }
-    int any_valid = 0;
-    for (int c = 0; c < P.nch; c++) {
-        int64_t n = gather(bin + c * plane, P.w, P.h, sv, STAT_SAMPLES);
-        make_stretch(sv, sd, n, o.stretch, &st[c]);
-        any_valid |= st[c].valid;
-    }
-    free(sv);
-    free(sd);
-    double ref = P.src.ref;
-    img->info.median = st[0].med + ref;
-    img->info.sigma = st[0].sig;
-    img->info.black = st[0].lo + ref;
-    img->info.white = st[0].hi + ref;
-    if (!any_valid) {
-        has_nan = 1;
-        img->info.empty = 1;
-    }
-
-    img->width = P.w;
-    img->height = P.h;
-    img->components = (P.nch == 1 && !has_nan) ? 1 : 4;
-    img->row_bytes = (size_t)P.w * img->components;
-    img->pixels = malloc(img->row_bytes * P.h);
-    if (!img->pixels) {
-        free(bin);
+    *k = (fq_kept){ bin, P.w, P.h, P.nch, P.flip, has_nan, P.src.ref };
+    if (stretch_map(img, k, o.stretch, o.threads) != 0) {
+        kept_free(k);
         fq_image_free(img);
         fqi_seterr(err, errlen, "out of memory");
         return NULL;
     }
-    int nchunks = P.h < 128 ? P.h : 128;
-    mapjob M = { &P, bin, st, img->pixels, img->row_bytes, img->components, nchunks };
-    par_for((size_t)nchunks, o.threads, &M, map_task);
-    free(bin);
+    if (o.keep)
+        img->kept = k;
+    else
+        kept_free(k);
     return img;
+}
+
+int fq_restretch(fq_image *img, int stretch, int threads)
+{
+    if (!img || !img->kept || img->info.kind != FQ_KIND_IMAGE)
+        return -1;
+    free(img->pixels);
+    img->pixels = NULL;
+    return stretch_map(img, img->kept, stretch, threads);
 }
 
 void fq_image_free(fq_image *img)
@@ -1873,6 +1911,7 @@ void fq_image_free(fq_image *img)
     free(img->spec_lo);
     free(img->spec_hi);
     free(img->dots);
+    kept_free(img->kept);
     free(img);
 }
 
@@ -1903,12 +1942,14 @@ int fq_list_hdus(fq_file *f, fq_hdu_entry *out, int max)
             snprintf(e.desc, sizeof e.desc, "%s %s", dims, fqi_type_name(d.bitpix, h->bscale, h->bzero));
         } else if (fqi_table_plot_spec(f, i, &ps)) {
             e.kind = FQ_KIND_PLOT;
+            e.table = 1;
             snprintf(e.desc, sizeof e.desc, "%s vs %s", ps.yname, ps.xname);
         } else if ((h = fqi_get_hdu(f, i))->naxis == 2 && !h->zimage &&
                    (!strcmp(h->xtension, "BINTABLE") || !strcmp(h->xtension, "TABLE"))) {
             int64_t ncol = 0, nrow = h->naxes[1];
             fqi_kw_int(f, h, "TFIELDS", &ncol);
             e.kind = FQ_KIND_TABLE;
+            e.table = 1;
             snprintf(e.desc, sizeof e.desc, "%lld row%s x %lld column%s", (long long)nrow,
                      nrow == 1 ? "" : "s", (long long)ncol, ncol == 1 ? "" : "s");
         } else {

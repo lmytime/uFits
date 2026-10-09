@@ -75,10 +75,12 @@ static NSString *FQTypeName(int bitpix)
     if ((self = [super init])) {
         _hdu = e->hdu;
         _kind = e->kind;
+        _isTable = e->table != 0;
         _nplanes = e->nplanes;
         NSString *desc = [FQString(e->desc) stringByReplacingOccurrencesOfString:@" x "
                                                                       withString:@" × "];
         NSString *ext = FQString(e->extname);
+        _extname = ext;
         _title = ext.length ? [NSString stringWithFormat:@"HDU %d  %@ — %@", e->hdu, ext, desc]
                             : [NSString stringWithFormat:@"HDU %d — %@", e->hdu, desc];
     }
@@ -124,6 +126,7 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
                     stretch:stretch
                         hdu:-1
                       plane:-1
+                       keep:NO
                        hdus:NULL
                       error:error];
 }
@@ -134,6 +137,7 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
                    stretch:(int)stretch
                        hdu:(int)hdu
                      plane:(long long)plane
+                      keep:(BOOL)keep
                       hdus:(NSArray<FQHDUItem *> **)hdus
                      error:(NSString **)error
 {
@@ -151,6 +155,7 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
     o.stretch = stretch;
     o.hdu = hdu;
     o.plane = plane < 0 ? -1 : (int)MIN(plane, (long long)INT_MAX);
+    o.keep = keep;
     fq_image *img = fq_render(f, &o, err, sizeof err);
     if (hdus)
         *hdus = FQListHDUs(f, path);
@@ -178,6 +183,18 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
     if (_image)
         CGImageRelease(_image);
     fq_image_free(_img);
+}
+
+- (BOOL)restretch:(int)stretch
+{
+    if (!_image || fq_restretch(_img, stretch, 0) != 0)
+        return NO;
+    CGImageRef cg = FQCreateImage(_img);   // takes the new pixels
+    if (!cg)
+        return NO;
+    CGImageRelease(_image);
+    _image = cg;
+    return YES;
 }
 
 - (int)kind

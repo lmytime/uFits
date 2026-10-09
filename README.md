@@ -33,7 +33,7 @@ Time spent in the core alone, measured on a 4-core Linux VM:
 - The first HDU that holds an image or a plottable table (an empty primary HDU
   followed by `SCI`, as in HST/JWST files, works as expected). When a file has more,
   a menu in the preview's bar switches between them (`SCI`, `ERR`, `DQ`, ...); it also
-  lists every other table, and picking one shows its rows in the header view.
+  lists every other table, and picking one shows its rows.
 - Every BITPIX, with `BSCALE`/`BZERO` (unsigned integers included) and `BLANK`/NaN
   as transparent pixels, so mosaics keep their footprint shape.
 - An automatic midtone stretch (median/MAD based, like PixInsight's STF) that shows faint
@@ -59,10 +59,15 @@ Time spent in the core alone, measured on a 4-core Linux VM:
   `NOCOMPRESS`, with all three quantization/dithering modes.
 - Gzipped files (`.fits.gz`) when built with `GZIP=1` (see below).
 - Rows follow the FITS convention (first row at the bottom) unless `ROWORDER = 'TOP-DOWN'`.
-- The **Header** button lists every HDU, all header cards and the first 100 rows of
-  every table (binary and ASCII; array, string, logical, bit, complex and
-  variable-length columns included). Files without anything to plot open straight on
-  it. ⌘F searches it.
+- **Table** shows the rows of any table, plotted or not, as a grid with fixed column
+  titles: all of them, read only as they scroll into view, so a catalog of millions of
+  rows opens at once. Binary and ASCII tables, with array, string, logical, bit,
+  complex and variable-length columns. ⌘C copies the selected rows as tab-separated
+  text. Files whose tables have nothing to plot open on it.
+- **Header** lists every HDU and all header cards, plus the first 100 rows of each
+  table; ⌘F searches it.
+- Changing the stretch only remaps the image already binned, so it is instant even for
+  big or compressed files.
 
 Not supported: `HCOMPRESS_1` tiles (such files still open on their header), random groups.
 

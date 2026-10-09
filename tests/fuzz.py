@@ -72,7 +72,8 @@ def main():
             for args in (["render", target, png, "--max", str(rnd.choice([16, 100, 512])),
                           "--samples", str(rnd.choice([0, 1, 2, 4]))],
                          ["info", target], ["header", target, str(rnd.randrange(3))],
-                         ["hdus", target], ["table", target, str(rnd.randrange(1, 3)), "50"]):
+                         ["hdus", target], ["table", target, str(rnd.randrange(1, 3)), "50"],
+                         ["rows", target, str(rnd.randrange(1, 3)), str(rnd.choice([0, 3, 999])), "5"]):
                 try:
                     r = subprocess.run([FQ, *args], capture_output=True, text=True, errors="replace",
                                        env=env, timeout=30)

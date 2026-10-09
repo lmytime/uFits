@@ -174,7 +174,10 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
 
 #pragma mark - Root view
 
-@interface FQPreviewController ()
+/// The segments of the mode switch.
+enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
+
+@interface FQPreviewController () <NSTableViewDataSource, NSTableViewDelegate>
 - (void)layoutBar;
 - (BOOL)handleKeyEquivalent:(NSEvent *)event;
 @end
@@ -207,6 +210,9 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     FQSpectrumView *_spectrumView;
     NSScrollView *_headerScroll;
     NSTextView *_headerText;
+    NSScrollView *_tableScroll;
+    NSTableView *_tableView;
+    NSFont *_cellFont;
     NSTextField *_message;
     NSTextField *_info;
     NSPopUpButton *_stretchMenu;
@@ -217,9 +223,14 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     NSSegmentedControl *_mode;
     NSString *_path;
     FQRendering *_rendering;
+    NSString *_renderInfo, *_renderTip;   // the bar's text for the picture
     NSArray<FQHDUItem *> *_hdus;
     int _hdu;             // HDU asked for, -1 = automatic
     long long _plane;     // cube plane asked for, -1 = automatic
+    int _selected;        // HDU picked in the menu (drawn or listed), -1 = none
+    fq_file *_tableFile;  // open while its table is in the table view
+    fq_table *_table;
+    int _tableHDU;        // HDU in the table view, -1 = none
     BOOL _headerLoaded, _headerReady;   // listing asked for; in the text view
     int _headerTarget;    // HDU to scroll the listing to, -1 = none
     BOOL _headerTargetRows;   // to its table rows rather than its cards
@@ -237,8 +248,18 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
         _hdu = -1;
         _plane = -1;
         _headerTarget = -1;
+        _tableHDU = -1;
+        _selected = -1;
     }
     return self;
+}
+
+- (void)dealloc
+{
+    _tableView.dataSource = nil;
+    _tableView.delegate = nil;
+    fq_table_close(_table);
+    fq_close(_tableFile);
 }
 
 - (NSPopUpButton *)smallPopUpWithAction:(SEL)action
@@ -249,6 +270,18 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     p.target = self;
     p.action = action;
     return p;
+}
+
+- (NSScrollView *)scrollViewWithFrame:(NSRect)frame
+{
+    NSScrollView *sv = [[NSScrollView alloc] initWithFrame:frame];
+    sv.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    sv.hasVerticalScroller = YES;
+    sv.hasHorizontalScroller = YES;
+    sv.autohidesScrollers = YES;
+    sv.borderType = NSNoBorder;
+    sv.hidden = YES;
+    return sv;
 }
 
 - (void)loadView
@@ -267,12 +300,8 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     _spectrumView.hidden = YES;
     [root addSubview:_spectrumView];
 
-    _headerScroll = [[NSScrollView alloc] initWithFrame:content];
-    _headerScroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    _headerScroll.hasVerticalScroller = YES;
-    _headerScroll.hasHorizontalScroller = YES;
-    _headerScroll.autohidesScrollers = YES;
-    _headerScroll.borderType = NSNoBorder;
+    // Header listing. Non-contiguous layout keeps big listings quick to show.
+    _headerScroll = [self scrollViewWithFrame:content];
     NSSize cs = _headerScroll.contentSize;
     _headerText = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, cs.width, cs.height)];
     _headerText.editable = NO;
@@ -291,9 +320,24 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     _headerText.autoresizingMask = NSViewWidthSizable;
     _headerText.textContainer.containerSize = NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX);
     _headerText.textContainer.widthTracksTextView = NO;
+    _headerText.layoutManager.allowsNonContiguousLayout = YES;
     _headerScroll.documentView = _headerText;
-    _headerScroll.hidden = YES;
     [root addSubview:_headerScroll];
+
+    // Table view: every row of a table, formatted only as it scrolls in.
+    _cellFont = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
+    _tableScroll = [self scrollViewWithFrame:content];
+    _tableView = [[NSTableView alloc] initWithFrame:_tableScroll.bounds];
+    _tableView.style = NSTableViewStylePlain;
+    _tableView.usesAlternatingRowBackgroundColors = YES;
+    _tableView.gridStyleMask = NSTableViewSolidVerticalGridLineMask;
+    _tableView.columnAutoresizingStyle = NSTableViewNoColumnAutoresizing;
+    _tableView.allowsMultipleSelection = YES;
+    _tableView.rowHeight = 17;
+    _tableView.dataSource = self;
+    _tableView.delegate = self;
+    _tableScroll.documentView = _tableView;
+    [root addSubview:_tableScroll];
 
     _message = [NSTextField wrappingLabelWithString:@""];
     _message.frame = NSInsetRect(content, 40, 40);
@@ -304,14 +348,14 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     [root addSubview:_message];
 
     // The bar, laid out by -layoutBar: info text on the left; HDU menu,
-    // plane slider, stretch menu and Image/Header switch on the right.
-    _mode = [NSSegmentedControl segmentedControlWithLabels:@[ @"Image", @"Header" ]
+    // plane slider, stretch menu and the mode switch on the right.
+    _mode = [NSSegmentedControl segmentedControlWithLabels:@[ @"Image", @"Table", @"Header" ]
                                               trackingMode:NSSegmentSwitchTrackingSelectOne
                                                     target:self
                                                     action:@selector(modeChanged:)];
     _mode.controlSize = NSControlSizeSmall;
     _mode.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
-    _mode.selectedSegment = 0;
+    _mode.selectedSegment = kModePicture;
     [_mode sizeToFit];
     [root addSubview:_mode];
 
@@ -369,15 +413,19 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     (void)self.view;
     _path = [path copy];
     _headerLoaded = _headerReady = NO;
+    _headerText.string = @"";
     _headerTarget = -1;
     _hdu = -1;
     _plane = -1;
     _hdus = nil;
+    _selected = -1;
+    [self closeTable];
     [self render:YES completion:completion];
 }
 
-/// Renders _path with the current HDU, plane and stretch. The first render
-/// of a file also lists its HDUs and sizes the view.
+/// Renders _path with the current HDU, plane and stretch, keeping the
+/// binned values so a new stretch is quick. The first render of a file
+/// also lists its HDUs and sizes the view.
 - (void)render:(BOOL)first completion:(void (^)(void))completion
 {
     int stretch = [self currentStretch];
@@ -399,6 +447,7 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
                                 stretch:stretch
                                     hdu:hdu
                                   plane:plane
+                                   keep:YES
                                    hdus:&hdus
                                   error:&error];
         else
@@ -408,6 +457,7 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
                                 stretch:stretch
                                     hdu:hdu
                                   plane:plane
+                                   keep:YES
                                    hdus:NULL
                                   error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -437,6 +487,23 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
         [self render:NO completion:nil];
 }
 
+/// The bar's text for the picture: what it shows, display range as tooltip.
+- (void)updateRenderInfo:(NSString *)error
+{
+    FQRendering *r = _rendering;
+    if (r) {
+        fq_info in = r.info;
+        _renderInfo = r.summary;
+        _renderTip = r.kind == FQ_KIND_IMAGE
+                         ? [NSString stringWithFormat:@"median %.6g   σ %.4g   display range %.6g … %.6g",
+                                                      in.median, in.sigma, in.black, in.white]
+                         : nil;
+    } else {
+        _renderInfo = error.length ? error : @"No image";
+        _renderTip = nil;
+    }
+}
+
 - (void)showRendering:(FQRendering *)r error:(NSString *)error first:(BOOL)first
 {
     _rendering = r;
@@ -444,22 +511,12 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     _imageView.image = kind == FQ_KIND_IMAGE ? r.image : NULL;
     _spectrumView.rendering = kind == FQ_KIND_PLOT ? r : nil;
     _spectrumView.needsDisplay = YES;
-    if (r) {
-        fq_info in = r.info;
-        _info.stringValue = r.summary;
-        _info.toolTip = kind == FQ_KIND_IMAGE
-                            ? [NSString stringWithFormat:@"median %.6g   σ %.4g   display range %.6g … %.6g",
-                                                         in.median, in.sigma, in.black, in.white]
-                            : nil;
-    } else {
-        _info.stringValue = error.length ? error : @"No image";
-        _info.toolTip = nil;
-    }
+    [self updateRenderInfo:error];
     if (kind == FQ_KIND_IMAGE && r.info.empty)
         _message.stringValue = @"Every pixel of this image is blank (NaN or BLANK).";
     else
         _message.stringValue = error.length ? error : @"";
-
+    NSInteger mode = _mode.selectedSegment;
     if (first) {
         [_hduMenu removeAllItems];
         for (FQHDUItem *item in _hdus) {
@@ -469,8 +526,14 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
         [_hduMenu sizeToFit];
         _hduWidth = MIN(NSWidth(_hduMenu.frame), 260);
 
-        // Files without a picture (tables, unsupported data) open on the header.
-        _mode.selectedSegment = kind == FQ_KIND_NONE ? 1 : 0;
+        // Files without a picture open on their first table, or the header.
+        _selected = r ? r.info.hdu : -1;
+        for (FQHDUItem *item in _hdus)
+            if (_selected < 0 && item.kind == FQ_KIND_TABLE)
+                _selected = item.hdu;
+        mode = r ? kModePicture : kModeTable;
+        [self updateModeSwitch];
+        _mode.selectedSegment = mode;
 
         // Fit 1000 x 720 points; small images grow at most 2x, or to 480
         // points. Wide enough for the bar's controls and some info text.
@@ -486,10 +549,11 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
                 bar += (i == 0 ? _hduWidth : NSWidth(controls[i].frame)) + 8;
         _fitting = NSMakeSize(MAX(MAX(round(w * s), 360), bar), round(h * s) + kBarHeight);
         self.preferredContentSize = _fitting;
+
+        [self loadHeader];   // in the background, so the Header button is instant
     }
-    [self selectRenderedHDU];
     [self updatePlaneControls];
-    [self showHeader:_mode.selectedSegment == 1];
+    [self showMode:mode];
 }
 
 #pragma mark Bar
@@ -521,8 +585,8 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
         [NSString stringWithFormat:@"%lld / %lld", llround(_planeSlider.doubleValue) + 1, n];
 }
 
-/// The bar's controls besides the Image/Header switch, most important
-/// first: HDU menu, plane slider, stretch menu.
+/// The bar's controls besides the mode switch, most important first: HDU
+/// menu, plane slider, stretch menu.
 - (NSArray<NSView *> *)barControls
 {
     return @[ _hduMenu, _planeBox, _stretchMenu ];
@@ -531,10 +595,10 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
 /// Which of -barControls the file and the mode call for.
 - (void)wantedControls:(BOOL *)wanted
 {
-    BOOL header = _mode.selectedSegment == 1;
+    BOOL picture = _mode.selectedSegment == kModePicture;
     wanted[0] = _hdus.count > 1;
-    wanted[1] = !header && [self showsPlaneSlider];
-    wanted[2] = !header && _rendering && _rendering.kind == FQ_KIND_IMAGE;
+    wanted[1] = picture && [self showsPlaneSlider];
+    wanted[2] = picture && _rendering && _rendering.kind == FQ_KIND_IMAGE;
 }
 
 /// Right to left: the switch, then the stretch menu, plane slider and HDU
@@ -576,50 +640,92 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     _info.frame = NSMakeRect(10, floor((kBarHeight - ih) / 2), MAX(0, x - 10), ih);
 }
 
-/// Selects the HDU on show in the HDU menu (which may show a table picked
-/// for the header listing).
-- (void)selectRenderedHDU
+/// The HDU picked in the menu.
+- (FQHDUItem *)selectedItem
 {
-    if (!_rendering)
-        return;
-    NSInteger i = [_hduMenu indexOfItemWithRepresentedObject:@(_rendering.info.hdu)];
-    if (i >= 0)
-        [_hduMenu selectItemAtIndex:i];
+    for (FQHDUItem *item in _hdus)
+        if (item.hdu == _selected)
+            return item;
+    return nil;
 }
 
-- (void)showHeader:(BOOL)header
+/// Picture and Table are on for the HDU picked when it can be drawn, or is
+/// a table; Header always is.
+- (void)updateModeSwitch
 {
+    FQHDUItem *item = [self selectedItem];
+    BOOL picture = item ? item.kind != FQ_KIND_TABLE : _rendering != nil;
+    [_mode setEnabled:picture forSegment:kModePicture];
+    [_mode setEnabled:item.isTable forSegment:kModeTable];
+    [_mode setLabel:item.kind == FQ_KIND_PLOT ? @"Plot" : @"Image" forSegment:kModePicture];
+    [_mode sizeToFit];
+}
+
+/// Shows mode: the picture (image or plot), a table's rows, or the header
+/// listing, falling back to what the HDU picked has.
+- (void)showMode:(NSInteger)mode
+{
+    [self updateModeSwitch];
+    if (![_mode isEnabledForSegment:mode])
+        mode = [_mode isEnabledForSegment:kModePicture] ? kModePicture
+             : [_mode isEnabledForSegment:kModeTable]   ? kModeTable
+                                                          : kModeHeader;
+    _mode.selectedSegment = mode;
     int kind = _rendering ? _rendering.kind : FQ_KIND_NONE;
-    _headerScroll.hidden = !header;
-    _imageView.hidden = header || kind != FQ_KIND_IMAGE;
-    _spectrumView.hidden = header || kind != FQ_KIND_PLOT;
-    _message.hidden = header || _message.stringValue.length == 0 ||
+    BOOL picture = mode == kModePicture;
+    _headerScroll.hidden = mode != kModeHeader;
+    _tableScroll.hidden = mode != kModeTable;
+    _imageView.hidden = !picture || kind != FQ_KIND_IMAGE;
+    _spectrumView.hidden = !picture || kind != FQ_KIND_PLOT;
+    _message.hidden = !picture || _message.stringValue.length == 0 ||
                       (kind != FQ_KIND_NONE && !(kind == FQ_KIND_IMAGE && _rendering.info.empty));
-    [self layoutBar];
-    if (header && !_headerLoaded && _path) {
-        _headerLoaded = YES;
-        _headerText.string = @"";
-        NSString *path = _path;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-            NSString *text = FQHeaderListing(path);
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (![path isEqualToString:self->_path])
-                    return;
-                self->_headerText.string = text;
-                self->_headerReady = YES;
-                [self scrollHeaderToTarget];
-            });
-        });
-    } else if (header) {
-        [self scrollHeaderToTarget];
+    if (mode == kModeTable)
+        [self showTable:_selected];
+    if (mode == kModeHeader)
+        [self loadHeader];
+
+    NSInteger i = [_hduMenu indexOfItemWithRepresentedObject:@(_selected)];
+    if (i >= 0)
+        [_hduMenu selectItemAtIndex:i];
+    if (mode == kModeTable) {
+        _info.stringValue = [self tableSummary];
+        _info.toolTip = nil;
+    } else {
+        _info.stringValue = _renderInfo ?: @"";
+        _info.toolTip = _renderTip;
     }
+    [self layoutBar];
+}
+
+#pragma mark Header listing
+
+/// Builds the header listing in the background, once per file, puts it in
+/// the text view and scrolls to the HDU asked for.
+- (void)loadHeader
+{
+    if (_headerLoaded || !_path) {
+        [self scrollHeaderToTarget];
+        return;
+    }
+    _headerLoaded = YES;
+    NSString *path = _path;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *text = FQHeaderListing(path);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (![path isEqualToString:self->_path] || self->_headerReady)
+                return;
+            self->_headerText.string = text;
+            self->_headerReady = YES;
+            [self scrollHeaderToTarget];
+        });
+    });
 }
 
 /// Scrolls the header listing to the rows of table _headerTarget, or to
-/// its header cards, once the listing is there.
+/// its header cards, once the listing is there and on screen.
 - (void)scrollHeaderToTarget
 {
-    if (!_headerReady || _headerTarget < 0)
+    if (!_headerReady || _headerTarget < 0 || _headerScroll.hidden)
         return;
     NSString *text = _headerText.string;
     NSRange r = NSMakeRange(NSNotFound, 0);
@@ -642,17 +748,152 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     [_headerText showFindIndicatorForRange:r];
 }
 
+#pragma mark Table view
+
+- (void)closeTable
+{
+    fq_table_close(_table);
+    fq_close(_tableFile);
+    _table = NULL;
+    _tableFile = NULL;
+    _tableHDU = -1;
+    for (NSTableColumn *column in [_tableView.tableColumns copy])
+        [_tableView removeTableColumn:column];
+    [_tableView reloadData];
+}
+
+/// Puts table hdu in the table view. Opening a table reads its header only
+/// (a gzip file is inflated as far as the table); cells are formatted as
+/// they scroll into view.
+- (void)showTable:(int)hdu
+{
+    if (_table && _tableHDU == hdu)
+        return;
+    [self closeTable];
+    char err[256] = "";
+    _tableFile = fq_open(_path.fileSystemRepresentation, err, sizeof err);
+    _table = _tableFile ? fq_table_open(_tableFile, hdu) : NULL;
+    if (!_table) {
+        fq_close(_tableFile);
+        _tableFile = NULL;
+        return;
+    }
+    _tableHDU = hdu;
+    NSDictionary *attrs = @{NSFontAttributeName : _cellFont};
+    CGFloat digit = [@"0" sizeWithAttributes:attrs].width;
+    int64_t nrows = fq_table_rows(_table), sample = MIN(nrows, (int64_t)50);
+    NSTableColumn *num = [[NSTableColumn alloc] initWithIdentifier:@"#"];
+    num.title = @"#";
+    num.width = ceil(digit * (CGFloat)[NSString stringWithFormat:@"%lld", (long long)MAX(nrows, 1)].length) + 14;
+    num.headerCell.alignment = NSTextAlignmentRight;
+    [_tableView addTableColumn:num];
+    int nc = fq_table_ncols(_table);
+    for (int c = 0; c < nc && c < 1000; c++) {
+        const fq_column *ci = fq_table_column(_table, c);
+        NSTableColumn *column = [[NSTableColumn alloc] initWithIdentifier:[NSString stringWithFormat:@"%d", c]];
+        column.title = FQString(ci->name);
+        NSString *unit = FQString(ci->unit), *form = FQString(ci->form);
+        column.headerToolTip = unit.length ? [NSString stringWithFormat:@"%@  [%@]", form, unit] : form;
+        size_t chars = column.title.length;   // as wide as the first rows need
+        char cell[200];
+        for (int64_t r = 0; r < sample; r++) {
+            fq_table_cell(_table, r, c, cell, sizeof cell);
+            chars = MAX(chars, strlen(cell));
+        }
+        column.width = MIN(MAX(ceil(digit * (CGFloat)chars) + 14, 40), 420);
+        column.minWidth = 24;
+        column.headerCell.alignment = ci->numeric ? NSTextAlignmentRight : NSTextAlignmentLeft;
+        [_tableView addTableColumn:column];
+    }
+    [_tableView reloadData];
+    [_tableView scrollRowToVisible:0];
+}
+
+- (NSString *)tableSummary
+{
+    if (!_table)
+        return @"Cannot read this table";
+    NSString *ext = @"";
+    for (FQHDUItem *item in _hdus)
+        if (item.hdu == _tableHDU)
+            ext = item.extname;
+    long long rows = fq_table_rows(_table);
+    int cols = fq_table_ncols(_table);
+    return [NSString stringWithFormat:@"HDU %d%@%@  ·  %lld row%@ × %d column%@", _tableHDU,
+                                      ext.length ? @" " : @"", ext, rows, rows == 1 ? @"" : @"s",
+                                      cols, cols == 1 ? @"" : @"s"];
+}
+
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView
+{
+    (void)tableView;
+    return (NSInteger)fq_table_rows(_table);
+}
+
+- (NSView *)tableView:(NSTableView *)tableView viewForTableColumn:(NSTableColumn *)column row:(NSInteger)row
+{
+    NSTextField *field = [tableView makeViewWithIdentifier:@"cell" owner:self];
+    if (!field) {
+        field = [NSTextField labelWithString:@""];
+        field.identifier = @"cell";
+        field.font = _cellFont;
+        field.lineBreakMode = NSLineBreakByTruncatingTail;
+    }
+    if ([column.identifier isEqualToString:@"#"]) {
+        field.stringValue = [NSString stringWithFormat:@"%ld", (long)row + 1];
+        field.alignment = NSTextAlignmentRight;
+        field.textColor = NSColor.tertiaryLabelColor;
+        return field;
+    }
+    int c = column.identifier.intValue;
+    char cell[200];
+    fq_table_cell(_table, row, c, cell, sizeof cell);
+    const fq_column *ci = fq_table_column(_table, c);
+    field.stringValue = FQString(cell);
+    field.alignment = ci && ci->numeric ? NSTextAlignmentRight : NSTextAlignmentLeft;
+    field.textColor = NSColor.labelColor;
+    return field;
+}
+
+/// Copies the selected rows as tab-separated text, with a line of column
+/// names first.
+- (void)copy:(id)sender
+{
+    (void)sender;
+    NSIndexSet *rows = _tableView.selectedRowIndexes;
+    if (_tableScroll.hidden || !_table || !rows.count)
+        return;
+    NSMutableString *text = [NSMutableString string];
+    int nc = fq_table_ncols(_table);
+    for (int c = 0; c < nc; c++)
+        [text appendFormat:@"%@%@", c ? @"\t" : @"", FQString(fq_table_column(_table, c)->name)];
+    [text appendString:@"\n"];
+    __block NSUInteger left = 100000;
+    [rows enumerateIndexesUsingBlock:^(NSUInteger row, BOOL *stop) {
+        char cell[200];
+        for (int c = 0; c < nc; c++) {
+            fq_table_cell(self->_table, (int64_t)row, c, cell, sizeof cell);
+            [text appendFormat:@"%@%@", c ? @"\t" : @"", FQString(cell)];
+        }
+        [text appendString:@"\n"];
+        if (--left == 0)
+            *stop = YES;
+    }];
+    [NSPasteboard.generalPasteboard clearContents];
+    [NSPasteboard.generalPasteboard setString:text forType:NSPasteboardTypeString];
+}
+
 #pragma mark Actions
 
 - (void)modeChanged:(id)sender
 {
     (void)sender;
-    BOOL header = _mode.selectedSegment == 1;
-    if (!header)
-        [self selectRenderedHDU];
-    [self showHeader:header];
-    if (header)
+    NSInteger mode = _mode.selectedSegment;
+    [self showMode:mode];
+    if (mode == kModeHeader)
         [self.view.window makeFirstResponder:_headerText];
+    else if (mode == kModeTable)
+        [self.view.window makeFirstResponder:_tableView];
 }
 
 - (void)stretchChanged:(id)sender
@@ -660,6 +901,14 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     (void)sender;
     NSInteger stretch = _stretchMenu.indexOfSelectedItem;
     [NSUserDefaults.standardUserDefaults setInteger:stretch forKey:kStretchDefaultsKey];
+    // Only the mapping changes: redo it from the binned values, without
+    // reading the file again.
+    if (!_busy && _rendering && [_rendering restretch:(int)stretch]) {
+        _imageView.image = _rendering.image;
+        [self updateRenderInfo:nil];
+        [self showMode:_mode.selectedSegment];
+        return;
+    }
     [self requestRender];
 }
 
@@ -669,28 +918,25 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     NSNumber *n = _hduMenu.selectedItem.representedObject;
     if (!n)
         return;
-    int hdu = n.intValue, kind = FQ_KIND_NONE;
-    for (FQHDUItem *item in _hdus)
-        if (item.hdu == hdu)
-            kind = item.kind;
-    // Opening the header later shows this HDU's part of the listing.
-    _headerTarget = hdu;
-    _headerTargetRows = kind == FQ_KIND_TABLE;
-    if (kind == FQ_KIND_TABLE) {   // nothing to draw: show its rows
-        _mode.selectedSegment = 1;
-        [self showHeader:YES];
-        [self.view.window makeFirstResponder:_headerText];
+    _selected = n.intValue;
+    FQHDUItem *item = [self selectedItem];
+    if (!item)
+        return;
+    // The header listing then opens at this HDU's cards.
+    _headerTarget = _selected;
+    _headerTargetRows = NO;
+    if (item.kind == FQ_KIND_TABLE) {   // nothing to draw: its rows
+        [self showMode:kModeTable];
+        [self.view.window makeFirstResponder:_tableView];
         return;
     }
-    if (_mode.selectedSegment == 1) {
-        _mode.selectedSegment = 0;
-        [self showHeader:NO];
+    // An image or a plot is drawn, unless a table's rows are on show.
+    if (_selected != _hdu && !(_hdu < 0 && _rendering && _selected == _rendering.info.hdu)) {
+        _hdu = _selected;
+        _plane = -1;
+        [self requestRender];
     }
-    if (hdu == _hdu || (_hdu < 0 && _rendering && hdu == _rendering.info.hdu))
-        return;
-    _hdu = hdu;
-    _plane = -1;
-    [self requestRender];
+    [self showMode:_mode.selectedSegment == kModeTable && item.isTable ? kModeTable : kModePicture];
 }
 
 - (void)planeChanged:(id)sender

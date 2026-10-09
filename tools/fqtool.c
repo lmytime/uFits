@@ -9,9 +9,11 @@
  *   fqtool dump FILE OUT.f32 [options]   binned float32 values (tests)
  *   fqtool plot FILE OUT [options]   plot envelope, low then high, then
  *                                     the dot grid of time series (tests)
+ *   fqtool rows FILE HDU FIRST COUNT  table cells, tab separated (tests)
  *
  * Options: --max N  --samples K  --stretch auto|linear|minmax  --hdu N
  *          --plane P  --mono  --threads T  --repeat R
+ *          --then auto|linear|minmax   restretch after rendering (tests)
  */
 #define _POSIX_C_SOURCE 200809L
 #include "fq.h"
@@ -155,8 +157,16 @@ static void usage(void)
             "       fqtool render FILE OUT.png [--max N] [--samples K] [--stretch auto|linear|minmax]\n"
             "                                 [--hdu N] [--plane P] [--mono] [--threads T] [--repeat R]\n"
             "       fqtool dump FILE OUT.f32 [same options]\n"
-            "       fqtool plot FILE OUT.f32 [same options]\n");
+            "       fqtool plot FILE OUT.f32 [same options]\n"
+            "       fqtool rows FILE HDU FIRST COUNT\n");
 }
+
+static int stretch_named(const char *v)
+{
+    return !strcmp(v, "linear") ? FQ_STRETCH_LINEAR : !strcmp(v, "minmax") ? FQ_STRETCH_MINMAX : FQ_STRETCH_AUTO;
+}
+
+static int then_stretch = -1;   /* --then: restretch after rendering */
 
 static int parse_opts(int argc, char **argv, int start, fq_opts *o, int *repeat)
 {
@@ -185,8 +195,9 @@ static int parse_opts(int argc, char **argv, int start, fq_opts *o, int *repeat)
         else if (!strcmp(a, "--repeat"))
             *repeat = atoi(v);
         else if (!strcmp(a, "--stretch"))
-            o->stretch = !strcmp(v, "linear") ? FQ_STRETCH_LINEAR
-                       : !strcmp(v, "minmax") ? FQ_STRETCH_MINMAX : FQ_STRETCH_AUTO;
+            o->stretch = stretch_named(v);
+        else if (!strcmp(a, "--then"))
+            then_stretch = stretch_named(v);
         else {
             fprintf(stderr, "unknown option %s\n", a);
             return -1;
@@ -257,6 +268,29 @@ int main(int argc, char **argv)
                    : e[i].kind == FQ_KIND_TABLE ? "table"
                                                 : "image",
                    (long long)e[i].nplanes, e[i].extname[0] ? e[i].extname : "-", e[i].desc);
+    } else if (!strcmp(cmd, "rows")) {
+        int hdu = argc > 3 ? atoi(argv[3]) : 1;
+        long long first = argc > 4 ? atoll(argv[4]) : 0, count = argc > 5 ? atoll(argv[5]) : 10;
+        fq_table *t = fq_table_open(f, hdu);
+        if (!t) {
+            fprintf(stderr, "HDU %d is not a table\n", hdu);
+            rc = 1;
+        } else {
+            int nc = fq_table_ncols(t);
+            printf("rows=%lld cols=%d\n", (long long)fq_table_rows(t), nc);
+            for (int c = 0; c < nc; c++)
+                printf("%s%s", c ? "\t" : "", fq_table_column(t, c)->name);
+            printf("\n");
+            for (long long r = first; r < first + count; r++) {
+                char cell[200];
+                for (int c = 0; c < nc; c++) {
+                    fq_table_cell(t, r, c, cell, sizeof cell);
+                    printf("%s%s", c ? "\t" : "", cell);
+                }
+                printf("\n");
+            }
+            fq_table_close(t);
+        }
     } else if (!strcmp(cmd, "table")) {
         int hdu = argc > 3 ? atoi(argv[3]) : 1, rows = argc > 4 ? atoi(argv[4]) : 20;
         char *s = fq_table_text(f, hdu, rows, NULL);
@@ -331,6 +365,7 @@ int main(int argc, char **argv)
         } else {
             double best = 1e30, t_open = now_ms() - t0;
             fq_image *img = NULL;
+            o.keep = then_stretch >= 0;
             for (int r = 0; r < (repeat < 1 ? 1 : repeat); r++) {
                 if (img)
                     fq_image_free(img);
@@ -341,6 +376,12 @@ int main(int argc, char **argv)
                     best = dt;
                 if (!img)
                     break;
+            }
+            if (img && then_stretch >= 0) {
+                double t1 = now_ms();
+                if (fq_restretch(img, then_stretch, o.threads) != 0)
+                    fprintf(stderr, "%s: cannot restretch\n", path);
+                printf("restretch %.2f ms\n", now_ms() - t1);
             }
             if (!img) {
                 fprintf(stderr, "%s: %s\n", path, err);

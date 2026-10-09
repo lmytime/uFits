@@ -48,6 +48,7 @@ typedef struct {
     int mono;          /* 1 = ignore Bayer / RGB colour hints */
     int threads;       /* 0 = all cores, 1 = single threaded */
     int exact;         /* 1 = keep absolute values in fq_decode_float */
+    int keep;          /* 1 = keep the binned values, for fq_restretch */
 } fq_opts;
 
 void fq_opts_default(fq_opts *o);
@@ -75,6 +76,8 @@ typedef struct {
     double median, sigma;     /* channel 0 statistics in data units */
     double black, white;      /* display range of channel 0 */
 } fq_info;
+
+typedef struct fq_kept fq_kept;
 
 typedef struct {
     fq_info info;
@@ -105,6 +108,8 @@ typedef struct {
        of spec_n columns by dot_rows rows, row 0 at y_min, column by column. */
     int dot_rows;
     uint8_t *dots;
+
+    fq_kept *kept;             /* binned values (opts.keep), private */
 } fq_image;
 
 /* Open a FITS file (plain or gzip compressed). Returns NULL on failure and
@@ -118,6 +123,10 @@ void fq_close(fq_file *f);
 
 /* Render the first image (or opts->hdu) for display. */
 fq_image *fq_render(fq_file *f, const fq_opts *opts, char *err, size_t errlen);
+/* Stretch an image rendered with opts.keep again, without reading the
+   file: new pixels (the old ones are freed unless taken: set pixels to
+   NULL to keep them) and display range. 0 on success. */
+int fq_restretch(fq_image *img, int stretch, int threads);
 void fq_image_free(fq_image *img);
 
 /* Binned values before stretching, nch planes of w*h floats, FITS row
@@ -131,6 +140,7 @@ int fq_hdu_count(fq_file *f);
 typedef struct {
     int hdu;
     int kind;                 /* FQ_KIND_IMAGE, FQ_KIND_PLOT or FQ_KIND_TABLE */
+    int table;                /* a table (plotted or not): fq_table_open works */
     int64_t nplanes;          /* planes of a cube */
     char extname[72];
     char desc[96];            /* "4096 x 4096 float32", "PDCSAP_FLUX vs TIME",
@@ -143,6 +153,25 @@ int fq_list_hdus(fq_file *f, fq_hdu_entry *out, int max);
 /* Columns and first rows of a table HDU as text. malloc'd, NULL if the HDU
    is not a table. */
 char *fq_table_text(fq_file *f, int hdu, int maxrows, size_t *len);
+
+/* A table HDU opened for browsing: any cell, formatted on demand. */
+typedef struct fq_table fq_table;
+typedef struct {
+    char name[48];            /* TTYPE, or "col3" */
+    char unit[24];            /* TUNIT */
+    char form[24];            /* TFORM */
+    int numeric;              /* align to the right */
+} fq_column;
+
+/* NULL if HDU hdu is not a table. f must stay open while t is in use. */
+fq_table *fq_table_open(fq_file *f, int hdu);
+void fq_table_close(fq_table *t);
+int64_t fq_table_rows(const fq_table *t);   /* rows in the file (fewer if truncated) */
+int fq_table_ncols(const fq_table *t);
+const fq_column *fq_table_column(const fq_table *t, int col);
+/* Cell text, as in fq_table_text but up to n-1 characters (arrays show
+   their first values, variable-length arrays their length). */
+void fq_table_cell(const fq_table *t, int64_t row, int col, char *out, size_t n);
 /* Header cards of one HDU, one per line. malloc'd, NULL if no such HDU. */
 char *fq_header_text(fq_file *f, int hdu, size_t *len);
 /* One line per HDU describing its contents. malloc'd. */
