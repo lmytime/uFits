@@ -1,0 +1,68 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core:
+    name: Core tests (Linux, sanitizers, fuzz)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy astropy
+      - name: Decode and binning vs astropy
+        run: make test
+      - name: AddressSanitizer + UBSan, damaged files
+        run: |
+          gcc -std=c99 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+              -Icore -o build/fqtool-asan tools/fqtool.c core/fq.c core/fq_codec.c -lz -lm -lpthread
+          python3 tests/test_core.py build/fqtool-asan build/testdata > /dev/null
+          python3 tests/fuzz.py build/fqtool-asan build/testdata 500
+
+  macos:
+    name: macOS app + Quick Look
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make app
+      - name: Bundle contents
+        run: |
+          find build/uFits.app -type f | sort
+          lipo -info build/uFits.app/Contents/MacOS/uFits build/uFits.app/Contents/PlugIns/*.appex/Contents/MacOS/*
+          codesign -d --entitlements - build/uFits.app/Contents/PlugIns/uFitsPreview.appex
+          du -sh build/uFits.app
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy astropy
+      - name: Core tests (Apple clang, GCD)
+        run: make test
+      - name: Install and register the extensions
+        run: |
+          make install
+          pluginkit -m -v -i io.github.lmytime.uFits.Preview
+          pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail
+          mdls -name kMDItemContentType build/testdata/f32.fits || true
+      - name: Quick Look thumbnails
+        run: tests/ql_smoke.sh build/testdata build/ql
+      - name: Quick Look logs
+        if: always()
+        run: log show --last 5m --style compact --predicate 'process CONTAINS "uFits" OR (subsystem CONTAINS "quicklook" AND messageType >= 16)' | tail -80 || true
+      - name: Package
+        if: always()
+        run: make zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uFits
+          path: |
+            build/uFits.zip
+            build/ql/*.png
