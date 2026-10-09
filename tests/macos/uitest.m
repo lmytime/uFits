@@ -90,6 +90,19 @@ static NSString *gridState(NSView *root)
                                       [titles componentsJoinedByString:@","], first];
 }
 
+/// Saves the window as it is now to OUTDIR/ui-<step>.png.
+static void screenshot(NSString *step)
+{
+    NSString *png = [gOut stringByAppendingPathComponent:[NSString stringWithFormat:@"ui-%@.png", step]];
+    NSTask *t = [NSTask
+        launchedTaskWithExecutableURL:[NSURL fileURLWithPath:@"/usr/sbin/screencapture"]
+                            arguments:@[ @"-x", @"-o",
+                                         [NSString stringWithFormat:@"-l%ld", (long)gWindow.windowNumber], png ]
+                                error:nil
+                   terminationHandler:nil];
+    [t waitUntilExit];
+}
+
 static void capture(NSString *step, NSString *expect)
 {
     spin(0.6);
@@ -101,14 +114,7 @@ static void capture(NSString *step, NSString *expect)
     printf("%s %s: %s\n", ok ? "ok  " : "FAIL", step.UTF8String, state.UTF8String);
     if (!ok)
         printf("      expected to see: %s\n", expect.UTF8String);
-    NSString *png = [gOut stringByAppendingPathComponent:[NSString stringWithFormat:@"ui-%@.png", step]];
-    NSTask *t = [NSTask
-        launchedTaskWithExecutableURL:[NSURL fileURLWithPath:@"/usr/sbin/screencapture"]
-                            arguments:@[ @"-x", @"-o",
-                                         [NSString stringWithFormat:@"-l%ld", (long)gWindow.windowNumber], png ]
-                                error:nil
-                   terminationHandler:nil];
-    [t waitUntilExit];
+    screenshot(step);
 }
 
 static void load(FQPreviewController *vc, NSString *path)
@@ -276,8 +282,39 @@ static void timeSwitch(NSString *name, NSInteger mode)
            busy, shown, spinner ? "   (showed Loading…)" : "");
 }
 
-/// Scrolls the table on show a page down (or half a width sideways) at a
-/// time, drawing each step; reports the time per step.
+/// Share of the pixels of rep that stand out from the background (text,
+/// lines): about 0 when nothing is drawn.
+static double inkShare(NSBitmapImageRep *rep)
+{
+    NSInteger dark = 0, light = 0;
+    for (NSInteger y = 0; y < rep.pixelsHigh; y += 3)
+        for (NSInteger x = 0; x < rep.pixelsWide; x += 3) {
+            NSColor *c = [[rep colorAtX:x y:y] colorUsingColorSpace:NSColorSpace.genericRGBColorSpace];
+            CGFloat l = 0.3 * c.redComponent + 0.59 * c.greenComponent + 0.11 * c.blueComponent;
+            if (l < 0.5)
+                dark++;
+            else
+                light++;
+        }
+    return dark + light ? (double)MIN(dark, light) / (double)(dark + light) : 0;
+}
+
+/// Draws all that is visible of the table into a bitmap, as after a jump;
+/// returns the milliseconds and sets *ink.
+static double drawTable(NSTableView *tv, double *ink)
+{
+    NSRect r = tv.visibleRect;
+    NSBitmapImageRep *rep = [tv bitmapImageRepForCachingDisplayInRect:r];
+    CFTimeInterval t0 = CACurrentMediaTime();
+    [tv cacheDisplayInRect:r toBitmapImageRep:rep];
+    double ms = msSince(t0);
+    *ink = inkShare(rep);
+    return ms;
+}
+
+/// Scrolls the table on show a page down (or half a width across) at a
+/// time, drawing each step; reports the time per step, then the time to
+/// draw a whole page, and checks that the page is not blank.
 static void timeScroll(NSString *name, BOOL sideways, int steps)
 {
     NSTableView *tv = findView(gWindow.contentView, NSTableView.class, nil);
@@ -286,28 +323,31 @@ static void timeScroll(NSString *name, BOOL sideways, int steps)
         gFailures++;
         return;
     }
-    NSScrollView *sv = tv.enclosingScrollView;
-    NSClipView *clip = sv.contentView;
     [gWindow displayIfNeeded];
     CFTimeInterval t0 = CACurrentMediaTime();
     for (int i = 0; i < steps; i++) {
-        NSPoint p = clip.bounds.origin;
-        if (sideways)
-            p.x += NSWidth(clip.bounds) / 2;
-        else
-            p.y += NSHeight(clip.bounds);
-        [clip scrollToPoint:p];
-        [sv reflectScrolledClipView:clip];
+        NSRect v = tv.visibleRect;
+        if (sideways) {
+            CGFloat x = MIN(NSMaxX(v) + NSWidth(v) / 2, NSWidth(tv.bounds) - 1);
+            NSInteger c = [tv columnAtPoint:NSMakePoint(x, NSMidY(v))];
+            [tv scrollColumnToVisible:c >= 0 ? c : tv.numberOfColumns - 1];
+        } else {
+            NSRange rows = [tv rowsInRect:v];
+            [tv scrollRowToVisible:MIN((NSInteger)(NSMaxRange(rows) + rows.length / 2), tv.numberOfRows - 1)];
+        }
         [gWindow displayIfNeeded];
     }
-    double ms = msSince(t0) / steps;
-    BOOL ok = ms < 50;
+    double ms = msSince(t0) / steps, ink = 0;
+    double draw = drawTable(tv, &ink);
+    BOOL ok = ms < 50 && draw < 100 && ink > 0.01;
     if (!ok)
         gFailures++;
-    printf("%s time %-31s %7.2f ms per step (%d steps)\n", ok ? "ok  " : "FAIL", name.UTF8String, ms, steps);
+    printf("%s time %-31s %7.2f ms per step (%d steps); a page drawn in %.1f ms, %.1f%% ink\n", ok ? "ok  " : "FAIL",
+           name.UTF8String, ms, steps, draw, ink * 100);
 }
 
-/// Jumps the table on show to row, drawing it; reports the time.
+/// Jumps the table on show to row, drawing it; reports the time and checks
+/// that the rows there are drawn.
 static void timeJump(NSString *name, NSInteger row)
 {
     NSTableView *tv = findView(gWindow.contentView, NSTableView.class, nil);
@@ -316,7 +356,14 @@ static void timeJump(NSString *name, NSInteger row)
     CFTimeInterval t0 = CACurrentMediaTime();
     [tv scrollRowToVisible:row];
     [gWindow displayIfNeeded];
-    printf("ok   time %-31s %7.1f ms\n", name.UTF8String, msSince(t0));
+    double ms = msSince(t0), ink = 0;
+    double draw = drawTable(tv, &ink);
+    NSRange rows = [tv rowsInRect:tv.visibleRect];
+    BOOL ok = NSLocationInRange((NSUInteger)row, rows) && ink > 0.01;
+    if (!ok)
+        gFailures++;
+    printf("%s time %-31s %7.1f ms; rows %lu-%lu drawn in %.1f ms, %.1f%% ink\n", ok ? "ok  " : "FAIL",
+           name.UTF8String, ms, (unsigned long)rows.location + 1, (unsigned long)NSMaxRange(rows), draw, ink * 100);
 }
 
 /// Opens path and reports how long until it is on screen.
@@ -440,7 +487,8 @@ int main(int argc, const char *argv[])
             timeSwitch(@"catalog: Plot -> Table", 1);
             timeScroll(@"catalog: scroll down", NO, 200);
             timeJump(@"catalog: jump to row 900000", 900000);
-            timeScroll(@"catalog: scroll right", YES, 4);
+            capture(@"big-catalog-900000", @"grid=1000000 rows");
+            timeScroll(@"catalog: scroll right", YES, 2);
             timeSwitch(@"catalog: Table -> Header", 2);
             timeSwitch(@"catalog: Header -> Plot", 0);
             timeSwitch(@"catalog: Plot -> Table again", 1);
@@ -451,6 +499,33 @@ int main(int argc, const char *argv[])
             timeScroll(@"wide table: scroll right", YES, 40);
             timeScroll(@"wide table: scroll down", NO, 50);
             capture(@"wide-table", nil);
+            // A gzipped catalog has to be inflated to be read: "Loading…" shows
+            // while it is, and the window answers all the while.
+            NSString *gz = [data stringByAppendingPathComponent:@"big_catalog.fits.gz"];
+            if ([NSFileManager.defaultManager fileExistsAtPath:gz]) {
+                __block BOOL done = NO;
+                CFTimeInterval t0 = CACurrentMediaTime();
+                [vc loadFile:gz
+                    completion:^{
+                        done = YES;
+                    }];
+                BOOL spinner = NO;
+                while (!done && msSince(t0) < 30000) {
+                    spin(0.02);
+                    if (!spinner && findView(gWindow.contentView, NSProgressIndicator.class, nil)) {
+                        spinner = YES;
+                        [gWindow displayIfNeeded];
+                        screenshot(@"loading");
+                    }
+                }
+                printf("%s time %-31s %7.1f ms%s\n", done && spinner ? "ok  " : "FAIL", "open gzipped catalog",
+                       msSince(t0), spinner ? "   (showed Loading…)" : "   (no Loading…)");
+                if (!(done && spinner))
+                    gFailures++;
+                timeSwitch(@"gz catalog: Plot -> Table", 1);
+                timeSwitch(@"gz catalog: Table -> Header", 2);
+                timeSwitch(@"gz catalog: Header -> Plot", 0);
+            }
             timeLoad(vc, @"open 200-HDU file", [data stringByAppendingPathComponent:@"many_hdus.fits"]);
             timeSwitch(@"200 HDUs: Image -> Header", 2);
             timeSwitch(@"200 HDUs: Header -> Image", 0);
