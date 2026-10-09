@@ -328,11 +328,10 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     else
         _message.stringValue = error.length ? error : @"";
 
+    // Fit 1000 x 720 points; small images grow at most 2x, or to 480 points.
     CGSize px = r ? r.pixelSize : CGSizeMake(800, 600);
     CGFloat w = MAX(px.width, 1), h = MAX(px.height, 1);
-    CGFloat s = MIN(1000 / w, 720 / h);
-    if (MAX(w, h) * s < 480)
-        s = 480 / MAX(w, h);
+    CGFloat s = MIN(MIN(1000 / w, 720 / h), MAX(2.0, 480 / MAX(w, h)));
     _fitting = NSMakeSize(MAX(round(w * s), 360), round(h * s) + kBarHeight);
     self.preferredContentSize = _fitting;
 

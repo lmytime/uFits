@@ -16,8 +16,8 @@ uFits is built to be small and fast:
   (Grand Central Dispatch).
 
 On an Apple Silicon CI runner, a Finder-style thumbnail request (through
-`QLThumbnailGenerator`, including the round trip to the extension) takes 11–16 ms per
-file once the extension is running, 150 ms for the very first one.
+`QLThumbnailGenerator`, including the round trip to the extension) takes 10–25 ms per
+file once the extension is running, and about 0.2 s for the very first one.
 
 Time spent in the core alone, measured on a 4-core Linux VM:
 

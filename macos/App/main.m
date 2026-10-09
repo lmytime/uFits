@@ -116,7 +116,14 @@ static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
     [_viewers addObject:w];
     [vc loadFile:url.path
         completion:^{
-            [w setContentSize:vc.fittingContentSize];
+            // Keep the window on screen, shrinking it with its aspect ratio.
+            NSSize size = vc.fittingContentSize;
+            NSRect vis = (w.screen ?: NSScreen.mainScreen).visibleFrame;
+            NSRect frame = [w frameRectForContentRect:NSMakeRect(0, 0, size.width, size.height)];
+            CGFloat chrome = NSHeight(frame) - size.height;
+            CGFloat k = MIN(1.0, MIN(NSWidth(vis) * 0.92 / size.width,
+                                     (NSHeight(vis) * 0.92 - chrome) / size.height));
+            [w setContentSize:NSMakeSize(floor(size.width * k), floor(size.height * k))];
             if (NSEqualPoints(self->_cascade, NSZeroPoint)) {
                 [w center];
                 self->_cascade = NSMakePoint(NSMinX(w.frame), NSMaxY(w.frame));
