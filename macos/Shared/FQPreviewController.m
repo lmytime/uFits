@@ -686,12 +686,15 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     NSInteger i = [_hduMenu indexOfItemWithRepresentedObject:@(_selected)];
     if (i >= 0)
         [_hduMenu selectItemAtIndex:i];
-    if (mode == kModeTable) {
+    // Without a picture, the header describes the table open, if any: the
+    // render's message is about the picture.
+    BOOL noPicture = mode == kModeHeader && !_rendering;
+    if (mode == kModeTable || (noPicture && _table)) {
         _info.stringValue = [self tableSummary];
         _info.toolTip = nil;
     } else {
-        _info.stringValue = _renderInfo ?: @"";
-        _info.toolTip = _renderTip;
+        _info.stringValue = noPicture ? @"" : _renderInfo ?: @"";
+        _info.toolTip = noPicture ? nil : _renderTip;
     }
     [self layoutBar];
 }

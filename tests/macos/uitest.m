@@ -289,7 +289,8 @@ int main(int argc, const char *argv[])
         expectListing(@"tables-header-cards", @"XTENSION = 'TABLE' / ASCII table extension");
         expectColumns(@"tables-header-columns", @"XTENSION = 'TABLE'", @"TFORM2   = 'F10.5'",
                       @"ASCII table extension");
-        capture(@"tables-header", @"mode=2");
+        capture(@"tables-header", @"\"HDU 2 ASCII  ·  4 rows × 3 columns\"  menu=\"HDU 2  ASCII — 4 rows × 3 "
+                                  @"columns\" (2 items)  \"HDU 2  ASCII — 4 rows × 3 columns\"  mode=2");
         NSEvent *cmdF = [NSEvent keyEventWithType:NSEventTypeKeyDown
                                          location:NSZeroPoint
                                     modifierFlags:NSEventModifierFlagCommand
