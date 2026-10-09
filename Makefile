@@ -31,10 +31,10 @@ DEST       ?= /Applications
 NOTARY_PROFILE ?= uFits
 B          ?= build
 
-# Apple's clang from the selected Xcode or Command Line Tools, whatever is
-# first on PATH: a clang from Homebrew, MacPorts or conda cannot build
-# against the macOS SDK ("could not build module 'Cocoa'").
-CC      := $(shell xcrun -f clang 2>/dev/null || echo clang)
+# Apple's clang and SDK from the selected Xcode or Command Line Tools,
+# whatever is first on PATH: a clang from Homebrew, MacPorts or conda
+# cannot build against the macOS SDK ("could not build module 'Cocoa'").
+CC      := xcrun clang
 HOSTCC  ?= cc
 ARCHF   := $(foreach a,$(ARCHS),-arch $(a))
 WARN    := -Wall -Wextra -Wno-unused-parameter
