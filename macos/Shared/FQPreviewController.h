@@ -1,6 +1,6 @@
-// FQPreviewController.h - the preview UI: an image or a plot, an info bar
-// with HDU, cube plane and stretch controls, and a header viewer that also
-// lists table rows. Used by the Quick Look preview extension and by the
+// FQPreviewController.h - the preview UI: an image or a plot, a table's
+// rows, or the headers, with an info bar holding the HDU, cube plane and
+// stretch controls. Used by the Quick Look preview extension and by the
 // app's viewer windows.
 
 #import <Cocoa/Cocoa.h>
