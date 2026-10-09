@@ -630,7 +630,11 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     _headerTarget = -1;
     if (r.location == NSNotFound)
         return;
+    // Lay out (and size the view for) the text down to a screenful past the
+    // target first, or the scroll stops short where layout has got to.
     NSLayoutManager *lm = _headerText.layoutManager;
+    [lm ensureLayoutForCharacterRange:NSMakeRange(0, MIN(text.length, NSMaxRange(r) + 20000))];
+    [_headerText sizeToFit];
     NSRange glyphs = [lm glyphRangeForCharacterRange:r actualCharacterRange:NULL];
     NSRect box = [lm boundingRectForGlyphRange:glyphs inTextContainer:_headerText.textContainer];
     CGFloat y = NSMinY(box) + _headerText.textContainerOrigin.y - 6;

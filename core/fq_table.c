@@ -712,7 +712,8 @@ char *fq_table_text(fq_file *f, int idx, int maxrows, size_t *len)
             if (w > width[c])
                 width[c] = w;
         }
-    sb_printf(&b, "%lld rows x %d columns", (long long)nrows, nc);
+    sb_printf(&b, "%lld row%s x %d column%s", (long long)nrows, nrows == 1 ? "" : "s", nc,
+              nc == 1 ? "" : "s");
     if (show < nrows)
         sb_printf(&b, ", first %lld rows", (long long)show);
     if (shown < nc)

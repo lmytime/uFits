@@ -187,7 +187,7 @@ int main(int argc, const char *argv[])
         // going back to the plot puts the menu back on the plotted HDU.
         pickHDU(root, 1);
         capture(@"sdss-specobj", @"mode=1");
-        expectListing(@"sdss-specobj", @"——— HDU 2 table ———");
+        expectListing(@"sdss-specobj", @"GALAXY");   // its one row, the end of the listing
         NSSegmentedControl *mode = findView(root, NSSegmentedControl.class, nil);
         if (mode) {
             mode.selectedSegment = 0;
