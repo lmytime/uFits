@@ -1866,9 +1866,9 @@ void fq_image_free(fq_image *img)
     free(img->pixels);
     free(img->spec_lo);
     free(img->spec_hi);
+    free(img->dots);
     free(img);
 }
-
 
 int fq_list_hdus(fq_file *f, fq_hdu_entry *out, int max)
 {

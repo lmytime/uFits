@@ -7,7 +7,8 @@
  *   fqtool table FILE HDU [ROWS]     columns and first rows of a table
  *   fqtool render FILE OUT.png [options]
  *   fqtool dump FILE OUT.f32 [options]   binned float32 values (tests)
- *   fqtool plot FILE OUT.f32 [options]   plot envelope, low then high (tests)
+ *   fqtool plot FILE OUT [options]   plot envelope, low then high, then
+ *                                     the dot grid of time series (tests)
  *
  * Options: --max N  --samples K  --stretch auto|linear|minmax  --hdu N
  *          --plane P  --mono  --threads T  --repeat R
@@ -92,6 +93,22 @@ static int write_spectrum_png(const char *path, const fq_image *img)
     if (img->y_flip) {   /* magnitudes: small values on top */
         lo = img->y_max;
         hi = img->y_min;
+    }
+    if (img->dots) {   /* time series: the dot grid */
+        for (int c = 0; c < img->spec_n; c++)
+            for (int r = 0; r < img->dot_rows; r++) {
+                if (!img->dots[(size_t)c * img->dot_rows + r])
+                    continue;
+                int x = (int)((int64_t)c * (w - 2) / img->spec_n);
+                int y = (int)((int64_t)r * (h - 2) / img->dot_rows);
+                if (!img->y_flip)
+                    y = h - 2 - y;
+                for (int dy = 0; dy < 2; dy++)
+                    memset(px + (size_t)(y + dy) * w + x, 0, 2);
+            }
+        int rc = write_png(path, px, w, h, 1, (size_t)w);
+        free(px);
+        return rc;
     }
     int prev = -1;
     for (int x = 0; x < w; x++) {
@@ -190,10 +207,11 @@ static void print_info(const fq_info *in)
 static void print_plot(const fq_image *img)
 {
     printf("n=%d\npoints=%lld\ny_min=%.17g\ny_max=%.17g\nhas_x=%d\nx_first=%.17g\nx_last=%.17g\n"
-           "x_log=%d\ny_flip=%d\ndots=%d\nx_label=%s\ny_label=%s\nx_unit=%s\ny_unit=%s\n",
+           "x_log=%d\ny_flip=%d\ndots=%d\ndot_rows=%d\nx_label=%s\ny_label=%s\nx_unit=%s\n"
+           "y_unit=%s\n",
            img->spec_n, (long long)img->spec_points, img->y_min, img->y_max, img->has_x,
-           img->x_first, img->x_last, img->x_log, img->y_flip, img->points, img->x_label,
-           img->y_label, img->x_unit, img->y_unit);
+           img->x_first, img->x_last, img->x_log, img->y_flip, img->points, img->dot_rows,
+           img->x_label, img->y_label, img->x_unit, img->y_unit);
 }
 
 int main(int argc, char **argv)
@@ -277,6 +295,8 @@ int main(int argc, char **argv)
                 if (fp) {
                     fwrite(img->spec_lo, sizeof(float), (size_t)img->spec_n, fp);
                     fwrite(img->spec_hi, sizeof(float), (size_t)img->spec_n, fp);
+                    if (img->dots)
+                        fwrite(img->dots, 1, (size_t)img->spec_n * (size_t)img->dot_rows, fp);
                     fclose(fp);
                 }
                 print_info(&img->info);

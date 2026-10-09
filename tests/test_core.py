@@ -51,9 +51,11 @@ def run_plot(path, *opts):
         lines = r.stdout.split("\n")
         info = dict(kv.split("=", 1) for kv in lines[0].split() if "=" in kv)
         info.update(l.split("=", 1) for l in lines[1:] if "=" in l)
-        v = np.fromfile(out, dtype=np.float32)
-        n = int(info["n"])
-        return (v[:n], v[n:], info), None
+        raw = open(out, "rb").read()
+        n, rows = int(info["n"]), int(info["dot_rows"])
+        v = np.frombuffer(raw[:8 * n], dtype=np.float32)
+        dots = np.frombuffer(raw[8 * n:], dtype=np.uint8).reshape(n, rows) if rows else None
+        return (v[:n], v[n:], dots, info), None
     finally:
         os.unlink(out)
 
@@ -119,7 +121,7 @@ def check_plot(fn, path, h, idx, spec):
     if res is None:
         failures.append(f"{fn}: plot failed: {err}")
         return
-    lo, hi, info = res
+    lo, hi, dots, info = res
     if int(info["hdu"]) != idx or info["table"] != "1":
         failures.append(f"{fn}: core plotted HDU {info['hdu']} (table={info['table']}), expected table {idx}")
         return
@@ -160,6 +162,19 @@ def check_plot(fn, path, h, idx, spec):
         return
     compare(f"{fn} plot low", lo, elo, 0)
     compare(f"{fn} plot high", hi, ehi, 0)
+    if spec["dots"]:
+        rows = int(info["dot_rows"])
+        ymin, ymax = float(info["y_min"]), float(info["y_max"])
+        r = (y - ymin) * (rows / (ymax - ymin))
+        on = (r >= 0) & (r < rows)
+        grid = np.zeros((ncol, rows), np.uint8)
+        grid[c[on], r[on].astype(np.int64)] = 1
+        if dots is None or dots.shape != grid.shape or not np.array_equal(dots, grid):
+            failures.append(f"{fn} plot dots differ ({0 if dots is None else int(dots.sum())} vs {int(grid.sum())})")
+        else:
+            print(f"  ok  {fn} plot dots ({int(grid.sum())} cells)")
+    elif dots is not None:
+        failures.append(f"{fn} plot: dots for a line plot")
 
 
 def check_listings():

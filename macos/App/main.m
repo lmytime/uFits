@@ -133,7 +133,9 @@ static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
             CGFloat chrome = NSHeight(frame) - size.height;
             CGFloat k = MIN(1.0, MIN(NSWidth(vis) * 0.92 / size.width,
                                      (NSHeight(vis) * 0.92 - chrome) / size.height));
-            [w setContentSize:NSMakeSize(floor(size.width * k), floor(size.height * k))];
+            NSSize fit = NSMakeSize(floor(size.width * k), floor(size.height * k));
+            vc.preferredContentSize = fit;   // the window follows this size
+            [w setContentSize:fit];
             if (NSEqualPoints(self->_cascade, NSZeroPoint)) {
                 [w center];
                 self->_cascade = NSMakePoint(NSMinX(w.frame), NSMaxY(w.frame));

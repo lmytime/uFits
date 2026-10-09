@@ -93,6 +93,10 @@ typedef struct {
     char x_label[32], y_label[32]; /* axis names: table columns or CTYPE1 */
     int y_flip;                /* magnitudes: smaller values belong on top */
     int points;                /* a time series: draw points, not a line */
+    /* For points: which cells of a grid of spec_n columns by dot_rows rows
+       (row 0 at y_min, column after column) hold at least one point. */
+    int dot_rows;
+    uint8_t *dots;
 } fq_image;
 
 /* Open a FITS file (plain or gzip compressed). Returns NULL on failure and

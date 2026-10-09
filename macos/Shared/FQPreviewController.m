@@ -217,6 +217,7 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
     BOOL _busy, _again;   // a render is running; another one is wanted after it
     NSInteger _generation;
     NSSize _fitting;
+    CGFloat _hduWidth;    // natural width of the HDU menu
 }
 
 - (instancetype)initWithNibName:(NSNibName)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
@@ -449,25 +450,31 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
         _message.stringValue = error.length ? error : @"";
 
     if (first) {
-        // Fit 1000 x 720 points; small images grow at most 2x, or to 480 points.
-        CGSize px = r ? r.pixelSize : CGSizeMake(800, 600);
-        CGFloat w = MAX(px.width, 1), h = MAX(px.height, 1);
-        CGFloat s = MIN(MIN(1000 / w, 720 / h), MAX(2.0, 480 / MAX(w, h)));
-        _fitting = NSMakeSize(MAX(round(w * s), 360), round(h * s) + kBarHeight);
-        self.preferredContentSize = _fitting;
-
         [_hduMenu removeAllItems];
         for (FQHDUItem *item in _hdus) {
             [_hduMenu addItemWithTitle:item.title];
             _hduMenu.lastItem.representedObject = @(item.hdu);
         }
         [_hduMenu sizeToFit];
-        NSRect f = _hduMenu.frame;
-        f.size.width = MIN(f.size.width, 260);
-        _hduMenu.frame = f;
+        _hduWidth = MIN(NSWidth(_hduMenu.frame), 260);
 
         // Files without a picture (tables, unsupported data) open on the header.
         _mode.selectedSegment = kind == FQ_KIND_NONE ? 1 : 0;
+
+        // Fit 1000 x 720 points; small images grow at most 2x, or to 480
+        // points. Wide enough for the bar's controls and some info text.
+        CGSize px = r ? r.pixelSize : CGSizeMake(800, 600);
+        CGFloat w = MAX(px.width, 1), h = MAX(px.height, 1);
+        CGFloat s = MIN(MIN(1000 / w, 720 / h), MAX(2.0, 480 / MAX(w, h)));
+        CGFloat bar = 20 + NSWidth(_mode.frame) + 8 + 150;
+        NSArray<NSView *> *controls = [self barControls];
+        BOOL wanted[3];
+        [self wantedControls:wanted];
+        for (NSUInteger i = 0; i < 3; i++)
+            if (wanted[i])
+                bar += (i == 0 ? _hduWidth : NSWidth(controls[i].frame)) + 8;
+        _fitting = NSMakeSize(MAX(MAX(round(w * s), 360), bar), round(h * s) + kBarHeight);
+        self.preferredContentSize = _fitting;
     }
     if (r) {
         NSInteger i = [_hduMenu indexOfItemWithRepresentedObject:@(r.info.hdu)];
@@ -507,23 +514,54 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
         [NSString stringWithFormat:@"%lld / %lld", llround(_planeSlider.doubleValue) + 1, n];
 }
 
+/// The bar's controls besides the Image/Header switch, most important
+/// first: HDU menu, plane slider, stretch menu.
+- (NSArray<NSView *> *)barControls
+{
+    return @[ _hduMenu, _planeBox, _stretchMenu ];
+}
+
+/// Which of -barControls the file and the mode call for.
+- (void)wantedControls:(BOOL *)wanted
+{
+    BOOL header = _mode.selectedSegment == 1;
+    wanted[0] = _hdus.count > 1;
+    wanted[1] = !header && [self showsPlaneSlider];
+    wanted[2] = !header && _rendering && _rendering.kind == FQ_KIND_IMAGE;
+}
+
+/// Right to left: the switch, then the stretch menu, plane slider and HDU
+/// menu; the info text takes what is left. When the bar is too narrow,
+/// the HDU menu shrinks (down to 120 points) and the least important
+/// controls are hidden, keeping at least 80 points of info text.
 - (void)layoutBar
 {
     NSRect b = self.view.bounds;
-    BOOL header = _mode.selectedSegment == 1;
-    BOOL image = _rendering && _rendering.kind == FQ_KIND_IMAGE;
-    NSArray<NSView *> *views = @[ _mode, _stretchMenu, _planeBox, _hduMenu ];
-    BOOL wanted[4] = { YES, !header && image, !header && [self showsPlaneSlider], _hdus.count > 1 };
-    // Right to left; whatever does not fit next to 120 points of info text
-    // is hidden.
+    NSArray<NSView *> *controls = [self barControls];
+    BOOL wanted[3], shown[3];
+    [self wantedControls:wanted];
+    CGFloat minHDU = MIN(_hduWidth, 120);
+    CGFloat room = NSWidth(b) - 20 - NSWidth(_mode.frame) - 8 - 80, used = 0;
+    for (NSUInteger i = 0; i < 3; i++) {
+        CGFloat w = i == 0 ? minHDU : NSWidth(controls[i].frame);
+        shown[i] = wanted[i] && used + w + 8 <= room;
+        if (shown[i])
+            used += w + 8;
+    }
+    CGFloat hduWidth = MIN(_hduWidth, minHDU + MAX(0, room - used));
+
     CGFloat x = NSMaxX(b) - 10;
-    for (NSUInteger i = 0; i < views.count; i++) {
-        NSView *v = views[i];
-        NSSize sz = v.frame.size;
-        BOOL fits = x - sz.width >= (i == 0 ? 10 : 130);
-        v.hidden = !(wanted[i] && fits);
-        if (v.hidden)
+    NSSize ms = _mode.frame.size;
+    _mode.frame = NSMakeRect(x - ms.width, floor((kBarHeight - ms.height) / 2), ms.width, ms.height);
+    x -= ms.width + 8;
+    for (NSInteger i = 2; i >= 0; i--) {
+        NSView *v = controls[(NSUInteger)i];
+        v.hidden = !shown[i];
+        if (!shown[i])
             continue;
+        NSSize sz = v.frame.size;
+        if (i == 0)
+            sz.width = hduWidth;
         v.frame = NSMakeRect(x - sz.width, floor((kBarHeight - sz.height) / 2), sz.width, sz.height);
         x -= sz.width + 8;
     }

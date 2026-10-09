@@ -340,9 +340,11 @@ int fqi_table_plot(fq_file *f, int idx, const fq_opts *o, fq_image *img, char *e
 
     /* Pass 2: min/max of y in evenly spaced x columns. */
     int ncol = o->max_width > 0 ? o->max_width : 1024;
+    if (ps.points && ncol > 1600)   /* dots: finer than any screen needs */
+        ncol = 1600;
     if (ncol > nvalid)
         ncol = (int)nvalid;
-    if (!(xmax > xmin))
+    if (!(xmax > xmin) || !isfinite(xmax - xmin))
         ncol = 1;
     img->spec_lo = malloc((size_t)ncol * sizeof(float));
     img->spec_hi = malloc((size_t)ncol * sizeof(float));
@@ -353,6 +355,24 @@ int fqi_table_plot(fq_file *f, int idx, const fq_opts *o, fq_image *img, char *e
     }
     for (int c = 0; c < ncol; c++)
         img->spec_lo[c] = img->spec_hi[c] = NAN;
+    fqi_plot_range(samp, ns, &img->y_min, &img->y_max);
+    free(samp);
+
+    /* Time series are drawn as dots: mark the cells of a grid that hold a
+       point, so sparse and dense stretches both look right. */
+    int nrow = 0;
+    if (ps.points) {
+        nrow = ncol * 3 / 4;
+        nrow = nrow < 16 ? 16 : nrow > 1024 ? 1024 : nrow;
+        img->dots = calloc((size_t)ncol * (size_t)nrow, 1);
+        if (!img->dots) {
+            fqi_seterr(err, errlen, "out of memory");
+            return -1;
+        }
+        img->dot_rows = nrow;
+    }
+    const double rowper = nrow / (img->y_max - img->y_min);
+
     const double span = xmax - xmin, per = ncol > 1 ? ncol / span : 0;
     for (int64_t k = 0; k < total; k += step) {
         const uint8_t *row = base + (k / rep) * rowlen;
@@ -371,9 +391,12 @@ int fqi_table_plot(fq_file *f, int idx, const fq_opts *o, fq_image *img, char *e
             img->spec_lo[c] = v;
         if (!(v <= img->spec_hi[c]))
             img->spec_hi[c] = v;
+        if (nrow) {
+            double r = (y - img->y_min) * rowper;   /* off the plot: no dot */
+            if (r >= 0 && r < nrow)
+                img->dots[(size_t)c * (size_t)nrow + (size_t)r] = 1;
+        }
     }
-    fqi_plot_range(samp, ns, &img->y_min, &img->y_max);
-    free(samp);
 
     img->spec_n = ncol;
     img->spec_points = nvalid;
@@ -382,7 +405,7 @@ int fqi_table_plot(fq_file *f, int idx, const fq_opts *o, fq_image *img, char *e
         img->x_first = xmin + 0.5 * span / ncol;
         img->x_last = xmax - 0.5 * span / ncol;
     } else {
-        img->x_first = img->x_last = 0.5 * (xmin + xmax);
+        img->x_first = img->x_last = 0.5 * xmin + 0.5 * xmax;
     }
     img->y_flip = ps.yflip;
     img->points = ps.points;

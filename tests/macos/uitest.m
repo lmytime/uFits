@@ -92,6 +92,8 @@ static void load(FQPreviewController *vc, NSString *path)
         }];
     for (int i = 0; i < 200 && !done; i++)
         spin(0.05);
+    // The window follows the controller's preferred size; use a fixed one.
+    vc.preferredContentSize = NSMakeSize(900, 640);
     [gWindow setContentSize:NSMakeSize(900, 640)];
     gWindow.title = path.lastPathComponent;
 }

@@ -251,6 +251,47 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
 
 @end
 
+/// Dots of a time series from the core's grid: round where there are few,
+/// square (much faster to fill) where there are very many.
+static void FQDrawDots(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat size)
+{
+    const int n = img->spec_n, rows = img->dot_rows;
+    const size_t cells = (size_t)n * (size_t)rows;
+    size_t count = 0;
+    for (size_t i = 0; i < cells; i++)
+        count += img->dots[i];
+    const BOOL ellipses = count <= 20000;
+    CGMutablePathRef path = CGPathCreateMutable();
+    CGRect batch[256];
+    int nb = 0;
+    for (int c = 0; c < n; c++) {
+        const uint8_t *col = img->dots + (size_t)c * (size_t)rows;
+        CGFloat x = rect.origin.x +
+                    (n > 1 ? (CGFloat)c * rect.size.width / (CGFloat)(n - 1) : rect.size.width / 2);
+        for (int r = 0; r < rows; r++) {
+            if (!col[r])
+                continue;
+            CGFloat k = ((CGFloat)r + 0.5) / (CGFloat)rows * rect.size.height;
+            CGFloat y = img->y_flip ? CGRectGetMaxY(rect) - k : CGRectGetMinY(rect) + k;
+            CGRect dot = CGRectMake(x - size / 2, y - size / 2, size, size);
+            if (ellipses) {
+                CGPathAddEllipseInRect(path, NULL, dot);
+            } else {
+                batch[nb++] = dot;
+                if (nb == 256) {
+                    CGContextFillRects(ctx, batch, (size_t)nb);
+                    nb = 0;
+                }
+            }
+        }
+    }
+    if (nb)
+        CGContextFillRects(ctx, batch, (size_t)nb);
+    CGContextAddPath(ctx, path);
+    CGContextFillPath(ctx);
+    CGPathRelease(path);
+}
+
 void FQDrawSpectrum(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat lineWidth,
                     CGColorRef color)
 {
@@ -261,10 +302,16 @@ void FQDrawSpectrum(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat 
         return;
     CGContextSaveGState(ctx);
     CGContextClipToRect(ctx, rect);
+    if (img->dots && img->dot_rows > 0) {
+        CGContextSetFillColorWithColor(ctx, color);
+        FQDrawDots(ctx, rect, img, MAX(lineWidth * 2, 1.0));
+        CGContextRestoreGState(ctx);
+        return;
+    }
     CGMutablePathRef path = CGPathCreateMutable();
     const double sy = rect.size.height / (hi - lo);
     const CGFloat ymin = CGRectGetMinY(rect) - 4, ymax = CGRectGetMaxY(rect) + 4;
-    const BOOL flip = img->y_flip != 0, dots = img->points != 0;
+    const BOOL flip = img->y_flip != 0;
     // Short runs of empty columns come from uneven sampling and are bridged;
     // longer ones are gaps in the data.
     const int maxgap = MAX(2, n / 50);
@@ -285,11 +332,6 @@ void FQDrawSpectrum(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat 
         y1 = flip ? CGRectGetMaxY(rect) - y1 : CGRectGetMinY(rect) + y1;
         y0 = y0 < ymin ? ymin : (y0 > ymax ? ymax : y0);
         y1 = y1 < ymin ? ymin : (y1 > ymax ? ymax : y1);
-        if (dots) {   // a time series: a dot, or a bar where a column holds many
-            CGPathMoveToPoint(path, NULL, x, y0);
-            CGPathAddLineToPoint(path, NULL, x, y1 != y0 ? y1 : y0 + 0.01);
-            continue;
-        }
         if (c & 1) {   // alternate direction so dense data fills as a band
             CGFloat t = y0;
             y0 = y1;
@@ -305,7 +347,7 @@ void FQDrawSpectrum(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat 
     }
     CGContextAddPath(ctx, path);
     CGContextSetStrokeColorWithColor(ctx, color);
-    CGContextSetLineWidth(ctx, dots ? lineWidth * 2 : lineWidth);
+    CGContextSetLineWidth(ctx, lineWidth);
     CGContextSetLineJoin(ctx, kCGLineJoinRound);
     CGContextSetLineCap(ctx, kCGLineCapRound);
     CGContextStrokePath(ctx);
