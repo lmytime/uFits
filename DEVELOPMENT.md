@@ -95,7 +95,7 @@ make install          # builds build/uFits.app, copies it to /Applications, regi
 make                   # build/uFits.app only
 make ARCHS=arm64       # native-only build (default is universal)
 make GZIP=1 install    # also preview .gz files (claims every gzip file, see below)
-make dmg               # build/uFits-0.0.1.dmg: the app and a link to Applications
+make dmg               # build/uFits-0.0.2.dmg: the app and a link to Applications
 make SIGN="Developer ID Application: Your Name (TEAMID)" zip   # hardened runtime, ready to notarize
 make SIGN="Developer ID Application: Your Name (TEAMID)" notarize   # notarize and staple (see below)
 make uninstall

@@ -12,18 +12,16 @@ curl -fsSL https://github.com/lmytime/uFits/releases/latest/download/install.sh 
 That's all: select a FITS file in Finder and press Space. Works on macOS 11 or later,
 Apple silicon and Intel.
 
-While the repository is private, install with the [GitHub CLI](https://cli.github.com)
-after `gh auth login`:
-
-```sh
-gh release download -R lmytime/uFits -p install.sh -O - | sh
-```
-
 To uninstall:
 
 ```sh
 curl -fsSL https://github.com/lmytime/uFits/releases/latest/download/install.sh | sh -s -- --uninstall
 ```
+
+Prefer to install by hand? Download `uFits-<version>.dmg` from
+[Releases](https://github.com/lmytime/uFits/releases), drag uFits onto Applications,
+run `xattr -dr com.apple.quarantine /Applications/uFits.app` (the app is not notarized
+by Apple), then open uFits once.
 
 ## What you see
 

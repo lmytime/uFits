@@ -17,9 +17,8 @@
 #   UFITS_DEST=folder     install into this folder
 #   UFITS_DMG=file.dmg    install from this disk image, without downloading
 #
-# Private repository: release files need a GitHub login, which the GitHub CLI
-# provides (gh auth login); then
-#   gh release download -R lmytime/uFits -p install.sh -O - | sh
+# When curl cannot download, the GitHub CLI is tried (a private copy of the
+# repository needs it, signed in with gh auth login).
 set -eu
 
 REPO=lmytime/uFits
@@ -66,7 +65,7 @@ cleanup() {
     [ -z "$TMP" ] || rm -rf "$TMP"
 }
 
-private_hint="(for a private repository, install the GitHub CLI and run: gh auth login)"
+hint="(is the Mac online?)"
 
 # The release tag to install: VERSION, or the latest release when it is
 # @VERSION@ (a copy of this script from the repository) or "latest".
@@ -87,7 +86,7 @@ release_tag() {
     esac
     case $tag in
     v[0-9]*) echo "$tag" ;;
-    *) fail "could not find the latest release of $REPO $private_hint" ;;
+    *) fail "could not find the latest release of $REPO $hint" ;;
     esac
 }
 
@@ -99,7 +98,7 @@ fetch() {
     command -v gh >/dev/null 2>&1 &&
         gh release download "$1" -R "$REPO" -p "$2" -D "$TMP" --clobber </dev/null >/dev/null 2>&1 &&
         return 0
-    fail "could not download $url $private_hint"
+    fail "could not download $url $hint"
 }
 
 uninstall_ufits() {

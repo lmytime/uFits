@@ -10,13 +10,6 @@ curl -fsSL https://github.com/lmytime/uFits/releases/download/@TAG@/install.sh |
 
 It downloads the disk image below, checks its SHA-256, copies uFits to Applications and
 turns on its Quick Look extensions. Then select a FITS file in Finder and press Space.
-If the repository is private, fetch the installer with the GitHub CLI instead (after
-`gh auth login`):
-
-```sh
-gh release download @TAG@ -R lmytime/uFits -p install.sh -O - | sh
-```
-
 To remove uFits, run the same command with `sh -s -- --uninstall` at the end.
 
 **Or by hand:** open the disk image and drag uFits onto Applications. The app is not

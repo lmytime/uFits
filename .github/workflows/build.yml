@@ -101,9 +101,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           make install
-          # The one-command installer over that: the latest release, downloaded
-          # (through the GitHub CLI while the repository is private), then the
-          # disk image built above, which the tests below use.
+          # The one-command installer over that: the latest release, downloaded,
+          # then the disk image built above, which the tests below use.
           sh install.sh
           UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh
           pluginkit -m -v -i io.github.lmytime.uFits.Preview
