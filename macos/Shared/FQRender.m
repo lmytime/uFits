@@ -87,10 +87,28 @@ static NSString *FQTypeName(int bitpix)
     return self;
 }
 
+- (instancetype)initWithHeaderOf:(int)hdu file:(fq_file *)f
+{
+    if ((self = [super init])) {
+        _hdu = hdu;
+        _kind = FQ_KIND_NONE;
+        char name[72] = "", naxis[16] = "";
+        fq_keyword(f, hdu, "EXTNAME", name, sizeof name);
+        _extname = FQString(name);
+        BOOL empty = fq_keyword(f, hdu, "NAXIS", naxis, sizeof naxis) && atoi(naxis) == 0;
+        NSString *desc = empty ? @"no data" : @"header";
+        _title = _extname.length ? [NSString stringWithFormat:@"HDU %d  %@ — %@", hdu, _extname, desc]
+                                 : [NSString stringWithFormat:@"HDU %d — %@", hdu, desc];
+    }
+    return self;
+}
+
 @end
 
-/// The HDUs of f that can be shown. Skipped for big gzip files, where
-/// finding every header means inflating the whole file.
+/// Every HDU of f, in file order: those that can be drawn or listed, and
+/// the others for their header (an empty primary HDU, say). Skipped for
+/// big gzip files, where finding every header means inflating the whole
+/// file.
 static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
 {
     struct stat st;
@@ -101,10 +119,16 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
     fq_hdu_entry *e = calloc(kMaxHDUs, sizeof *e);
     if (!e)
         return @[];
-    int n = fq_list_hdus(f, e, kMaxHDUs);
+    int n = fq_list_hdus(f, e, kMaxHDUs), total = MIN(fq_hdu_count(f), (int)kMaxHDUs), k = 0;
     NSMutableArray<FQHDUItem *> *items = [NSMutableArray array];
-    for (int i = 0; i < n; i++)
-        [items addObject:[[FQHDUItem alloc] initWithEntry:&e[i]]];
+    for (int hdu = 0; hdu < total || k < n; hdu++) {
+        if (k < n && e[k].hdu == hdu)
+            [items addObject:[[FQHDUItem alloc] initWithEntry:&e[k++]]];
+        else if (hdu < total)
+            [items addObject:[[FQHDUItem alloc] initWithHeaderOf:hdu file:f]];
+        else
+            break;
+    }
     free(e);
     return items;
 }

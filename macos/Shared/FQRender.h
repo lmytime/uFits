@@ -8,10 +8,11 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// One HDU a viewer can switch to (an image, or a table that is plotted).
+/// One HDU of a file, for the menu: an image, a plotted table, a table, or
+/// just a header.
 @interface FQHDUItem : NSObject
 @property(nonatomic, readonly) int hdu;
-@property(nonatomic, readonly) int kind;            // FQ_KIND_IMAGE, _PLOT or _TABLE
+@property(nonatomic, readonly) int kind;            // FQ_KIND_IMAGE, _PLOT, _TABLE, or _NONE
 @property(nonatomic, readonly) BOOL isTable;        // a table, plotted or not
 @property(nonatomic, readonly) long long nplanes;
 @property(nonatomic, readonly, copy) NSString *extname;

@@ -83,9 +83,8 @@ static NSString *gridState(NSView *root)
         [titles addObject:c.title];
     NSString *first = @"";
     if (tv.numberOfRows > 0 && tv.numberOfColumns > 1) {
-        NSView *cell = [tv viewAtColumn:1 row:0 makeIfNecessary:YES];
-        if ([cell isKindOfClass:NSTextField.class])
-            first = ((NSTextField *)cell).stringValue;
+        id value = [tv.dataSource tableView:tv objectValueForTableColumn:tv.tableColumns[1] row:0];
+        first = [value description] ?: @"";
     }
     return [NSString stringWithFormat:@"grid=%ld rows [%@] first=\"%@\"", (long)tv.numberOfRows,
                                       [titles componentsJoinedByString:@","], first];
@@ -133,10 +132,19 @@ static void act(NSControl *c)
     spin(1.0);
 }
 
-/// Clicks segment i of the mode switch (Image/Plot, Table, Header).
+/// The mode switch (Image/Plot, Table, Header), not some other segmented
+/// control such as the find bar's arrows.
+static NSSegmentedControl *modeSwitch(NSView *root)
+{
+    return findView(root, NSSegmentedControl.class, ^BOOL(id v) {
+        return [v segmentCount] == 3 && [[v labelForSegment:2] isEqualToString:@"Header"];
+    });
+}
+
+/// Clicks segment i of the mode switch.
 static void pickMode(NSView *root, NSInteger i)
 {
-    NSSegmentedControl *mode = findView(root, NSSegmentedControl.class, nil);
+    NSSegmentedControl *mode = modeSwitch(root);
     if (!mode) {
         printf("FAIL no mode switch\n");
         gFailures++;
@@ -244,7 +252,7 @@ static BOOL contentReady(NSInteger mode)
 /// on screen.
 static void timeSwitch(NSString *name, NSInteger mode)
 {
-    NSSegmentedControl *seg = findView(gWindow.contentView, NSSegmentedControl.class, nil);
+    NSSegmentedControl *seg = modeSwitch(gWindow.contentView);
     if (!seg)
         return;
     seg.selectedSegment = mode;
@@ -253,10 +261,19 @@ static void timeSwitch(NSString *name, NSInteger mode)
     [gWindow layoutIfNeeded];
     [gWindow displayIfNeeded];
     double busy = msSince(t0);
-    while (!contentReady(mode) && msSince(t0) < 20000)
+    BOOL spinner = NO;
+    while (!contentReady(mode) && msSince(t0) < 20000) {
         spin(0.005);
+        spinner = spinner || findView(gWindow.contentView, NSProgressIndicator.class, nil) != nil;
+    }
     [gWindow displayIfNeeded];
-    printf("time %-36s busy %7.1f ms   on screen after %7.1f ms\n", name.UTF8String, busy, msSince(t0));
+    double shown = msSince(t0);
+    // The window must answer at once; the content may take a moment.
+    BOOL ok = busy < 100 && contentReady(mode);
+    if (!ok)
+        gFailures++;
+    printf("%s time %-31s busy %7.1f ms   on screen after %7.1f ms%s\n", ok ? "ok  " : "FAIL", name.UTF8String,
+           busy, shown, spinner ? "   (showed Loading…)" : "");
 }
 
 /// Scrolls the table on show a page down (or half a width sideways) at a
@@ -283,7 +300,11 @@ static void timeScroll(NSString *name, BOOL sideways, int steps)
         [sv reflectScrolledClipView:clip];
         [gWindow displayIfNeeded];
     }
-    printf("time %-36s %7.2f ms per step (%d steps)\n", name.UTF8String, msSince(t0) / steps, steps);
+    double ms = msSince(t0) / steps;
+    BOOL ok = ms < 50;
+    if (!ok)
+        gFailures++;
+    printf("%s time %-31s %7.2f ms per step (%d steps)\n", ok ? "ok  " : "FAIL", name.UTF8String, ms, steps);
 }
 
 /// Jumps the table on show to row, drawing it; reports the time.
@@ -295,7 +316,7 @@ static void timeJump(NSString *name, NSInteger row)
     CFTimeInterval t0 = CACurrentMediaTime();
     [tv scrollRowToVisible:row];
     [gWindow displayIfNeeded];
-    printf("time %-36s %7.1f ms\n", name.UTF8String, msSince(t0));
+    printf("ok   time %-31s %7.1f ms\n", name.UTF8String, msSince(t0));
 }
 
 /// Opens path and reports how long until it is on screen.
@@ -304,7 +325,7 @@ static void timeLoad(FQPreviewController *vc, NSString *name, NSString *path)
     CFTimeInterval t0 = CACurrentMediaTime();
     load(vc, path);
     [gWindow displayIfNeeded];
-    printf("time %-36s %7.1f ms\n", name.UTF8String, msSince(t0));
+    printf("ok   time %-31s %7.1f ms\n", name.UTF8String, msSince(t0));
 }
 
 int main(int argc, const char *argv[])
@@ -328,9 +349,18 @@ int main(int argc, const char *argv[])
 
         // Multi-extension file: the HDU menu switches between SCI, ERR and DQ.
         load(vc, [data stringByAppendingPathComponent:@"mef.fits"]);
-        capture(@"mef", @"menu=\"HDU 1  SCI");
-        pickHDU(root, 2);
+        capture(@"mef", @"menu=\"HDU 1  SCI — 256 × 256 float32\" (4 items)");
+        pickHDU(root, 3);
         capture(@"mef-dq", @"HDU 3 DQ");
+        // Its empty primary HDU is listed too, and shows its header.
+        pickHDU(root, 0);
+        expectListing(@"mef-primary", @"SIMPLE   = T");
+        capture(@"mef-primary", @"menu=\"HDU 0 — no data\" (4 items)  \"HDU 0 — no data\"  mode=2 [Image(off)|Table(off)|Header]");
+        // In the Header view the menu switches headers; Image shows SCI again.
+        pickHDU(root, 1);
+        expectListing(@"mef-sci-header", @"——— HDU 1  SCI ———");
+        pickMode(root, 0);
+        capture(@"mef-sci", @"\"HDU 1 SCI  ·  256 × 256  ·  float32\"");
 
         // Cube: the slider picks the plane.
         load(vc, [data stringByAppendingPathComponent:@"cube5.fits"]);
@@ -357,10 +387,10 @@ int main(int argc, const char *argv[])
 
         // Its second table has nothing to plot: the menu shows its rows; the
         // first one's rows, then its plot, come back the same way.
-        pickHDU(root, 1);
+        pickHDU(root, 2);
         capture(@"sdss-specobj", @"grid=1 rows [#,CLASS,Z] first=\"GALAXY\"");
         capture(@"sdss-specobj-switch", @"mode=1 [Image(off)|Table|Header]");
-        pickHDU(root, 0);
+        pickHDU(root, 1);
         capture(@"sdss-coadd", @"grid=3000 rows");
         pickMode(root, 0);
         capture(@"sdss-plot", @"mode=0 [Plot|Table|Header]");
@@ -375,9 +405,9 @@ int main(int argc, const char *argv[])
         // the menu switches tables; the header opens at the table picked, its
         // cards in columns, and Cmd-F opens its find bar.
         load(vc, [data stringByAppendingPathComponent:@"tables_mixed.fits"]);
-        capture(@"tables", @"menu=\"HDU 1  MIXED — 6 rows × 11 columns\" (2 items)");
+        capture(@"tables", @"menu=\"HDU 1  MIXED — 6 rows × 11 columns\" (3 items)");
         capture(@"tables-grid", @"grid=6 rows [#,NAME,FLAG,BITS");
-        pickHDU(root, 1);
+        pickHDU(root, 2);
         capture(@"tables-ascii", @"grid=4 rows [#,ID,RA,NOTE] first=\"0\"");
         pickMode(root, 2);
         expectListing(@"tables-header", @"——— HDU 2  ASCII ———");
@@ -385,7 +415,7 @@ int main(int argc, const char *argv[])
         expectColumns(@"tables-header-columns", @"XTENSION = 'TABLE'", @"TFORM2   = 'F10.5'",
                       @"ASCII table extension");
         capture(@"tables-header", @"\"HDU 2 ASCII  ·  4 rows × 3 columns\"  menu=\"HDU 2  ASCII — 4 rows × 3 "
-                                  @"columns\" (2 items)  \"HDU 2  ASCII — 4 rows × 3 columns\"  mode=2");
+                                  @"columns\" (3 items)  \"HDU 2  ASCII — 4 rows × 3 columns\"  mode=2");
         NSEvent *cmdF = [NSEvent keyEventWithType:NSEventTypeKeyDown
                                          location:NSZeroPoint
                                     modifierFlags:NSEventModifierFlagCommand
