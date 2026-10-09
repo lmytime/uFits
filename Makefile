@@ -239,7 +239,7 @@ test: $(B)/fqtool
 # Checks used by CI: thumbnails through QLThumbnailGenerator and previews
 # through QLPreviewView, both served by the installed extensions, and the
 # preview UI driven directly (HDU menu, plane slider, find bar).
-qltools: $(B)/qlthumb $(B)/qlpreview $(B)/uitest
+qltools: $(B)/qlthumb $(B)/qlpreview $(B)/uitest $(B)/clicklag
 
 $(B)/qlthumb: tests/macos/qlthumb.m
 	@mkdir -p $(B)
@@ -253,6 +253,11 @@ $(B)/qlpreview: tests/macos/qlpreview.m
 $(B)/uitest: tests/macos/uitest.m $(B)/obj/app/FQPreviewController.o $(B)/obj/app/FQRender.o $(CORE_OBJ)
 	@mkdir -p $(B)
 	$(CC) $(OBJC_) -o $@ $^ -framework Cocoa -framework QuartzCore -framework CoreGraphics -lz
+
+$(B)/clicklag: tests/macos/clicklag.m $(B)/obj/app/FQPreviewController.o $(B)/obj/app/FQRender.o $(CORE_OBJ)
+	@mkdir -p $(B)
+	$(CC) $(OBJC_) -o $@ $^ -framework Cocoa -framework Quartz -framework QuartzCore -framework CoreGraphics \
+	    -framework ApplicationServices -lz
 
 clean:
 	rm -rf $(B)

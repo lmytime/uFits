@@ -129,6 +129,20 @@ jobs:
         run: |
           python3 tests/macos/make_big_files.py build/testdata
           build/uitest build/ql build/testdata
+      - name: Click latency (diagnostic)
+        if: always()
+        timeout-minutes: 5
+        run: |
+          build/clicklag build/ql build/testdata/mef.fits || true
+          # Again with a short double-click interval: a delay that follows it
+          # is something waiting to see whether a click is a double click.
+          defaults write -g com.apple.mouse.doubleClickThreshold -float 0.15
+          killall -9 QuickLookUIService uFitsPreview 2>/dev/null || true
+          build/clicklag build/ql build/testdata/mef.fits fast || true
+          defaults delete -g com.apple.mouse.doubleClickThreshold || true
+          log show --last 4m --style compact \
+            --predicate 'process == "QuickLookUIService" OR process == "uFitsPreview" OR process == "clicklag"' \
+            | grep -i -E "click|gesture|mouse|event|menu|remote|viewbridge" | tail -80 || true
       - name: App windows (best effort)
         if: always()
         timeout-minutes: 2
