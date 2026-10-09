@@ -86,8 +86,14 @@ make                   # build/uFits.app only
 make ARCHS=arm64       # native-only build (default is universal)
 make GZIP=1 install    # also preview .gz files (claims every gzip file, see below)
 make SIGN="Developer ID Application: Your Name (TEAMID)" zip   # hardened runtime, ready to notarize
+make SIGN="Developer ID Application: Your Name (TEAMID)" notarize   # notarize and staple (see below)
 make uninstall
 ```
+
+`make notarize` sends the zip to Apple's notary service and staples the ticket, so the
+app opens on other Macs without quarantine warnings. It uses a `notarytool` keychain
+profile, stored once with `xcrun notarytool store-credentials uFits --apple-id ...
+--team-id ...` (choose another name with `NOTARY_PROFILE=`).
 
 `.fits.gz` files carry the `.gz` extension, so macOS identifies them as gzip archives,
 not FITS. With `GZIP=1` uFits handles every gzip file and gives up quickly on the ones

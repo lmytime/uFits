@@ -5,11 +5,14 @@
 #   make            build/uFits.app (universal, ad hoc signed)
 #   make install    copy it to /Applications and register the extensions
 #   make zip        build/uFits.zip, ready to share
+#   make notarize   notarize and staple a Developer ID build (see SIGN)
 #   make test       check the core against astropy (needs python3 with
 #                   numpy and astropy; also works on Linux)
 #
 # Options:
 #   SIGN="Developer ID Application: Name (TEAMID)"   sign for distribution
+#   NOTARY_PROFILE=uFits  notarytool keychain profile, made once with
+#                      xcrun notarytool store-credentials uFits --apple-id ...
 #   ARCHS=arm64                                      native-only build
 #   GZIP=1             also preview .gz files (claims every gzip file)
 #   BUNDLE_ID=...      change the bundle identifier prefix
@@ -25,6 +28,7 @@ ARCHS      ?= arm64 x86_64
 SIGN       ?= -
 GZIP       ?= 0
 DEST       ?= /Applications
+NOTARY_PROFILE ?= uFits
 B          ?= build
 
 CC      := clang
@@ -64,7 +68,7 @@ APP_OBJ     := $(B)/obj/app/main.o $(B)/obj/app/FQRender.o $(B)/obj/app/FQPrevie
 PREVIEW_OBJ := $(B)/obj/ext/PreviewViewController.o $(B)/obj/ext/FQRender.o $(B)/obj/ext/FQPreviewController.o
 THUMB_OBJ   := $(B)/obj/ext/ThumbnailProvider.o $(B)/obj/ext/FQRender.o
 
-.PHONY: all app install uninstall zip test fqtool qltools clean
+.PHONY: all app install uninstall zip notarize test fqtool qltools clean
 
 all: app
 
@@ -174,6 +178,19 @@ zip: app
 	rm -f $(B)/$(APP).zip
 	ditto -c -k --keepParent $(APPDIR) $(B)/$(APP).zip
 	@echo "Wrote $(B)/$(APP).zip"
+
+# Apple's notary service needs a Developer ID signature with the hardened
+# runtime, which SIGN=... gives. The stapled app is zipped again.
+ifeq ($(SIGN)$(filter notarize,$(MAKECMDGOALS)),-notarize)
+$(error make notarize needs SIGN="Developer ID Application: Name (TEAMID)")
+endif
+
+notarize: zip
+	xcrun notarytool submit $(B)/$(APP).zip --keychain-profile "$(NOTARY_PROFILE)" --wait
+	xcrun stapler staple $(APPDIR)
+	rm -f $(B)/$(APP).zip
+	ditto -c -k --keepParent $(APPDIR) $(B)/$(APP).zip
+	@echo "Wrote $(B)/$(APP).zip (notarized)"
 
 # --- core tests (portable) ---------------------------------------------------
 

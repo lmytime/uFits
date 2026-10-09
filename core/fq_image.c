@@ -605,9 +605,10 @@ static int select_target(fq_file *f, const fq_opts *o, imgdesc *d, int *table, c
     imgdesc oned, unsup;
     memset(&oned, 0, sizeof oned);
     memset(&unsup, 0, sizeof unsup);
-    int have1d = 0, haveunsup = 0;
+    int have1d = 0, haveunsup = 0, tables = 0;
     for (int i = 0; i < 4096; i++) {
-        if (!fqi_get_hdu(f, i))
+        hdu_t *h = fqi_get_hdu(f, i);
+        if (!h)
             break;
         imgdesc t;
         if (!fqi_describe_image(f, i, &t)) {
@@ -617,6 +618,8 @@ static int select_target(fq_file *f, const fq_opts *o, imgdesc *d, int *table, c
                 *table = 1;
                 return 0;
             }
+            h = fqi_get_hdu(f, i);   /* the HDU array may have moved */
+            tables += !strcmp(h->xtension, "BINTABLE") || !strcmp(h->xtension, "TABLE");
             continue;
         }
         if (!t.supported) {
@@ -644,7 +647,10 @@ static int select_target(fq_file *f, const fq_opts *o, imgdesc *d, int *table, c
         fqi_seterr(err, errlen, "%s compression is not supported", unsup.cmptype);
         return -1;
     }
-    fqi_seterr(err, errlen, "no image data");
+    if (tables)
+        fqi_seterr(err, errlen, "no image, and no table with columns to plot");
+    else
+        fqi_seterr(err, errlen, "no image data");
     return -1;
 }
 
