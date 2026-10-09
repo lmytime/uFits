@@ -146,7 +146,7 @@ img { max-width: 100%; }
 .pitch { min-width: 0; display: flex; flex-direction: column; gap: 22px; }
 h1 {
   margin: 0;
-  font: 500 clamp(2rem, 1.1rem + 2.7vw, 3.3rem)/1.06 var(--font-display);
+  font: 500 clamp(2.2rem, 1.1rem + 3vw, 3.7rem)/1.06 var(--font-display);
   letter-spacing: -0.045em;
   text-wrap: balance;
 }
@@ -239,8 +239,8 @@ canvas.fill { width: 100%; height: 100%; display: block; }
 
   <main class="wrap hero">
     <div class="pitch">
-      <h1>See inside FITS files with one key.</h1>
-      <p class="lead">Select a <strong>.fits</strong> file in Finder and press <button class="key" id="space" type="button" aria-label="Space (shows the next example in the window)">space</button>. uFits shows the image, the spectrum or light curve, the catalog, the table or the header at once, even when the file holds gigabytes.</p>
+      <h1>See FITS in your Finder.</h1>
+      <p class="lead">Select a FITS file and press <button class="key" id="space" type="button" aria-label="Space (shows the next example in the window)">space</button> to see its image, plot, table or header.</p>
       <div class="install">
         <div class="install-head"><span>Install: paste this in Terminal</span><button class="copy" type="button" data-copy="cmd">Copy</button></div>
         <div class="install-cmd"><span class="sigil" aria-hidden="true">$ </span><code id="cmd">curl -fsSL https://github.com/<wbr>lmytime/<wbr>uFits/<wbr>releases/<wbr>latest/<wbr>download/<wbr><span class="nobr">install.sh | sh</span></code></div>
@@ -249,7 +249,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
         <span>macOS 11 or later</span>
         <span>Apple silicon and Intel</span>
         <span>1 MB</span>
-        <a href="https://github.com/lmytime/uFits/releases/latest">Download the disk image</a>
+        <a id="dmg" href="https://github.com/lmytime/uFits/releases/download/v0.0.2/uFits-0.0.2.dmg">uFits-0.0.2.dmg</a>
       </p>
     </div>
 
@@ -313,6 +313,20 @@ canvas.fill { width: 100%; height: 100%; display: block; }
         select();
       }
     });
+  }
+
+  // ---- The latest disk image, on the project site ----------------------------
+  if (location.hostname.endsWith("github.io")) {
+    fetch("https://api.github.com/repos/lmytime/uFits/releases/latest")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((release) => {
+        const dmg = release && (release.assets || []).find((a) => a.name.endsWith(".dmg"));
+        if (dmg) {
+          $("dmg").textContent = dmg.name;
+          $("dmg").href = dmg.browser_download_url;
+        }
+      })
+      .catch(() => {});
   }
 
   // ---- Seeded random numbers, so the example looks the same every time ----
