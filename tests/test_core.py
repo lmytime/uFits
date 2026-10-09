@@ -5,10 +5,13 @@ Usage: test_core.py FQTOOL TESTDATA_DIR
 
 For every image file the decoded values (full resolution), the binned
 values (with and without sub-sampling) and Bayer/RGB handling are compared
-with a reference computed from astropy's reading of the same file.
+with a reference computed from astropy's reading of the same file. Tables
+holding a light curve or a spectrum are plotted: the plot envelope is
+compared with one computed by numpy, and table listings are spot-checked.
 """
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -35,6 +38,164 @@ def run_dump(path, *opts):
         return (v.reshape(nch, h, w), info), None
     finally:
         os.unlink(out)
+
+
+def run_plot(path, *opts):
+    with tempfile.NamedTemporaryFile(suffix=".f32", delete=False) as t:
+        out = t.name
+    try:
+        r = subprocess.run([FQ, "plot", path, out, *opts], capture_output=True, text=True,
+                           errors="replace")
+        if r.returncode != 0:
+            return None, r.stderr.strip()
+        lines = r.stdout.split("\n")
+        info = dict(kv.split("=", 1) for kv in lines[0].split() if "=" in kv)
+        info.update(l.split("=", 1) for l in lines[1:] if "=" in l)
+        v = np.fromfile(out, dtype=np.float32)
+        n = int(info["n"])
+        return (v[:n], v[n:], info), None
+    finally:
+        os.unlink(out)
+
+
+def fqtool(*args):
+    r = subprocess.run([FQ, *args], capture_output=True, text=True, errors="replace")
+    return r.returncode, r.stdout
+
+
+# Column names that make a table a light curve or a spectrum, best first
+# (the same lists as core/fq_table.c).
+LC_X = ["TIME", "BTJD", "BKJD", "BJD", "BJD_TDB", "HJD", "MJD", "JD"]
+LC_Y = ["PDCSAP_FLUX", "SAP_FLUX", "FLUX", "RATE", "NET_RATE", "COUNT_RATE", "MAG", "MAGNITUDE", "COUNTS"]
+SP_X = ["WAVELENGTH", "WAVE", "LAMBDA", "LAM", "LOGLAM", "FREQUENCY", "FREQ", "ENERGY", "VELOCITY",
+        "VELO", "CHANNEL"]
+SP_Y = ["FLUX", "FLUX_DENSITY", "FLAM", "F_LAMBDA", "FNU", "F_NU", "SPEC", "SPECTRUM", "INTENSITY",
+        "COUNTS", "RATE", "DATA"]
+
+
+def plot_spec(h):
+    """Which columns of a binary table the core plots, or None."""
+    if isinstance(h, fits.CompImageHDU) or not isinstance(h, fits.BinTableHDU):
+        return None
+    cols = []
+    for c in h.columns:
+        m = re.match(r"\s*(\d*)([A-Za-z])", str(c.format))
+        rep = int(m.group(1)) if m and m.group(1) else 1
+        t = m.group(2).upper() if m else ""
+        cols.append((c.name, rep, t in "BIJKED" and rep >= 1))
+
+    def find(name):
+        return next((i for i, c in enumerate(cols) if c[0].upper() == name and c[2]), -1)
+
+    for xs, ys, dots in ((LC_X, LC_Y, True), (SP_X, SP_Y, False)):
+        for xn in xs:
+            i = find(xn)
+            if i < 0:
+                continue
+            for yn in ys:
+                j = find(yn)
+                if j >= 0 and j != i and cols[j][1] == cols[i][1]:
+                    if h.header["NAXIS2"] * cols[i][1] < 2:
+                        return None
+                    return dict(x=cols[i][0], y=cols[j][0], dots=dots,
+                                xlog=cols[i][0].upper() == "LOGLAM",
+                                flip=cols[j][0].upper().startswith("MAG"))
+    return None
+
+
+def column_values(h, name):
+    """Physical values of a numeric column, NaN for nulls, flattened."""
+    i = [c.name for c in h.columns].index(name) + 1
+    raw = np.asarray(h.data.base[name])
+    v = raw.astype(np.float64) * h.header.get(f"TSCAL{i}", 1.0) + h.header.get(f"TZERO{i}", 0.0)
+    if f"TNULL{i}" in h.header and raw.dtype.kind in "iu":
+        v[raw == h.header[f"TNULL{i}"]] = np.nan
+    return v.ravel()
+
+
+def check_plot(fn, path, h, idx, spec):
+    ncol_max = 300
+    res, err = run_plot(path, "--max", str(ncol_max))
+    if res is None:
+        failures.append(f"{fn}: plot failed: {err}")
+        return
+    lo, hi, info = res
+    if int(info["hdu"]) != idx or info["table"] != "1":
+        failures.append(f"{fn}: core plotted HDU {info['hdu']} (table={info['table']}), expected table {idx}")
+        return
+    x, y = column_values(h, spec["x"]), column_values(h, spec["y"])
+    if spec["xlog"]:
+        with np.errstate(over="ignore"):
+            x = 10.0 ** x
+    ok = np.isfinite(x) & np.isfinite(y)
+    x, y = x[ok], y[ok]
+    xmin, xmax = x.min(), x.max()
+    ncol = min(ncol_max, len(x)) if xmax > xmin else 1
+    span = xmax - xmin
+    c = ((x - xmin) * (ncol / span)).astype(np.int64).clip(0, ncol - 1) if ncol > 1 else np.zeros(len(x), int)
+    y32 = y.astype(np.float32)
+    elo = np.full(ncol, np.inf, np.float32)
+    ehi = np.full(ncol, -np.inf, np.float32)
+    np.minimum.at(elo, c, y32)
+    np.maximum.at(ehi, c, y32)
+    elo[np.isinf(elo)] = np.nan
+    ehi[np.isinf(ehi)] = np.nan
+    want = {
+        "n": str(ncol), "points": str(len(x)), "has_x": "1", "dots": str(int(spec["dots"])),
+        "y_flip": str(int(spec["flip"])), "y_label": spec["y"],
+        "x_label": ("wavelength" if spec["x"][0].islower() else "WAVELENGTH") if spec["xlog"] else spec["x"],
+    }
+    bad = [f"{k}={info.get(k)!r} (want {v!r})" for k, v in want.items() if info.get(k) != v]
+    if bad:
+        failures.append(f"{fn} plot: " + ", ".join(bad))
+        return
+    x0, x1 = (xmin + 0.5 * span / ncol, xmax - 0.5 * span / ncol) if ncol > 1 else ((xmin + xmax) / 2,) * 2
+    if not (math.isclose(float(info["x_first"]), x0, rel_tol=1e-12) and
+            math.isclose(float(info["x_last"]), x1, rel_tol=1e-12)):
+        failures.append(f"{fn} plot: x range {info['x_first']}..{info['x_last']}, want {x0}..{x1}")
+        return
+    p1, p99 = np.percentile(y, [1, 99])
+    if not float(info["y_min"]) <= p1 <= p99 <= float(info["y_max"]):
+        failures.append(f"{fn} plot: y range {info['y_min']}..{info['y_max']} misses {p1}..{p99}")
+        return
+    compare(f"{fn} plot low", lo, elo, 0)
+    compare(f"{fn} plot high", hi, ehi, 0)
+
+
+def check_listings():
+    """Spot checks of HDU lists and table listings."""
+    def expect(name, got, want):
+        if got != want:
+            failures.append(f"{name}: got {got!r}, want {want!r}")
+        else:
+            print(f"  ok  {name}")
+
+    def hdus(fn):
+        rc, out = fqtool("hdus", os.path.join(DATA, fn))
+        return [l.split(" | ")[0] for l in out.splitlines()]
+
+    def rows(fn, hdu, n=10):
+        rc, out = fqtool("table", os.path.join(DATA, fn), str(hdu), str(n))
+        return [re.split(r"\s{2,}", l.strip()) for l in out.splitlines()[5:]] if rc == 0 else None
+
+    if not os.path.exists(os.path.join(DATA, "tables_mixed.fits")):
+        return
+    expect("mef.fits hdus", hdus("mef.fits"), ["1 image 1 SCI", "2 image 1 ERR", "3 image 1 DQ"])
+    expect("cube5.fits hdus", hdus("cube5.fits"), ["0 image 5 -"])
+    expect("lc_tess.fits hdus", hdus("lc_tess.fits"), ["1 plot 1 LIGHTCURVE", "2 image 1 APERTURE"])
+    expect("spec_rows.fits hdus", hdus("spec_rows.fits"), ["0 plot 1 -"])
+    expect("table_only.fits hdus", hdus("table_only.fits"), [])
+    r = rows("tables_mixed.fits", 1)
+    expect("tables_mixed.fits row 0", r and r[0][:7] if r else r,
+           ["alpha", "T", "0x0000", "0", "1", "0", "[0 1 2]"])
+    expect("tables_mixed.fits null and int64", r and r[1][3:6] if r else r, ["1", "null", "1000000000000"])
+    expect("tables_mixed.fits complex and VLA", r and r[2][-3:] if r else r, ["(2, 4)", "(6, -2)", "(2 values)"])
+    expect("tables_mixed.fits ascii", rows("tables_mixed.fits", 2), [["0", "10.00000", "a"], ["1", "10.33333", "bb"],
+                                                                    ["2", "10.66667", "ccc"], ["3", "11.00000", "dddd"]])
+    r = rows("lc_scaled.fits", 1, 2)
+    expect("lc_scaled.fits scaled null", r and r[0][1] if r else r, "null")
+    expect("lc_scaled.fits scaled value", r and r[1][1] if r else r, "15.207")
+    expect("image HDU is not a table", fqtool("table", os.path.join(DATA, "mef.fits"), "1")[0], 1)
 
 
 def is_image(i, h):
@@ -176,8 +337,55 @@ def check_stretch():
                 print(f"  ok  {fn} stretch: background grey {med}")
 
 
+def check_image(fn, path, hl, idx, extra):
+    h = hl[idx]
+    cmp_type = getattr(h, "compression_type", "") if isinstance(h, fits.CompImageHDU) else ""
+    if cmp_type == "HCOMPRESS_1":
+        res, err = run_dump(path, *extra)
+        if res is None and "not supported" in err:
+            print(f"  ok  {fn}: HCOMPRESS reported as unsupported")
+        else:
+            failures.append(f"{fn}: expected an unsupported-compression error")
+        return
+    data = physical(hl, idx)
+    res, err = run_dump(path, "--max", "100000", "--samples", "0", *extra)
+    if res is None:
+        failures.append(f"{fn}: dump failed: {err}")
+        return
+    got, info = res
+    if int(info["hdu"]) != idx:
+        failures.append(f"{fn}: core chose HDU {info['hdu']}, expected {idx}")
+        return
+    nch = got.shape[0]
+    hdr = h.header
+    bayer = hdr.get("BAYERPAT") if nch == 3 and data.ndim == 2 else None
+    if bayer:
+        img = data
+        xoff, yoff = hdr.get("XBAYROFF", 0), hdr.get("YBAYROFF", 0)
+        exp = bayer_ref(img, bayer, xoff, yoff, 1, 1)
+        compare(f"{fn} bayer full", got, exp, 1e-5)
+        res, _ = run_dump(path, "--max", "40", "--samples", "0", *extra)
+        compare(f"{fn} bayer binned", res[0], bayer_ref(img, bayer, xoff, yoff, 4, 4), 1e-5)
+        res, _ = run_dump(path, "--max", "20", "--samples", "3", *extra)
+        compare(f"{fn} bayer sampled", res[0], bayer_ref(img, bayer, xoff, yoff, 8, 3), 1e-5)
+        return
+    planes = plane_of(data, hdr, nch)
+    compare(f"{fn} full", got, planes, 2e-6)
+    H, W = planes.shape[-2:]
+    for maxdim, k in ((64, 0), (50, 2), (33, 3), (7, 1)):
+        f = max(math.ceil(W / maxdim), math.ceil(H / maxdim), 1)
+        kk = f if k == 0 else min(f, k)
+        res, err = run_dump(path, "--max", str(maxdim), "--samples", str(k), *extra)
+        if res is None:
+            failures.append(f"{fn}: binned dump failed: {err}")
+            continue
+        exp = np.stack([bin_ref(p, f, kk) for p in planes])
+        compare(f"{fn} bin f={f} k={kk}", res[0], exp, 2e-5)
+
+
 def main():
     check_stretch()
+    check_listings()
     files = sorted(f for f in os.listdir(DATA) if f.endswith((".fits", ".fits.gz")))
     for fn in files:
         path = os.path.join(DATA, fn)
@@ -187,6 +395,15 @@ def main():
             res, err = run_dump(path)
             print(f"  --  {fn}: astropy cannot read ({type(e).__name__}); core says: {err or 'ok'}")
             continue
+        # The core shows the first 2-D image or plottable table, in file
+        # order; a 1-D image only when there is neither.
+        table = next(((i, sp) for i, h in enumerate(hl) if (sp := plot_spec(h))), None)
+        first2d = idx if idx is not None and hl[idx].data is not None and hl[idx].data.ndim >= 2 else None
+        if table and (first2d is None or table[0] < first2d):
+            check_plot(fn, path, hl[table[0]], *table)
+            if idx is not None:
+                check_image(fn, path, hl, idx, ["--hdu", str(idx)])
+            continue
         if idx is None:
             res, err = run_dump(path)
             if res is not None:
@@ -194,49 +411,7 @@ def main():
             else:
                 print(f"  ok  {fn}: no image ({err})")
             continue
-        h = hl[idx]
-        cmp_type = getattr(h, "compression_type", "") if isinstance(h, fits.CompImageHDU) else ""
-        if cmp_type == "HCOMPRESS_1":
-            res, err = run_dump(path)
-            if res is None and "not supported" in err:
-                print(f"  ok  {fn}: HCOMPRESS reported as unsupported")
-            else:
-                failures.append(f"{fn}: expected an unsupported-compression error")
-            continue
-        data = physical(hl, idx)
-        res, err = run_dump(path, "--max", "100000", "--samples", "0")
-        if res is None:
-            failures.append(f"{fn}: dump failed: {err}")
-            continue
-        got, info = res
-        if int(info["hdu"]) != idx:
-            failures.append(f"{fn}: core chose HDU {info['hdu']}, expected {idx}")
-            continue
-        nch = got.shape[0]
-        hdr = h.header
-        bayer = hdr.get("BAYERPAT") if nch == 3 and data.ndim == 2 else None
-        if bayer:
-            img = data
-            xoff, yoff = hdr.get("XBAYROFF", 0), hdr.get("YBAYROFF", 0)
-            exp = bayer_ref(img, bayer, xoff, yoff, 1, 1)
-            compare(f"{fn} bayer full", got, exp, 1e-5)
-            res, _ = run_dump(path, "--max", "40", "--samples", "0")
-            compare(f"{fn} bayer binned", res[0], bayer_ref(img, bayer, xoff, yoff, 4, 4), 1e-5)
-            res, _ = run_dump(path, "--max", "20", "--samples", "3")
-            compare(f"{fn} bayer sampled", res[0], bayer_ref(img, bayer, xoff, yoff, 8, 3), 1e-5)
-            continue
-        planes = plane_of(data, hdr, nch)
-        compare(f"{fn} full", got, planes, 2e-6)
-        H, W = planes.shape[-2:]
-        for maxdim, k in ((64, 0), (50, 2), (33, 3), (7, 1)):
-            f = max(math.ceil(W / maxdim), math.ceil(H / maxdim), 1)
-            kk = f if k == 0 else min(f, k)
-            res, err = run_dump(path, "--max", str(maxdim), "--samples", str(k))
-            if res is None:
-                failures.append(f"{fn}: binned dump failed: {err}")
-                continue
-            exp = np.stack([bin_ref(p, f, kk) for p in planes])
-            compare(f"{fn} bin f={f} k={kk}", res[0], exp, 2e-5)
+        check_image(fn, path, hl, idx, [])
 
     print()
     if failures:

@@ -69,7 +69,7 @@ static const CGFloat kBarHeight = 30;
 
 @end
 
-#pragma mark - Spectrum view
+#pragma mark - Plot view
 
 static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
 {
@@ -84,7 +84,16 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     return ticks;
 }
 
-/// Plots a spectrum with labelled axes.
+/// "LABEL [unit]", or whichever of the two there is.
+static NSString *FQAxisTitle(const char *label, const char *unit)
+{
+    NSString *l = FQString(label), *u = FQString(unit);
+    if (l.length && u.length)
+        return [NSString stringWithFormat:@"%@ [%@]", l, u];
+    return l.length ? l : u;
+}
+
+/// Plots a spectrum or a light curve with labelled axes.
 @interface FQSpectrumView : NSView
 @property(nonatomic, strong, nullable) FQRendering *rendering;
 @end
@@ -95,12 +104,12 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
 {
     (void)dirtyRect;
     FQRendering *r = self.rendering;
-    if (!r || r.kind != FQ_KIND_SPECTRUM)
+    if (!r || r.kind != FQ_KIND_PLOT)
         return;
     const fq_image *img = r.raw;
     NSRect b = self.bounds;
     NSRect plot = NSMakeRect(NSMinX(b) + 70, NSMinY(b) + 36, MAX(20, NSWidth(b) - 88),
-                             MAX(20, NSHeight(b) - 52));
+                             MAX(20, NSHeight(b) - 56));
     NSDictionary *attrs = @{
         NSFontAttributeName : [NSFont monospacedDigitSystemFontOfSize:10 weight:NSFontWeightRegular],
         NSForegroundColorAttributeName : NSColor.secondaryLabelColor
@@ -113,9 +122,11 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
 
     [NSColor.secondaryLabelColor setFill];
     double ylo = img->y_min, yhi = img->y_max;
+    BOOL flip = img->y_flip != 0;   // magnitudes: small values (bright) on top
     for (NSNumber *n in FQNiceTicks(ylo, yhi, 6)) {
         double t = n.doubleValue;
-        CGFloat y = NSMinY(plot) + (CGFloat)((t - ylo) / (yhi - ylo)) * NSHeight(plot);
+        CGFloat k = (CGFloat)((t - ylo) / (yhi - ylo)) * NSHeight(plot);
+        CGFloat y = flip ? NSMaxY(plot) - k : NSMinY(plot) + k;
         NSString *label = [NSString stringWithFormat:@"%.4g", t];
         NSSize sz = [label sizeWithAttributes:attrs];
         [label drawAtPoint:NSMakePoint(NSMinX(plot) - 6 - sz.width, y - sz.height / 2)
@@ -137,19 +148,47 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
             withAttributes:attrs];
         NSRectFill(NSMakeRect(x - 0.5, NSMinY(plot) - 3, 1, 3));
     }
-    NSString *xunit = img->has_x ? FQString(img->x_unit) : @"pixel";
+    NSString *xtitle = img->has_x ? FQAxisTitle(img->x_label, img->x_unit) : @"pixel";
     if (img->x_log)
-        xunit = [NSString stringWithFormat:@"log %@", xunit];
-    NSString *yunit = FQString(img->y_unit);
-    if (xunit.length) {
-        NSSize sz = [xunit sizeWithAttributes:attrs];
-        [xunit drawAtPoint:NSMakePoint(NSMaxX(plot) - sz.width, NSMinY(b) + 2) withAttributes:attrs];
+        xtitle = [@"log " stringByAppendingString:xtitle];
+    NSString *ytitle = FQAxisTitle(img->y_label, img->y_unit);
+    if (xtitle.length) {
+        NSSize sz = [xtitle sizeWithAttributes:attrs];
+        [xtitle drawAtPoint:NSMakePoint(NSMaxX(plot) - sz.width, NSMinY(b) + 2) withAttributes:attrs];
     }
-    if (yunit.length)
-        [yunit drawAtPoint:NSMakePoint(NSMinX(b) + 4, NSMaxY(plot) + 2) withAttributes:attrs];
+    if (ytitle.length)
+        [ytitle drawAtPoint:NSMakePoint(NSMinX(b) + 4, NSMaxY(plot) + 4) withAttributes:attrs];
 
     CGContextRef ctx = NSGraphicsContext.currentContext.CGContext;
     FQDrawSpectrum(ctx, NSInsetRect(plot, 1, 1), img, 1.0, NSColor.labelColor.CGColor);
+}
+
+@end
+
+#pragma mark - Root view
+
+@interface FQPreviewController ()
+- (void)layoutBar;
+- (BOOL)handleKeyEquivalent:(NSEvent *)event;
+@end
+
+/// Lays out the bar when resized, and gives the header's find bar its keys
+/// where there is no menu to do it (in Quick Look).
+@interface FQRootView : NSView
+@property(nonatomic, weak) FQPreviewController *controller;
+@end
+
+@implementation FQRootView
+
+- (void)resizeSubviewsWithOldSize:(NSSize)oldSize
+{
+    [super resizeSubviewsWithOldSize:oldSize];
+    [self.controller layoutBar];
+}
+
+- (BOOL)performKeyEquivalent:(NSEvent *)event
+{
+    return [self.controller handleKeyEquivalent:event] || [super performKeyEquivalent:event];
 }
 
 @end
@@ -164,10 +203,18 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     NSTextField *_message;
     NSTextField *_info;
     NSPopUpButton *_stretchMenu;
+    NSPopUpButton *_hduMenu;
+    NSView *_planeBox;
+    NSSlider *_planeSlider;
+    NSTextField *_planeLabel;
     NSSegmentedControl *_mode;
     NSString *_path;
     FQRendering *_rendering;
+    NSArray<FQHDUItem *> *_hdus;
+    int _hdu;             // HDU asked for, -1 = automatic
+    long long _plane;     // cube plane asked for, -1 = automatic
     BOOL _headerLoaded;
+    BOOL _busy, _again;   // a render is running; another one is wanted after it
     NSInteger _generation;
     NSSize _fitting;
 }
@@ -177,15 +224,28 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     if ((self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil])) {
         _maxPixels = 2560;
         _fitting = NSMakeSize(800, 600);
+        _hdu = -1;
+        _plane = -1;
     }
     return self;
+}
+
+- (NSPopUpButton *)smallPopUpWithAction:(SEL)action
+{
+    NSPopUpButton *p = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    p.controlSize = NSControlSizeSmall;
+    p.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+    p.target = self;
+    p.action = action;
+    return p;
 }
 
 - (void)loadView
 {
     const NSRect all = NSMakeRect(0, 0, 800, 600);
     const NSRect content = NSMakeRect(0, kBarHeight, 800, 600 - kBarHeight);
-    NSView *root = [[NSView alloc] initWithFrame:all];
+    FQRootView *root = [[FQRootView alloc] initWithFrame:all];
+    root.controller = self;
 
     _imageView = [[FQImageView alloc] initWithFrame:content];
     _imageView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -207,6 +267,8 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     _headerText.editable = NO;
     _headerText.selectable = YES;
     _headerText.richText = NO;
+    _headerText.usesFindBar = YES;
+    _headerText.incrementalSearchingEnabled = YES;
     _headerText.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
     _headerText.textColor = NSColor.textColor;
     _headerText.backgroundColor = NSColor.textBackgroundColor;
@@ -230,6 +292,8 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     _message.hidden = YES;
     [root addSubview:_message];
 
+    // The bar, laid out by -layoutBar: info text on the left; HDU menu,
+    // plane slider, stretch menu and Image/Header switch on the right.
     _mode = [NSSegmentedControl segmentedControlWithLabels:@[ @"Image", @"Header" ]
                                               trackingMode:NSSegmentSwitchTrackingSelectOne
                                                     target:self
@@ -238,35 +302,42 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     _mode.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
     _mode.selectedSegment = 0;
     [_mode sizeToFit];
-    NSSize ms = _mode.frame.size;
-    _mode.frame = NSMakeRect(NSWidth(all) - ms.width - 10, floor((kBarHeight - ms.height) / 2),
-                             ms.width, ms.height);
-    _mode.autoresizingMask = NSViewMinXMargin | NSViewMaxYMargin;
     [root addSubview:_mode];
 
-    _stretchMenu = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
-    _stretchMenu.controlSize = NSControlSizeSmall;
-    _stretchMenu.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+    _stretchMenu = [self smallPopUpWithAction:@selector(stretchChanged:)];
     [_stretchMenu addItemsWithTitles:@[ @"Auto stretch", @"Linear 0.5–99.5%", @"Min – max" ]];
-    _stretchMenu.target = self;
-    _stretchMenu.action = @selector(stretchChanged:);
     [_stretchMenu sizeToFit];
-    NSSize ps = _stretchMenu.frame.size;
-    _stretchMenu.frame = NSMakeRect(NSMinX(_mode.frame) - ps.width - 8,
-                                    floor((kBarHeight - ps.height) / 2), ps.width, ps.height);
-    _stretchMenu.autoresizingMask = NSViewMinXMargin | NSViewMaxYMargin;
     [root addSubview:_stretchMenu];
+
+    _hduMenu = [self smallPopUpWithAction:@selector(hduChanged:)];
+    _hduMenu.toolTip = @"HDU to show";
+    _hduMenu.hidden = YES;
+    [root addSubview:_hduMenu];
+
+    _planeSlider = [NSSlider sliderWithTarget:self action:@selector(planeChanged:)];
+    _planeSlider.controlSize = NSControlSizeSmall;
+    _planeSlider.continuous = YES;
+    _planeSlider.frame = NSMakeRect(0, 2, 130, 18);
+    _planeLabel = [NSTextField labelWithString:@""];
+    _planeLabel.font = [NSFont monospacedDigitSystemFontOfSize:NSFont.smallSystemFontSize
+                                                        weight:NSFontWeightRegular];
+    _planeLabel.textColor = NSColor.secondaryLabelColor;
+    _planeLabel.frame = NSMakeRect(136, 3, 74, 16);
+    _planeBox = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 210, 22)];
+    _planeBox.toolTip = @"Cube plane";
+    [_planeBox addSubview:_planeSlider];
+    [_planeBox addSubview:_planeLabel];
+    _planeBox.hidden = YES;
+    [root addSubview:_planeBox];
 
     _info = [NSTextField labelWithString:@""];
     _info.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
     _info.textColor = NSColor.secondaryLabelColor;
     _info.lineBreakMode = NSLineBreakByTruncatingMiddle;
-    CGFloat ih = 16;
-    _info.frame = NSMakeRect(10, floor((kBarHeight - ih) / 2), NSMinX(_stretchMenu.frame) - 18, ih);
-    _info.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin;
     [root addSubview:_info];
 
     self.view = root;
+    [self layoutBar];
 }
 
 - (NSSize)fittingContentSize
@@ -280,37 +351,86 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     return (s >= FQ_STRETCH_AUTO && s <= FQ_STRETCH_MINMAX) ? (int)s : FQ_STRETCH_AUTO;
 }
 
+#pragma mark Rendering
+
 - (void)loadFile:(NSString *)path completion:(void (^)(void))completion
 {
     (void)self.view;
     _path = [path copy];
     _headerLoaded = NO;
+    _hdu = -1;
+    _plane = -1;
+    _hdus = nil;
+    [self render:YES completion:completion];
+}
+
+/// Renders _path with the current HDU, plane and stretch. The first render
+/// of a file also lists its HDUs and sizes the view.
+- (void)render:(BOOL)first completion:(void (^)(void))completion
+{
     int stretch = [self currentStretch];
     [_stretchMenu selectItemAtIndex:stretch];
-    int maxPixels = _maxPixels;
+    NSString *path = _path;
+    int maxPixels = _maxPixels, hdu = _hdu;
+    long long plane = _plane;
     NSInteger generation = ++_generation;
+    _busy = YES;
+    _again = NO;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSString *error = nil;
-        FQRendering *r = [FQRendering renderFile:path
-                                       maxPixels:maxPixels
-                                         samples:4
-                                         stretch:stretch
-                                           error:&error];
+        NSArray<FQHDUItem *> *hdus = nil;
+        FQRendering *r;
+        if (first)
+            r = [FQRendering renderFile:path
+                              maxPixels:maxPixels
+                                samples:4
+                                stretch:stretch
+                                    hdu:hdu
+                                  plane:plane
+                                   hdus:&hdus
+                                  error:&error];
+        else
+            r = [FQRendering renderFile:path
+                              maxPixels:maxPixels
+                                samples:4
+                                stretch:stretch
+                                    hdu:hdu
+                                  plane:plane
+                                   hdus:NULL
+                                  error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (generation == self->_generation)
-                [self showRendering:r error:error];
+            if (generation == self->_generation) {
+                self->_busy = NO;
+                if (first)
+                    self->_hdus = hdus;
+                [self showRendering:r error:error first:first];
+                if (self->_again)
+                    [self render:NO completion:nil];
+            }
             if (completion)
                 completion();
         });
     });
 }
 
-- (void)showRendering:(FQRendering *)r error:(NSString *)error
+/// Renders again with new settings; while a render is running, waits for
+/// it and then renders once with the latest settings (slider drags).
+- (void)requestRender
+{
+    if (!_path)
+        return;
+    if (_busy)
+        _again = YES;
+    else
+        [self render:NO completion:nil];
+}
+
+- (void)showRendering:(FQRendering *)r error:(NSString *)error first:(BOOL)first
 {
     _rendering = r;
     int kind = r ? r.kind : FQ_KIND_NONE;
     _imageView.image = kind == FQ_KIND_IMAGE ? r.image : NULL;
-    _spectrumView.rendering = kind == FQ_KIND_SPECTRUM ? r : nil;
+    _spectrumView.rendering = kind == FQ_KIND_PLOT ? r : nil;
     _spectrumView.needsDisplay = YES;
     if (r) {
         fq_info in = r.info;
@@ -328,17 +448,87 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     else
         _message.stringValue = error.length ? error : @"";
 
-    // Fit 1000 x 720 points; small images grow at most 2x, or to 480 points.
-    CGSize px = r ? r.pixelSize : CGSizeMake(800, 600);
-    CGFloat w = MAX(px.width, 1), h = MAX(px.height, 1);
-    CGFloat s = MIN(MIN(1000 / w, 720 / h), MAX(2.0, 480 / MAX(w, h)));
-    _fitting = NSMakeSize(MAX(round(w * s), 360), round(h * s) + kBarHeight);
-    self.preferredContentSize = _fitting;
+    if (first) {
+        // Fit 1000 x 720 points; small images grow at most 2x, or to 480 points.
+        CGSize px = r ? r.pixelSize : CGSizeMake(800, 600);
+        CGFloat w = MAX(px.width, 1), h = MAX(px.height, 1);
+        CGFloat s = MIN(MIN(1000 / w, 720 / h), MAX(2.0, 480 / MAX(w, h)));
+        _fitting = NSMakeSize(MAX(round(w * s), 360), round(h * s) + kBarHeight);
+        self.preferredContentSize = _fitting;
 
-    // Files without a picture (tables, unsupported data) open on the header.
-    BOOL header = kind == FQ_KIND_NONE;
-    _mode.selectedSegment = header ? 1 : 0;
-    [self showHeader:header];
+        [_hduMenu removeAllItems];
+        for (FQHDUItem *item in _hdus) {
+            [_hduMenu addItemWithTitle:item.title];
+            _hduMenu.lastItem.representedObject = @(item.hdu);
+        }
+        [_hduMenu sizeToFit];
+        NSRect f = _hduMenu.frame;
+        f.size.width = MIN(f.size.width, 260);
+        _hduMenu.frame = f;
+
+        // Files without a picture (tables, unsupported data) open on the header.
+        _mode.selectedSegment = kind == FQ_KIND_NONE ? 1 : 0;
+    }
+    if (r) {
+        NSInteger i = [_hduMenu indexOfItemWithRepresentedObject:@(r.info.hdu)];
+        if (i >= 0)
+            [_hduMenu selectItemAtIndex:i];
+    }
+    [self updatePlaneControls];
+    [self showHeader:_mode.selectedSegment == 1];
+}
+
+#pragma mark Bar
+
+- (BOOL)showsPlaneSlider
+{
+    if (!_rendering || _rendering.kind != FQ_KIND_IMAGE)
+        return NO;
+    fq_info in = _rendering.info;
+    return in.nplanes > 1 && in.color == FQ_COLOR_MONO;
+}
+
+- (void)updatePlaneControls
+{
+    if (![self showsPlaneSlider])
+        return;
+    fq_info in = _rendering.info;
+    _planeSlider.minValue = 0;
+    _planeSlider.maxValue = (double)(in.nplanes - 1);
+    if (!_again)   // not while the slider is being dragged further
+        _planeSlider.doubleValue = (double)in.plane;
+    [self updatePlaneLabel];
+}
+
+- (void)updatePlaneLabel
+{
+    long long n = _rendering ? _rendering.info.nplanes : 0;
+    _planeLabel.stringValue =
+        [NSString stringWithFormat:@"%lld / %lld", llround(_planeSlider.doubleValue) + 1, n];
+}
+
+- (void)layoutBar
+{
+    NSRect b = self.view.bounds;
+    BOOL header = _mode.selectedSegment == 1;
+    BOOL image = _rendering && _rendering.kind == FQ_KIND_IMAGE;
+    NSArray<NSView *> *views = @[ _mode, _stretchMenu, _planeBox, _hduMenu ];
+    BOOL wanted[4] = { YES, !header && image, !header && [self showsPlaneSlider], _hdus.count > 1 };
+    // Right to left; whatever does not fit next to 120 points of info text
+    // is hidden.
+    CGFloat x = NSMaxX(b) - 10;
+    for (NSUInteger i = 0; i < views.count; i++) {
+        NSView *v = views[i];
+        NSSize sz = v.frame.size;
+        BOOL fits = x - sz.width >= (i == 0 ? 10 : 130);
+        v.hidden = !(wanted[i] && fits);
+        if (v.hidden)
+            continue;
+        v.frame = NSMakeRect(x - sz.width, floor((kBarHeight - sz.height) / 2), sz.width, sz.height);
+        x -= sz.width + 8;
+    }
+    CGFloat ih = 16;
+    _info.frame = NSMakeRect(10, floor((kBarHeight - ih) / 2), MAX(0, x - 10), ih);
 }
 
 - (void)showHeader:(BOOL)header
@@ -346,9 +536,10 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     int kind = _rendering ? _rendering.kind : FQ_KIND_NONE;
     _headerScroll.hidden = !header;
     _imageView.hidden = header || kind != FQ_KIND_IMAGE;
-    _spectrumView.hidden = header || kind != FQ_KIND_SPECTRUM;
-    _message.hidden = header || !(kind == FQ_KIND_IMAGE && _rendering.info.empty);
-    _stretchMenu.hidden = header || kind != FQ_KIND_IMAGE;
+    _spectrumView.hidden = header || kind != FQ_KIND_PLOT;
+    _message.hidden = header || _message.stringValue.length == 0 ||
+                      (kind != FQ_KIND_NONE && !(kind == FQ_KIND_IMAGE && _rendering.info.empty));
+    [self layoutBar];
     if (header && !_headerLoaded && _path) {
         _headerLoaded = YES;
         _headerText.string = @"";
@@ -363,10 +554,15 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     }
 }
 
+#pragma mark Actions
+
 - (void)modeChanged:(id)sender
 {
     (void)sender;
-    [self showHeader:_mode.selectedSegment == 1];
+    BOOL header = _mode.selectedSegment == 1;
+    [self showHeader:header];
+    if (header)
+        [self.view.window makeFirstResponder:_headerText];
 }
 
 - (void)stretchChanged:(id)sender
@@ -374,8 +570,55 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     (void)sender;
     NSInteger stretch = _stretchMenu.indexOfSelectedItem;
     [NSUserDefaults.standardUserDefaults setInteger:stretch forKey:kStretchDefaultsKey];
-    if (_path)
-        [self loadFile:_path completion:nil];
+    [self requestRender];
+}
+
+- (void)hduChanged:(id)sender
+{
+    (void)sender;
+    NSNumber *n = _hduMenu.selectedItem.representedObject;
+    if (!n || n.intValue == _hdu || (_hdu < 0 && _rendering && n.intValue == _rendering.info.hdu))
+        return;
+    _hdu = n.intValue;
+    _plane = -1;
+    [self requestRender];
+}
+
+- (void)planeChanged:(id)sender
+{
+    (void)sender;
+    if (!_rendering)
+        return;
+    long long p = llround(_planeSlider.doubleValue);
+    [self updatePlaneLabel];
+    if (p == _plane || (_plane < 0 && p == _rendering.info.plane))
+        return;
+    _hdu = _rendering.info.hdu;
+    _plane = p;
+    [self requestRender];
+}
+
+/// Cmd-F, Cmd-G and Shift-Cmd-G search the header listing.
+- (BOOL)handleKeyEquivalent:(NSEvent *)event
+{
+    if (_headerScroll.hidden)
+        return NO;
+    NSEventModifierFlags mods = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask &
+                                ~NSEventModifierFlagCapsLock;
+    NSString *key = event.charactersIgnoringModifiers.lowercaseString;
+    NSInteger action = 0;
+    if (mods == NSEventModifierFlagCommand && [key isEqualToString:@"f"])
+        action = NSTextFinderActionShowFindInterface;
+    else if (mods == NSEventModifierFlagCommand && [key isEqualToString:@"g"])
+        action = NSTextFinderActionNextMatch;
+    else if (mods == (NSEventModifierFlagCommand | NSEventModifierFlagShift) && [key isEqualToString:@"g"])
+        action = NSTextFinderActionPreviousMatch;
+    if (!action)
+        return NO;
+    NSMenuItem *item = [NSMenuItem new];
+    item.tag = action;
+    [_headerText performTextFinderAction:item];
+    return YES;
 }
 
 @end

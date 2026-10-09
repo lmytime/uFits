@@ -15,13 +15,15 @@ import tempfile
 
 FQ, DATA = sys.argv[1], sys.argv[2]
 N = int(sys.argv[3]) if len(sys.argv) > 3 else 300
-rnd = random.Random(1234)
+rnd = random.Random(int(os.environ.get("FUZZ_SEED", "1234")))
 
 KEYS = [b"BITPIX  =", b"NAXIS   =", b"NAXIS1  =", b"NAXIS2  =", b"NAXIS3  =", b"PCOUNT  =",
         b"ZNAXIS1 =", b"ZNAXIS2 =", b"ZTILE1  =", b"ZTILE2  =", b"ZBITPIX =", b"TFORM1  =",
-        b"ZVAL1   =", b"ZVAL2   =", b"BLANK   =", b"BSCALE  =", b"THEAP   =", b"NAXIS1  ="]
+        b"ZVAL1   =", b"ZVAL2   =", b"BLANK   =", b"BSCALE  =", b"THEAP   =", b"NAXIS1  =",
+        b"TFIELDS =", b"TFORM2  =", b"TFORM3  =", b"TBCOL2  =", b"TSCAL2  =", b"TNULL2  ="]
 VALUES = [b"0", b"-1", b"1", b"2", b"3", b"7", b"-32", b"64", b"999999999", b"-2147483648",
-          b"9223372036854775807", b"1E300", b"'1PB(0)'", b"'1QB(99999999)'", b"'abc'", b"T"]
+          b"9223372036854775807", b"1E300", b"'1PB(0)'", b"'1QB(99999999)'", b"'abc'", b"T",
+          b"'1000000D'", b"'E'", b"'0J'", b"'F99999.3'", b"'A0'", b"'2X'", b"'3M'", b"'PE()'"]
 
 
 def mutate(data):
@@ -69,7 +71,8 @@ def main():
             open(target, "wb").write(data)
             for args in (["render", target, png, "--max", str(rnd.choice([16, 100, 512])),
                           "--samples", str(rnd.choice([0, 1, 2, 4]))],
-                         ["info", target], ["header", target, str(rnd.randrange(3))]):
+                         ["info", target], ["header", target, str(rnd.randrange(3))],
+                         ["hdus", target], ["table", target, str(rnd.randrange(1, 3)), "50"]):
                 try:
                     r = subprocess.run([FQ, *args], capture_output=True, text=True, errors="replace",
                                        env=env, timeout=30)

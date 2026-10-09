@@ -36,6 +36,19 @@ def write(hdus, path):
     fits.HDUList(hdus).writeto(path, overwrite=True)
 
 
+def add_cards(path, ext, cards):
+    """Insert header cards before END, in place (astropy will not write
+    some things, such as scaled integer columns with nulls)."""
+    with fits.open(path) as hl:
+        start, end = hl[ext]._header_offset, hl[ext]._data_offset
+    raw = bytearray(open(path, "rb").read())
+    pos = next(i for i in range(start, end, 80) if raw[i:i + 8] == b"END     ")
+    new = b"".join(fits.Card(k, v).image.encode() for k, v in cards)
+    assert raw[pos + 80 + len(new) - 80:end].strip() == b"", "no room in the header block"
+    raw[pos:pos + 80 + len(new)] = new + raw[pos:pos + 80]
+    open(path, "wb").write(bytes(raw))
+
+
 def main(out):
     os.makedirs(out, exist_ok=True)
     p = lambda name: os.path.join(out, name)
@@ -130,6 +143,86 @@ def main(out):
     write([h], p("spec1d.fits"))
     write([fits.PrimaryHDU(np.stack([flux, flux * 0.1, wave, flux * 0, flux * 0]).astype(np.float32))],
           p("spec_rows.fits"))
+
+    # Tables: light curves and spectra get plotted, anything gets listed.
+    n = 2000
+    t = 1500.0 + np.arange(n) * (2 / 1440)
+    f = 1000 + 5 * rng.standard_normal(n)
+    f[(t % 3.1) < 0.12] -= 30                       # transits
+    pdc = f.astype(np.float32)
+    pdc[300:340] = np.nan                           # a gap
+    lc = fits.BinTableHDU.from_columns([
+        fits.Column("TIME", "D", unit="BJD - 2457000, days", array=t),
+        fits.Column("TIMECORR", "E", array=np.zeros(n)),
+        fits.Column("CADENCENO", "J", array=np.arange(n)),
+        fits.Column("SAP_FLUX", "E", unit="e-/s", array=f * 1.1),
+        fits.Column("PDCSAP_FLUX", "E", unit="e-/s", array=pdc),
+        fits.Column("QUALITY", "J", array=np.zeros(n, np.int32)),
+    ], name="LIGHTCURVE")
+    write([fits.PrimaryHDU(), lc, fits.ImageHDU(np.ones((11, 13), np.int32), name="APERTURE")],
+          p("lc_tess.fits"))
+
+    loglam = np.log10(3800) + np.arange(3000) * 1e-4
+    sflux = 10 + 3 * np.exp(-((10 ** loglam - 6563) / 5) ** 2) + rng.standard_normal(3000)
+    coadd = fits.BinTableHDU.from_columns([
+        fits.Column("flux", "E", array=sflux), fits.Column("loglam", "E", array=loglam),
+        fits.Column("ivar", "E", array=np.ones(3000)), fits.Column("and_mask", "J", array=np.zeros(3000)),
+    ], name="COADD")
+    specobj = fits.BinTableHDU.from_columns([
+        fits.Column("CLASS", "6A", array=np.array(["GALAXY"])), fits.Column("Z", "E", array=[0.1]),
+    ], name="SPECOBJ")
+    write([fits.PrimaryHDU(), coadd, specobj], p("spec_sdss.fits"))
+
+    w1 = np.linspace(1150, 1450, 1024)
+    x1d = fits.BinTableHDU.from_columns([
+        fits.Column("SEGMENT", "4A", array=np.array(["FUVA", "FUVB"])),
+        fits.Column("NELEM", "J", array=[1024, 1024]),
+        fits.Column("WAVELENGTH", "1024D", unit="Angstrom", array=np.stack([w1 + 300, w1])),
+        fits.Column("FLUX", "1024E", unit="erg /s /cm**2 /Angstrom",
+                    array=np.stack([np.sin(w1 / 7), np.cos(w1 / 5)]) * 1e-14),
+    ], name="SCI")
+    write([fits.PrimaryHDU(), x1d], p("spec_x1d.fits"))
+
+    m = 500
+    mjd = 58000 + np.sort(rng.uniform(0, 400, m))
+    mag = 15 + 0.5 * np.sin(mjd / 13) + 0.05 * rng.standard_normal(m)
+    rate = np.round((mag - 14) * 1000).astype(np.int32)
+    rate[::17] = -999                               # nulls in a scaled int column
+    write([fits.PrimaryHDU(), fits.BinTableHDU.from_columns([
+        fits.Column("MJD", "D", array=mjd), fits.Column("MAG", "E", unit="mag", array=mag),
+        fits.Column("FILTER", "1A", array=np.array(["g"] * m)),
+    ], name="PHOT")], p("lc_mag.fits"))
+    write([fits.PrimaryHDU(), fits.BinTableHDU.from_columns([
+        fits.Column("TIME", "D", unit="s", array=mjd * 86400.0),
+        fits.Column("RATE", "J", unit="count/s", array=rate),
+    ], name="RATE")], p("lc_scaled.fits"))
+    add_cards(p("lc_scaled.fits"), 1, [("TSCAL2", 0.001), ("TZERO2", 14.0), ("TNULL2", -999)])
+
+    chan = np.arange(1024, dtype=np.int16)
+    counts = rng.poisson(50 * np.exp(-chan / 300.0) + 3).astype(np.int32)
+    write([fits.PrimaryHDU(), fits.BinTableHDU.from_columns([
+        fits.Column("CHANNEL", "I", array=chan), fits.Column("COUNTS", "J", unit="count", array=counts),
+    ], name="SPECTRUM")], p("pha.fits"))
+
+    k = 6
+    mixed = fits.BinTableHDU.from_columns([
+        fits.Column("NAME", "12A", array=np.array(["alpha", "beta", "gamma", "delta", "", "zeta"])),
+        fits.Column("FLAG", "L", array=np.array([True, False, True, True, False, True])),
+        fits.Column("BITS", "11X", array=np.zeros((k, 11), bool)),
+        fits.Column("SMALL", "B", array=np.arange(k, dtype=np.uint8)),
+        fits.Column("SHORT", "I", null=-1, array=np.array([1, -1, 3, 4, 5, 6], np.int16)),
+        fits.Column("BIG", "K", array=np.arange(k, dtype=np.int64) * 10 ** 12),
+        fits.Column("VEC", "3E", array=np.arange(3 * k, dtype=np.float32).reshape(k, 3)),
+        fits.Column("LONGVEC", "50D", array=np.ones((k, 50))),
+        fits.Column("Z", "C", array=np.arange(k) * (1 + 2j)),
+        fits.Column("ZZ", "M", array=np.arange(k) * (3 - 1j)),
+        fits.Column("VLA", "PE()", array=[np.arange(i, dtype=np.float32) for i in range(k)]),
+    ], name="MIXED")
+    ascii_tab = fits.TableHDU.from_columns([
+        fits.Column("ID", "I6", array=np.arange(4)), fits.Column("RA", "F10.5", array=np.linspace(10, 11, 4)),
+        fits.Column("NOTE", "A8", array=np.array(["a", "bb", "ccc", "dddd"])),
+    ], name="ASCII")
+    write([fits.PrimaryHDU(), mixed, ascii_tab], p("tables_mixed.fits"))
 
     # Tile compressed images.
     big = sky(500, 600)

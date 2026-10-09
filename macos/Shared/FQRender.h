@@ -8,6 +8,14 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// One HDU a viewer can switch to (an image, or a table that is plotted).
+@interface FQHDUItem : NSObject
+@property(nonatomic, readonly) int hdu;
+@property(nonatomic, readonly) int kind;            // FQ_KIND_IMAGE or FQ_KIND_PLOT
+@property(nonatomic, readonly) long long nplanes;
+@property(nonatomic, readonly, copy) NSString *title; // "HDU 1  SCI — 4096 × 4096 float32"
+@end
+
 /// Wraps an image rendered by the core. Owns the fq_image.
 @interface FQRendering : NSObject
 @property(nonatomic, readonly) int kind;              // FQ_KIND_*
@@ -24,16 +32,29 @@ NS_ASSUME_NONNULL_BEGIN
                             samples:(int)samples
                             stretch:(int)stretch
                               error:(NSString *_Nullable *_Nullable)error;
+
+/// Same, for a given HDU and cube plane (-1 = automatic). With hdus, also
+/// lists the HDUs that can be shown, whether or not rendering succeeds.
++ (nullable instancetype)renderFile:(NSString *)path
+                          maxPixels:(int)maxPixels
+                            samples:(int)samples
+                            stretch:(int)stretch
+                                hdu:(int)hdu
+                              plane:(long long)plane
+                               hdus:(NSArray<FQHDUItem *> *_Nullable *_Nullable)hdus
+                              error:(NSString *_Nullable *_Nullable)error;
 @end
 
-/// Draws a spectrum envelope inside rect (Core Graphics coordinates).
+/// Draws a plot envelope inside rect (Core Graphics coordinates): a line,
+/// or dots for a time series; magnitudes run downwards.
 void FQDrawSpectrum(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat lineWidth,
                     CGColorRef color);
 
 /// NSString from a C string that may not be valid UTF-8. Never nil.
 NSString *FQString(const char *_Nullable s);
 
-/// Full header listing: HDU summary followed by every header (capped).
+/// Full header listing: HDU summary followed by every header and the
+/// first rows of every table (capped).
 NSString *FQHeaderListing(NSString *path);
 
 NS_ASSUME_NONNULL_END

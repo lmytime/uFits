@@ -2,9 +2,12 @@
  * fqtool - command line front end to the uFits core.
  *
  *   fqtool info FILE                 HDU list and what would be shown
+ *   fqtool hdus FILE                 the HDUs a viewer can switch between
  *   fqtool header FILE [HDU]         header cards
+ *   fqtool table FILE HDU [ROWS]     columns and first rows of a table
  *   fqtool render FILE OUT.png [options]
  *   fqtool dump FILE OUT.f32 [options]   binned float32 values (tests)
+ *   fqtool plot FILE OUT.f32 [options]   plot envelope, low then high (tests)
  *
  * Options: --max N  --samples K  --stretch auto|linear|minmax  --hdu N
  *          --plane P  --mono  --threads T  --repeat R
@@ -86,12 +89,21 @@ static int write_spectrum_png(const char *path, const fq_image *img)
         return -1;
     memset(px, 255, (size_t)w * h);
     double lo = img->y_min, hi = img->y_max;
+    if (img->y_flip) {   /* magnitudes: small values on top */
+        lo = img->y_max;
+        hi = img->y_min;
+    }
     int prev = -1;
     for (int x = 0; x < w; x++) {
         int c = (int)((int64_t)x * img->spec_n / w);
         float a = img->spec_lo[c], b = img->spec_hi[c];
         if (!(a == a))
             continue;
+        if (img->y_flip) {
+            float t = a;
+            a = b;
+            b = t;
+        }
         double fy0 = (hi - b) / (hi - lo) * (h - 1), fy1 = (hi - a) / (hi - lo) * (h - 1);
         double fmid = (hi - ((double)a + b) / 2) / (hi - lo) * (h - 1);
         int y0 = fy0 < 0 ? 0 : fy0 > h - 1 ? h - 1 : (int)fy0;
@@ -114,10 +126,13 @@ static void usage(void)
 {
     fprintf(stderr,
             "usage: fqtool info FILE\n"
+            "       fqtool hdus FILE\n"
             "       fqtool header FILE [HDU]\n"
+            "       fqtool table FILE HDU [ROWS]\n"
             "       fqtool render FILE OUT.png [--max N] [--samples K] [--stretch auto|linear|minmax]\n"
             "                                 [--hdu N] [--plane P] [--mono] [--threads T] [--repeat R]\n"
-            "       fqtool dump FILE OUT.f32 [same options]\n");
+            "       fqtool dump FILE OUT.f32 [same options]\n"
+            "       fqtool plot FILE OUT.f32 [same options]\n");
 }
 
 static int parse_opts(int argc, char **argv, int start, fq_opts *o, int *repeat)
@@ -164,11 +179,21 @@ static void print_info(const fq_info *in)
     for (int i = 0; i < in->naxis; i++)
         printf(i ? "x%lld" : "%lld", (long long)in->naxes[i]);
     printf(" compressed=%d%s%s plane=%lld/%lld color=%d bayer=%s bin=%d samples=%d out=%dx%d"
-           " flipped=%d truncated=%d empty=%d median=%.6g sigma=%.6g black=%.6g white=%.6g\n",
+           " flipped=%d truncated=%d empty=%d table=%d median=%.6g sigma=%.6g black=%.6g white=%.6g\n",
            in->compressed, in->compressed ? ":" : "", in->cmptype, (long long)in->plane,
            (long long)in->nplanes, in->color, in->bayer, in->bin, in->samples, in->width,
-           in->height, in->flipped, in->truncated, in->empty, in->median, in->sigma, in->black,
-           in->white);
+           in->height, in->flipped, in->truncated, in->empty, in->table, in->median, in->sigma,
+           in->black, in->white);
+}
+
+/* Everything about a plot, one key=value per line (values may hold spaces). */
+static void print_plot(const fq_image *img)
+{
+    printf("n=%d\npoints=%lld\ny_min=%.17g\ny_max=%.17g\nhas_x=%d\nx_first=%.17g\nx_last=%.17g\n"
+           "x_log=%d\ny_flip=%d\ndots=%d\nx_label=%s\ny_label=%s\nx_unit=%s\ny_unit=%s\n",
+           img->spec_n, (long long)img->spec_points, img->y_min, img->y_max, img->has_x,
+           img->x_first, img->x_last, img->x_log, img->y_flip, img->points, img->x_label,
+           img->y_label, img->x_unit, img->y_unit);
 }
 
 int main(int argc, char **argv)
@@ -199,6 +224,22 @@ int main(int argc, char **argv)
         } else {
             printf("no image: %s\n", err);
         }
+    } else if (!strcmp(cmd, "hdus")) {
+        fq_hdu_entry e[64];
+        int n = fq_list_hdus(f, e, 64);
+        for (int i = 0; i < n; i++)
+            printf("%d %s %lld %s | %s\n", e[i].hdu, e[i].kind == FQ_KIND_PLOT ? "plot" : "image",
+                   (long long)e[i].nplanes, e[i].extname[0] ? e[i].extname : "-", e[i].desc);
+    } else if (!strcmp(cmd, "table")) {
+        int hdu = argc > 3 ? atoi(argv[3]) : 1, rows = argc > 4 ? atoi(argv[4]) : 20;
+        char *s = fq_table_text(f, hdu, rows, NULL);
+        if (!s) {
+            fprintf(stderr, "HDU %d is not a table\n", hdu);
+            rc = 1;
+        } else {
+            fputs(s, stdout);
+            free(s);
+        }
     } else if (!strcmp(cmd, "header")) {
         int hdu = argc > 3 ? atoi(argv[3]) : 0;
         char *s = fq_header_text(f, hdu, NULL);
@@ -209,7 +250,7 @@ int main(int argc, char **argv)
             fputs(s, stdout);
             free(s);
         }
-    } else if (!strcmp(cmd, "render") || !strcmp(cmd, "dump")) {
+    } else if (!strcmp(cmd, "render") || !strcmp(cmd, "dump") || !strcmp(cmd, "plot")) {
         if (argc < 4) {
             usage();
             fq_close(f);
@@ -222,7 +263,27 @@ int main(int argc, char **argv)
             fq_close(f);
             return 2;
         }
-        if (!strcmp(cmd, "dump")) {
+        if (!strcmp(cmd, "plot")) {
+            fq_image *img = fq_render(f, &o, err, sizeof err);
+            if (!img) {
+                fprintf(stderr, "%s: %s\n", path, err);
+                rc = 1;
+            } else if (img->info.kind != FQ_KIND_PLOT) {
+                fprintf(stderr, "%s: not a plot\n", path);
+                fq_image_free(img);
+                rc = 1;
+            } else {
+                FILE *fp = fopen(argv[3], "wb");
+                if (fp) {
+                    fwrite(img->spec_lo, sizeof(float), (size_t)img->spec_n, fp);
+                    fwrite(img->spec_hi, sizeof(float), (size_t)img->spec_n, fp);
+                    fclose(fp);
+                }
+                print_info(&img->info);
+                print_plot(img);
+                fq_image_free(img);
+            }
+        } else if (!strcmp(cmd, "dump")) {
             o.exact = 1;
             int w, h, nch;
             fq_info info;
@@ -258,11 +319,12 @@ int main(int argc, char **argv)
             } else {
                 print_info(&img->info);
                 printf("open %.2f ms, render %.2f ms (best of %d)\n", t_open, best, repeat);
-                if (img->info.kind == FQ_KIND_SPECTRUM) {
-                    printf("spectrum n=%d points=%lld y=[%g, %g] x=%d [%g, %g] log=%d xunit=%s yunit=%s\n",
+                if (img->info.kind == FQ_KIND_PLOT) {
+                    printf("plot n=%d points=%lld y=[%g, %g] x=%d [%g, %g] log=%d flip=%d dots=%d"
+                           " %s [%s] vs %s [%s]\n",
                            img->spec_n, (long long)img->spec_points, img->y_min, img->y_max,
-                           img->has_x, img->x_first, img->x_last, img->x_log, img->x_unit,
-                           img->y_unit);
+                           img->has_x, img->x_first, img->x_last, img->x_log, img->y_flip,
+                           img->points, img->y_label, img->y_unit, img->x_label, img->x_unit);
                     write_spectrum_png(argv[3], img);
                 } else {
                     /* Output statistics: median grey of the opaque pixels and

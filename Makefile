@@ -56,7 +56,8 @@ SIGNFLAGS := --options runtime --timestamp
 endif
 
 CORE_H   := core/fq.h core/fq_internal.h
-CORE_OBJ := $(B)/obj/core/fq.o $(B)/obj/core/fq_codec.o
+CORE_SRC := core/fq.c core/fq_image.c core/fq_table.c core/fq_codec.c
+CORE_OBJ := $(patsubst core/%.c,$(B)/obj/core/%.o,$(CORE_SRC))
 SHARED_H := macos/Shared/FQRender.h macos/Shared/FQPreviewController.h
 
 APP_OBJ     := $(B)/obj/app/main.o $(B)/obj/app/FQRender.o $(B)/obj/app/FQPreviewController.o
@@ -178,17 +179,18 @@ zip: app
 
 fqtool: $(B)/fqtool
 
-$(B)/fqtool: tools/fqtool.c core/fq.c core/fq_codec.c $(CORE_H)
+$(B)/fqtool: tools/fqtool.c $(CORE_SRC) $(CORE_H)
 	@mkdir -p $(B)
-	$(HOSTCC) -std=c99 -O2 $(WARN) -Icore -o $@ tools/fqtool.c core/fq.c core/fq_codec.c -lz -lm -lpthread
+	$(HOSTCC) -std=c99 -O2 $(WARN) -Icore -o $@ tools/fqtool.c $(CORE_SRC) -lz -lm -lpthread
 
 test: $(B)/fqtool
 	python3 tests/make_test_files.py $(B)/testdata
 	python3 tests/test_core.py $(B)/fqtool $(B)/testdata
 
-# Quick Look checks used by CI: thumbnails through QLThumbnailGenerator and
-# previews through QLPreviewView, both served by the installed extensions.
-qltools: $(B)/qlthumb $(B)/qlpreview
+# Checks used by CI: thumbnails through QLThumbnailGenerator and previews
+# through QLPreviewView, both served by the installed extensions, and the
+# preview UI driven directly (HDU menu, plane slider, find bar).
+qltools: $(B)/qlthumb $(B)/qlpreview $(B)/uitest
 
 $(B)/qlthumb: tests/macos/qlthumb.m
 	@mkdir -p $(B)
@@ -198,6 +200,10 @@ $(B)/qlthumb: tests/macos/qlthumb.m
 $(B)/qlpreview: tests/macos/qlpreview.m
 	@mkdir -p $(B)
 	$(CC) -fobjc-arc -fmodules -O2 -o $@ $< -framework Cocoa -framework Quartz
+
+$(B)/uitest: tests/macos/uitest.m $(B)/obj/app/FQPreviewController.o $(B)/obj/app/FQRender.o $(CORE_OBJ)
+	@mkdir -p $(B)
+	$(CC) $(OBJC_) -o $@ $^ -framework Cocoa -framework QuartzCore -lz
 
 clean:
 	rm -rf $(B)

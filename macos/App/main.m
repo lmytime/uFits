@@ -78,6 +78,16 @@ static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
     NSMenu *editMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
     [editMenu addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
     [editMenu addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
+    [editMenu addItem:NSMenuItem.separatorItem];
+    NSArray *finds = @[ @[ @"Find…", @"f", @(NSTextFinderActionShowFindInterface) ],
+                        @[ @"Find Next", @"g", @(NSTextFinderActionNextMatch) ],
+                        @[ @"Find Previous", @"G", @(NSTextFinderActionPreviousMatch) ] ];
+    for (NSArray *f in finds) {
+        NSMenuItem *item = [editMenu addItemWithTitle:f[0]
+                                               action:@selector(performTextFinderAction:)
+                                        keyEquivalent:f[1]];
+        item.tag = [f[2] integerValue];
+    }
 
     NSMenu *windowMenu = [[NSMenu alloc] initWithTitle:@"Window"];
     [windowMenu addItemWithTitle:@"Minimize" action:@selector(performMiniaturize:) keyEquivalent:@"m"];

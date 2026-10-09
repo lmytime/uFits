@@ -1,9 +1,14 @@
 name: build
 
+# Branches in this repository are tested on push (a pull request shows those
+# runs too); superseded runs of the same branch are cancelled.
 on:
   push:
-  pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   core:
@@ -15,13 +20,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/workflows/build.yml
       - run: pip install numpy astropy
       - name: Decode and binning vs astropy
         run: make test
       - name: AddressSanitizer + UBSan, damaged files
         run: |
           gcc -std=c99 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined \
-              -Icore -o build/fqtool-asan tools/fqtool.c core/fq.c core/fq_codec.c -lz -lm -lpthread
+              -Icore -o build/fqtool-asan tools/fqtool.c core/*.c -lz -lm -lpthread
           python3 tests/test_core.py build/fqtool-asan build/testdata > /dev/null
           python3 tests/fuzz.py build/fqtool-asan build/testdata 500
 
@@ -42,6 +49,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/workflows/build.yml
       - run: pip install numpy astropy
       - name: Core tests (Apple clang, GCD)
         run: make test
@@ -58,11 +67,17 @@ jobs:
           make qltools
           cd build/testdata
           ../qlthumb ../ql f32.fits u16.fits rgb.fits bayer_rggb.fits rice_f32_sd1.fits \
-            footprint_f32.fits mef.fits spec1d.fits cube5.fits
+            footprint_f32.fits mef.fits spec1d.fits cube5.fits lc_tess.fits lc_mag.fits spec_sdss.fits pha.fits
       - name: Quick Look preview (QLPreviewView)
         if: always()
         timeout-minutes: 4
-        run: build/qlpreview build/ql build/testdata/f32.fits build/testdata/spec1d.fits build/testdata/table_only.fits
+        run: |
+          cd build/testdata
+          ../qlpreview ../ql f32.fits spec1d.fits mef.fits lc_tess.fits tables_mixed.fits
+      - name: Preview UI (HDU menu, plane slider, plots, find bar)
+        if: always()
+        timeout-minutes: 3
+        run: build/uitest build/ql build/testdata
       - name: App windows (best effort)
         if: always()
         timeout-minutes: 2

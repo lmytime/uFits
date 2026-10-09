@@ -1,11 +1,12 @@
 # uFits
 
 Quick Look for FITS files on macOS. Press Space on a `.fits` / `.fit` / `.fts` / `.fz`
-file in Finder to see the image, and get real thumbnails in Finder windows.
+file in Finder to see the image (or the light curve, or the spectrum), and get real
+thumbnails in Finder windows.
 
 uFits is built to be small and fast:
 
-- **No frameworks, no Python, no cfitsio.** A ~3,000 line C core (zlib is the only
+- **No frameworks, no Python, no cfitsio.** A ~4,000 line C core (zlib is the only
   dependency) plus thin Objective-C Quick Look extensions. The whole app, universal
   (Apple Silicon + Intel), is 1.4 MB, a third of which is its icon.
 - **Reads only what it shows.** Files are memory mapped; images are binned straight from
@@ -29,24 +30,33 @@ Time spent in the core alone, measured on a 4-core Linux VM:
 
 ## What it shows
 
-- The first HDU that holds an image (an empty primary HDU followed by `SCI`, as in
-  HST/JWST files, works as expected).
+- The first HDU that holds an image or a plottable table (an empty primary HDU
+  followed by `SCI`, as in HST/JWST files, works as expected). When a file has more,
+  a menu in the preview's bar switches between them (`SCI`, `ERR`, `DQ`, ...).
 - Every BITPIX, with `BSCALE`/`BZERO` (unsigned integers included) and `BLANK`/NaN
   as transparent pixels, so mosaics keep their footprint shape.
 - An automatic midtone stretch (median/MAD based, like PixInsight's STF) that shows faint
   structure without burning out bright sources. The preview's menu switches to a linear
   0.5–99.5 % or min–max stretch; the choice is remembered.
-- Cubes: the middle plane. Three-plane cubes are shown in colour unless `CTYPE3` names
-  another axis (frequency, wavelength, ...).
+- Cubes: the middle plane first, and a slider to step through the others. Three-plane
+  cubes are shown in colour unless `CTYPE3` names another axis (frequency, wavelength,
+  ...).
 - One-shot-colour camera frames with `BAYERPAT` (`XBAYROFF`/`YBAYROFF`, `ROWORDER`
   honoured) are debayered to colour.
 - 1-D data (spectra) as a plot, with the wavelength axis from `CRVAL1`/`CDELT1`.
+- Binary tables holding a light curve or a spectrum, as a plot: TESS and Kepler light
+  curves (`PDCSAP_FLUX` against `TIME`), X-ray light curves (`RATE`), photometry in
+  magnitudes (drawn with bright up), SDSS spectra (`flux` against `loglam`), HST/JWST
+  `x1d` spectra (array columns), X-ray spectra (`COUNTS` against `CHANNEL`), and other
+  tables whose columns are named like these. Only the two columns plotted are decoded.
 - Tile-compressed images (`fpack`, `.fz`): `RICE_1`, `GZIP_1`, `GZIP_2`, `PLIO_1`,
   `NOCOMPRESS`, with all three quantization/dithering modes.
 - Gzipped files (`.fits.gz`) when built with `GZIP=1` (see below).
 - Rows follow the FITS convention (first row at the bottom) unless `ROWORDER = 'TOP-DOWN'`.
-- The **Header** button lists every HDU and all header cards; tables and other files
-  without an image open straight on the header.
+- The **Header** button lists every HDU, all header cards and the first 100 rows of
+  every table (binary and ASCII; array, string, logical, bit, complex and
+  variable-length columns included). Files without anything to plot open straight on
+  it. ⌘F searches it.
 
 Not supported: `HCOMPRESS_1` tiles (such files still open on their header), random groups.
 
@@ -114,12 +124,15 @@ make test                                     # needs python3 with numpy + astro
 make fqtool && build/fqtool render image.fits out.png --max 1024
 build/fqtool info image.fits                  # HDU list and what Quick Look would show
 build/fqtool header image.fits 1
+build/fqtool table catalog.fits 1 20          # columns and first rows of a table
 ```
 
-`make test` writes about 50 FITS files covering every BITPIX, scaling, blanks, NaNs, MEF,
-cubes, RGB, Bayer, spectra, every supported compression, gzip and damaged files,
-and checks the decoded and binned values against astropy, plus the stretch itself.
-`tests/fuzz.py` feeds damaged files to an AddressSanitizer/UBSan build. CI runs both
-on Linux and on macOS, then installs the app on the macOS runner, requests thumbnails
-through `QLThumbnailGenerator` and previews through `QLPreviewView` (the machinery
-behind Finder's Quick Look), and checks that no extension crashed.
+`make test` writes about 60 FITS files covering every BITPIX, scaling, blanks, NaNs, MEF,
+cubes, RGB, Bayer, spectra, light curves and spectra in tables, every supported
+compression, gzip and damaged files, and checks the decoded and binned values and the
+plotted envelopes against astropy and numpy, plus the stretch itself and the table
+listings. `tests/fuzz.py` feeds damaged files to an AddressSanitizer/UBSan build. CI
+runs both on Linux and on macOS, then installs the app on the macOS runner, requests
+thumbnails through `QLThumbnailGenerator` and previews through `QLPreviewView` (the
+machinery behind Finder's Quick Look), drives the preview's controls (HDU menu, plane
+slider, find bar), and checks that no extension crashed.

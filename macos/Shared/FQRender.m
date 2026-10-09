@@ -2,8 +2,10 @@
 
 #import "FQRender.h"
 
+#include <limits.h>
 #include <math.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 NSString *FQString(const char *s)
 {
@@ -62,6 +64,49 @@ static NSString *FQTypeName(int bitpix)
     return @"?";
 }
 
+@interface FQHDUItem ()
+- (instancetype)initWithEntry:(const fq_hdu_entry *)e;
+@end
+
+@implementation FQHDUItem
+
+- (instancetype)initWithEntry:(const fq_hdu_entry *)e
+{
+    if ((self = [super init])) {
+        _hdu = e->hdu;
+        _kind = e->kind;
+        _nplanes = e->nplanes;
+        NSString *desc = [FQString(e->desc) stringByReplacingOccurrencesOfString:@" x "
+                                                                      withString:@" × "];
+        NSString *ext = FQString(e->extname);
+        _title = ext.length ? [NSString stringWithFormat:@"HDU %d  %@ — %@", e->hdu, ext, desc]
+                            : [NSString stringWithFormat:@"HDU %d — %@", e->hdu, desc];
+    }
+    return self;
+}
+
+@end
+
+/// The HDUs of f that can be shown. Skipped for big gzip files, where
+/// finding every header means inflating the whole file.
+static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
+{
+    struct stat st;
+    if ([path.pathExtension.lowercaseString isEqualToString:@"gz"] &&
+        stat(path.fileSystemRepresentation, &st) == 0 && st.st_size > 64 * 1024 * 1024)
+        return @[];
+    enum { kMaxHDUs = 500 };
+    fq_hdu_entry *e = calloc(kMaxHDUs, sizeof *e);
+    if (!e)
+        return @[];
+    int n = fq_list_hdus(f, e, kMaxHDUs);
+    NSMutableArray<FQHDUItem *> *items = [NSMutableArray array];
+    for (int i = 0; i < n; i++)
+        [items addObject:[[FQHDUItem alloc] initWithEntry:&e[i]]];
+    free(e);
+    return items;
+}
+
 @implementation FQRendering {
     fq_image *_img;
     CGImageRef _image;
@@ -71,6 +116,25 @@ static NSString *FQTypeName(int bitpix)
                  maxPixels:(int)maxPixels
                    samples:(int)samples
                    stretch:(int)stretch
+                     error:(NSString **)error
+{
+    return [self renderFile:path
+                  maxPixels:maxPixels
+                    samples:samples
+                    stretch:stretch
+                        hdu:-1
+                      plane:-1
+                       hdus:NULL
+                      error:error];
+}
+
++ (instancetype)renderFile:(NSString *)path
+                 maxPixels:(int)maxPixels
+                   samples:(int)samples
+                   stretch:(int)stretch
+                       hdu:(int)hdu
+                     plane:(long long)plane
+                      hdus:(NSArray<FQHDUItem *> **)hdus
                      error:(NSString **)error
 {
     char err[256] = "";
@@ -85,7 +149,11 @@ static NSString *FQTypeName(int bitpix)
     o.max_width = o.max_height = maxPixels > 0 ? maxPixels : 1024;
     o.max_samples = samples;
     o.stretch = stretch;
+    o.hdu = hdu;
+    o.plane = plane < 0 ? -1 : (int)MIN(plane, (long long)INT_MAX);
     fq_image *img = fq_render(f, &o, err, sizeof err);
+    if (hdus)
+        *hdus = FQListHDUs(f, path);
     fq_close(f);
     if (!img) {
         if (error)
@@ -149,26 +217,32 @@ static NSString *FQTypeName(int bitpix)
     if (in->hdu > 0 || ext.length)
         [parts addObject:ext.length ? [NSString stringWithFormat:@"HDU %d %@", in->hdu, ext]
                                     : [NSString stringWithFormat:@"HDU %d", in->hdu]];
-    NSMutableArray<NSString *> *dims = [NSMutableArray array];
-    for (int i = 0; i < in->naxis && i < FQ_MAXAXES; i++)
-        [dims addObject:[NSString stringWithFormat:@"%lld", (long long)in->naxes[i]]];
-    [parts addObject:[dims componentsJoinedByString:@" × "]];
-    [parts addObject:FQTypeName(in->bitpix)];
-    if (in->compressed)
-        [parts addObject:FQString(in->cmptype)];
-    if (in->color == FQ_COLOR_RGB)
-        [parts addObject:@"RGB"];
-    else if (in->color == FQ_COLOR_BAYER)
-        [parts addObject:[NSString stringWithFormat:@"Bayer %@", FQString(in->bayer)]];
-    else if (in->nplanes > 1)
-        [parts addObject:[NSString stringWithFormat:@"plane %lld of %lld", (long long)in->plane + 1,
-                                                    (long long)in->nplanes]];
-    if (in->kind == FQ_KIND_SPECTRUM) {
-        if (_img->has_x)
-            [parts addObject:[NSString stringWithFormat:@"%g – %g %@", _img->x_first, _img->x_last,
-                                                        FQString(_img->x_unit)]];
-    } else if (in->bin > 1) {
-        [parts addObject:[NSString stringWithFormat:@"shown at 1/%d", in->bin]];
+    if (in->table) {
+        [parts addObject:[NSString stringWithFormat:@"%lld rows", (long long)in->naxes[0]]];
+        [parts addObject:[NSString stringWithFormat:@"%@ vs %@", FQString(_img->y_label),
+                                                    FQString(_img->x_label)]];
+    } else {
+        NSMutableArray<NSString *> *dims = [NSMutableArray array];
+        for (int i = 0; i < in->naxis && i < FQ_MAXAXES; i++)
+            [dims addObject:[NSString stringWithFormat:@"%lld", (long long)in->naxes[i]]];
+        [parts addObject:[dims componentsJoinedByString:@" × "]];
+        [parts addObject:FQTypeName(in->bitpix)];
+        if (in->compressed)
+            [parts addObject:FQString(in->cmptype)];
+        if (in->color == FQ_COLOR_RGB)
+            [parts addObject:@"RGB"];
+        else if (in->color == FQ_COLOR_BAYER)
+            [parts addObject:[NSString stringWithFormat:@"Bayer %@", FQString(in->bayer)]];
+        else if (in->nplanes > 1)
+            [parts addObject:[NSString stringWithFormat:@"plane %lld of %lld", (long long)in->plane + 1,
+                                                        (long long)in->nplanes]];
+        if (in->kind == FQ_KIND_PLOT) {
+            if (_img->has_x)
+                [parts addObject:[NSString stringWithFormat:@"%g – %g %@", _img->x_first,
+                                                            _img->x_last, FQString(_img->x_unit)]];
+        } else if (in->bin > 1) {
+            [parts addObject:[NSString stringWithFormat:@"shown at 1/%d", in->bin]];
+        }
     }
     if (in->truncated)
         [parts addObject:@"file is truncated"];
@@ -190,20 +264,33 @@ void FQDrawSpectrum(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat 
     CGMutablePathRef path = CGPathCreateMutable();
     const double sy = rect.size.height / (hi - lo);
     const CGFloat ymin = CGRectGetMinY(rect) - 4, ymax = CGRectGetMaxY(rect) + 4;
+    const BOOL flip = img->y_flip != 0, dots = img->points != 0;
+    // Short runs of empty columns come from uneven sampling and are bridged;
+    // longer ones are gaps in the data.
+    const int maxgap = MAX(2, n / 50);
+    int gap = 0;
     BOOL open = NO;
     for (int c = 0; c < n; c++) {
         float a = img->spec_lo[c], b = img->spec_hi[c];
         if (!isfinite(a) || !isfinite(b)) {
-            open = NO;
+            if (++gap > maxgap)
+                open = NO;
             continue;
         }
+        gap = 0;
         CGFloat x = rect.origin.x +
                     (n > 1 ? (CGFloat)c * rect.size.width / (CGFloat)(n - 1) : rect.size.width / 2);
-        CGFloat y0 = rect.origin.y + (CGFloat)((a - lo) * sy);
-        CGFloat y1 = rect.origin.y + (CGFloat)((b - lo) * sy);
+        CGFloat y0 = (CGFloat)((a - lo) * sy), y1 = (CGFloat)((b - lo) * sy);
+        y0 = flip ? CGRectGetMaxY(rect) - y0 : CGRectGetMinY(rect) + y0;
+        y1 = flip ? CGRectGetMaxY(rect) - y1 : CGRectGetMinY(rect) + y1;
         y0 = y0 < ymin ? ymin : (y0 > ymax ? ymax : y0);
         y1 = y1 < ymin ? ymin : (y1 > ymax ? ymax : y1);
-        if (c & 1) {   /* alternate direction so dense data fills as a band */
+        if (dots) {   // a time series: a dot, or a bar where a column holds many
+            CGPathMoveToPoint(path, NULL, x, y0);
+            CGPathAddLineToPoint(path, NULL, x, y1 != y0 ? y1 : y0 + 0.01);
+            continue;
+        }
+        if (c & 1) {   // alternate direction so dense data fills as a band
             CGFloat t = y0;
             y0 = y1;
             y1 = t;
@@ -218,7 +305,7 @@ void FQDrawSpectrum(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat 
     }
     CGContextAddPath(ctx, path);
     CGContextSetStrokeColorWithColor(ctx, color);
-    CGContextSetLineWidth(ctx, lineWidth);
+    CGContextSetLineWidth(ctx, dots ? lineWidth * 2 : lineWidth);
     CGContextSetLineJoin(ctx, kCGLineJoinRound);
     CGContextSetLineCap(ctx, kCGLineCapRound);
     CGContextStrokePath(ctx);
@@ -244,6 +331,12 @@ NSString *FQHeaderListing(NSString *path)
         [s appendFormat:@"\n——— HDU %d ———\n", i];
         [s appendString:FQString(h)];
         free(h);
+        char *t = s.length < 4000000 ? fq_table_text(f, i, 100, NULL) : NULL;
+        if (t) {
+            [s appendFormat:@"\n——— HDU %d table ———\n", i];
+            [s appendString:FQString(t)];
+            free(t);
+        }
     }
     if (shown < n)
         [s appendFormat:@"\n… %d more HDUs not shown\n", n - shown];

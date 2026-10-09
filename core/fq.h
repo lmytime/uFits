@@ -25,7 +25,7 @@ extern "C" {
 
 typedef struct fq_file fq_file;
 
-enum { FQ_KIND_NONE = 0, FQ_KIND_IMAGE = 1, FQ_KIND_SPECTRUM = 2 };
+enum { FQ_KIND_NONE = 0, FQ_KIND_IMAGE = 1, FQ_KIND_PLOT = 2 };
 enum { FQ_COLOR_MONO = 0, FQ_COLOR_RGB = 1, FQ_COLOR_BAYER = 2 };
 enum {
     FQ_STRETCH_AUTO = 0,   /* robust midtone stretch (median/MAD based) */
@@ -65,6 +65,8 @@ typedef struct {
     int flipped;              /* 1 = first FITS row is at the bottom */
     int truncated;            /* file ends before the data does */
     int empty;                /* no finite pixel values at all */
+    int table;                /* plot of two columns of a binary table;
+                                 naxes[0] is then the number of rows */
     double median, sigma;     /* channel 0 statistics in data units */
     double black, white;      /* display range of channel 0 */
 } fq_info;
@@ -78,15 +80,19 @@ typedef struct {
     size_t row_bytes;
     uint8_t *pixels;
 
-    /* FQ_KIND_SPECTRUM: min/max envelope of the values per output column. */
+    /* FQ_KIND_PLOT (spectra, light curves): min/max envelope of the values
+       per output column; columns are evenly spaced from x_first to x_last. */
     int spec_n;
     float *spec_lo, *spec_hi;
-    int64_t spec_points;       /* number of samples in the spectrum */
+    int64_t spec_points;       /* number of samples plotted */
     double y_min, y_max;       /* suggested plot range */
-    int has_x;                 /* x axis from WCS keywords */
-    double x_first, x_last;    /* x of the first and last sample */
+    int has_x;                 /* x axis from WCS keywords or a column */
+    double x_first, x_last;    /* x of the first and last column */
     int x_log;                 /* x values are log10 of the wavelength */
     char x_unit[24], y_unit[24];
+    char x_label[32], y_label[32]; /* axis names: table columns or CTYPE1 */
+    int y_flip;                /* magnitudes: smaller values belong on top */
+    int points;                /* a time series: draw points, not a line */
 } fq_image;
 
 /* Open a FITS file (plain or gzip compressed). Returns NULL on failure and
@@ -109,6 +115,20 @@ float *fq_decode_float(fq_file *f, const fq_opts *opts, int *w, int *h,
 
 /* Number of HDUs (reads every header in the file). */
 int fq_hdu_count(fq_file *f);
+
+typedef struct {
+    int hdu;
+    int kind;                 /* FQ_KIND_IMAGE or FQ_KIND_PLOT */
+    int64_t nplanes;          /* planes of a cube */
+    char extname[72];
+    char desc[96];            /* "4096 x 4096 float32", "PDCSAP_FLUX vs TIME" */
+} fq_hdu_entry;
+
+/* The HDUs uFits can show, in file order; returns how many (at most max). */
+int fq_list_hdus(fq_file *f, fq_hdu_entry *out, int max);
+/* Columns and first rows of a table HDU as text. malloc'd, NULL if the HDU
+   is not a table. */
+char *fq_table_text(fq_file *f, int hdu, int maxrows, size_t *len);
 /* Header cards of one HDU, one per line. malloc'd, NULL if no such HDU. */
 char *fq_header_text(fq_file *f, int hdu, size_t *len);
 /* One line per HDU describing its contents. malloc'd. */
