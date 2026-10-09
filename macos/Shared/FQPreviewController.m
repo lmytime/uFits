@@ -207,8 +207,9 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
 @end
 
 /// A table opened in the background for the table view: the file, the
-/// table, and how many characters wide each column's title and first
-/// values are.
+/// table, and how many characters wide each column's title and values are
+/// (in its first and last rows: numbers such as IDs and times grow down a
+/// table).
 @interface FQOpenTable : NSObject
 @property(nonatomic, readonly) fq_table *table;   // NULL if it could not be opened
 @property(nonatomic, readonly) int ncols;         // columns shown (at most 1000)
@@ -229,11 +230,12 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
         int nc = _table ? MIN(fq_table_ncols(_table), 1000) : 0;
         _chars = nc ? calloc((size_t)nc, sizeof *_chars) : NULL;
         _ncols = _chars ? nc : 0;
-        int64_t sample = _table ? MIN(fq_table_rows(_table), (int64_t)50) : 0;
+        int64_t rows = _table ? fq_table_rows(_table) : 0;
+        int64_t head = MIN(rows, (int64_t)50), tail = MAX(head, rows - 50);
         char cell[200];
         for (int c = 0; c < _ncols; c++) {
             size_t w = strlen(fq_table_column(_table, c)->name);
-            for (int64_t r = 0; r < sample; r++) {
+            for (int64_t r = 0; r < rows; r = r + 1 == head ? tail : r + 1) {
                 fq_table_cell(_table, r, c, cell, sizeof cell);
                 w = MAX(w, strlen(cell));
             }
@@ -549,6 +551,10 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     _spectrumView.rendering = nil;
     _imageView.hidden = _spectrumView.hidden = _tableScroll.hidden = _headerScroll.hidden = YES;
     _message.hidden = YES;
+    _renderInfo = _renderTip = nil;
+    _info.stringValue = @"";
+    [_hduMenu removeAllItems];
+    [self layoutBar];
     [self render:YES completion:completion];
 }
 

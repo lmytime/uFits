@@ -19,7 +19,11 @@ after `gh auth login`:
 gh release download -R lmytime/uFits -p install.sh -O - | sh
 ```
 
-To uninstall, run the install command with `sh -s -- --uninstall` at the end.
+To uninstall:
+
+```sh
+curl -fsSL https://github.com/lmytime/uFits/releases/latest/download/install.sh | sh -s -- --uninstall
+```
 
 ## What you see
 
