@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>uFits · Quick Look for FITS files</title>
+<meta name="description" content="uFits adds Quick Look for FITS files to macOS: select a file in Finder, press Space, and see the image, spectrum, light curve, catalog, table or header at once.">
+<meta property="og:title" content="uFits · Quick Look for FITS files">
+<meta property="og:description" content="Select a FITS file in Finder and press Space. Images, spectra, light curves, catalogs, tables and headers, at once.">
+<meta property="og:image" content="https://lmytime.github.io/uFits/icon.png">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#070a14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f2f4f9" media="(prefers-color-scheme: light)">
+<link rel="canonical" href="https://lmytime.github.io/uFits/">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Martian+Mono:wght@400;500;700&display=swap">
+<style>
+/* Layout: a night-sky band holding the pitch (left) and a live Quick Look
+   window (right); below it the feature list set as FITS header cards; a
+   quiet footer. Dark first (the night sky); the light theme is a
+   photographic plate: dark stars on pale glass. */
+:root {
+  --sky: #070a14;
+  --sky-raised: #0e1427;
+  --ink: #e9edf7;
+  --ink-dim: #9ba4bb;
+  --ink-faint: #5f6984;
+  --line: #1c2440;
+  --gold: #f2b65c;
+  --on-gold: #1a1204;
+  --blue: #93b6ff;
+  --star: #ffffff;
+  --glow: rgba(110, 140, 255, 0.16);
+  --shadow: rgba(0, 0, 0, 0.6);
+  --win: #1e2027;
+  --win-bar: #25272e;
+  --win-text: #e7e8ec;
+  --win-dim: #9b9fa9;
+  --win-line: #383b45;
+  --win-content: #15171c;
+  --win-stripe: rgba(255, 255, 255, 0.035);
+  --seg: #3a3d47;
+  --seg-on: #61656f;
+  --plot-ink: #dfe2ea;
+  --img-ground: #08090c;
+  --tl-red: #ff5f57;
+  --tl-yellow: #febc2e;
+  --tl-green: #28c840;
+  --icon-rim: rgba(150, 180, 255, 0.5);
+  --font-display: "Martian Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-body: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --sky: #f2f4f9;
+    --sky-raised: #ffffff;
+    --ink: #0b1122;
+    --ink-dim: #4a5470;
+    --ink-faint: #8a93aa;
+    --line: #dce1ee;
+    --gold: #a65a00;
+    --on-gold: #fffaf2;
+    --blue: #2853c4;
+    --star: #0b1122;
+    --glow: rgba(70, 100, 220, 0.10);
+    --shadow: rgba(20, 30, 60, 0.28);
+    --win: #ececee;
+    --win-bar: #f5f5f7;
+    --win-text: #1d1d1f;
+    --win-dim: #6e6e73;
+    --win-line: #d6d6db;
+    --win-content: #ffffff;
+    --win-stripe: rgba(0, 0, 0, 0.035);
+    --seg: #e1e1e6;
+    --seg-on: #ffffff;
+    --plot-ink: #1d1d1f;
+    --img-ground: #f0f0f2;
+    --icon-rim: transparent;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --sky: #f2f4f9;
+  --sky-raised: #ffffff;
+  --ink: #0b1122;
+  --ink-dim: #4a5470;
+  --ink-faint: #8a93aa;
+  --line: #dce1ee;
+  --gold: #a65a00;
+  --on-gold: #fffaf2;
+  --blue: #2853c4;
+  --star: #0b1122;
+  --glow: rgba(70, 100, 220, 0.10);
+  --shadow: rgba(20, 30, 60, 0.28);
+  --win: #ececee;
+  --win-bar: #f5f5f7;
+  --win-text: #1d1d1f;
+  --win-dim: #6e6e73;
+  --win-line: #d6d6db;
+  --win-content: #ffffff;
+  --win-stripe: rgba(0, 0, 0, 0.035);
+  --seg: #e1e1e6;
+  --seg-on: #ffffff;
+  --plot-ink: #1d1d1f;
+  --img-ground: #f0f0f2;
+  --icon-rim: transparent;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--sky);
+  color: var(--ink);
+  font: 400 1rem/1.6 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--blue); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
+img { max-width: 100%; }
+
+.wrap { max-width: 1160px; margin-inline: auto; padding-inline: clamp(16px, 4vw, 40px); }
+
+/* Night-sky band: the stars sit behind the header and the hero. */
+.band { position: relative; overflow: hidden; background: radial-gradient(70% 60% at 78% 18%, var(--glow), transparent 70%); }
+.sky { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+.top { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 22px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; font: 700 1.05rem/1 var(--font-display); letter-spacing: -0.02em; }
+.brand img, .foot .who img { filter: drop-shadow(0 0 0.6px var(--icon-rim)); }
+.brand img { width: 34px; height: 34px; margin: -2px -1px; }
+.top nav { display: flex; gap: 22px; font-size: 0.95rem; }
+.top nav a { color: var(--ink-dim); text-decoration: none; }
+.top nav a:hover { color: var(--ink); }
+
+.hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 48px; padding-block: 28px 84px; }
+@media (min-width: 980px) {
+  .hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); align-items: center; gap: 56px; padding-block: 40px 104px; }
+}
+.pitch { min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+.eyebrow { margin: 0; font: 500 0.72rem/1.4 var(--font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); }
+h1 {
+  margin: 0;
+  font: 500 clamp(2rem, 1.1rem + 2.7vw, 3.3rem)/1.06 var(--font-display);
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+.lead { margin: 0; max-width: 34em; font-size: 1.14rem; line-height: 1.62; color: var(--ink-dim); text-wrap: pretty; }
+.lead strong { color: var(--ink); font-weight: 600; }
+
+.install { border: 1px solid var(--line); border-radius: 12px; background: var(--sky-raised); overflow: hidden; }
+.install-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 7px 7px 16px; border-bottom: 1px solid var(--line); font-size: 0.88rem; color: var(--ink-dim); }
+.copy { flex: none; border: 0; border-radius: 7px; padding: 8px 16px; background: var(--gold); color: var(--on-gold); font: 600 0.88rem/1 var(--font-body); cursor: pointer; }
+.copy:hover { filter: brightness(1.08); }
+.install-cmd { margin: 0; padding: 13px 16px 15px; font: 400 0.82rem/1.75 var(--font-display); color: var(--ink); }
+.install-cmd .sigil { color: var(--gold); user-select: none; }
+.nobr { white-space: nowrap; }
+.key {
+  display: inline-flex; align-items: center; justify-content: center; vertical-align: 0.1em;
+  min-width: 5.6em; padding: 0.12em 0.9em 0.2em; margin-inline: 0.1em;
+  border: 1px solid var(--line); border-bottom-width: 3px; border-radius: 7px;
+  background: var(--sky-raised); color: var(--ink);
+  font: 500 0.72em/1.3 var(--font-display); cursor: pointer;
+  transition: transform 0.08s ease, border-bottom-width 0.08s ease;
+}
+.key:active { transform: translateY(2px); border-bottom-width: 1px; }
+.meta { margin: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.9rem; color: var(--ink-dim); }
+
+/* The Quick Look window, drawn live. */
+.demo { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.win {
+  border-radius: 12px; overflow: hidden; background: var(--win);
+  box-shadow: 0 40px 90px -30px var(--shadow), 0 0 0 1px var(--win-line);
+  font-family: var(--font-ui); color: var(--win-text);
+  animation: open 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.win.pop { animation: pop 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes open { from { transform: translateY(10px) scale(0.97); opacity: 0.4; } to { transform: none; opacity: 1; } }
+@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(0.985); } 100% { transform: scale(1); } }
+.win-title { position: relative; display: flex; align-items: center; justify-content: center; height: 30px; border-bottom: 1px solid var(--win-line); font-size: 12.5px; font-weight: 600; color: var(--win-dim); }
+.lights { position: absolute; left: 12px; top: 9px; display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: var(--tl-red); }
+.lights i:nth-child(2) { background: var(--tl-yellow); }
+.lights i:nth-child(3) { background: var(--tl-green); }
+.win-body { position: relative; aspect-ratio: 3 / 2; max-width: 100%; background: var(--win-content); }
+.view { position: absolute; inset: 0; transition: opacity 0.18s ease; }
+.view[hidden] { display: block !important; opacity: 0; pointer-events: none; visibility: hidden; }
+#imageView { background: var(--img-ground); }
+canvas.fill { width: 100%; height: 100%; display: block; }
+.rows { overflow: auto; font: 11.5px/1.25 ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+.rows table { border-collapse: collapse; min-width: 100%; }
+.rows th, .rows td { padding: 3px 10px; white-space: nowrap; text-align: right; border-right: 1px solid var(--win-line); }
+.rows th { position: sticky; top: 0; z-index: 1; background: var(--win-bar); color: var(--win-text); font: 500 11px/1.3 var(--font-ui); border-bottom: 1px solid var(--win-line); }
+.rows td:first-child { color: var(--win-dim); }
+.rows td.text, .rows th.text { text-align: left; }
+.rows tbody tr:nth-child(even) { background: var(--win-stripe); }
+.hdr { margin: 0; overflow: auto; padding: 10px 12px; font: 11.5px/1.45 ui-monospace, "SF Mono", Menlo, monospace; color: var(--win-text); white-space: pre; tab-size: 8; }
+.hdr .k { font-weight: 700; }
+.hdr .m { color: var(--win-dim); opacity: 0.7; }
+.hdr .c { color: var(--win-dim); }
+.hdr .h { font-weight: 700; }
+.win-bar { display: flex; align-items: center; gap: 8px; height: 36px; padding-inline: 10px; border-top: 1px solid var(--win-line); background: var(--win-bar); font-size: 11.5px; }
+.win-info { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--win-dim); }
+.pop-up { position: relative; flex: 0 1 auto; min-width: 0; max-width: 46%; }
+.pop-up select {
+  appearance: none; -webkit-appearance: none; width: 100%; max-width: 100%;
+  border: 0; border-radius: 6px; padding: 3px 22px 3px 8px; background: var(--seg); color: var(--win-text);
+  font: 11.5px/1.3 var(--font-ui); text-overflow: ellipsis; cursor: pointer;
+}
+.pop-up::after { content: "⌄"; position: absolute; right: 8px; top: 1px; font-size: 11px; color: var(--win-dim); pointer-events: none; }
+.seg { flex: none; display: inline-flex; padding: 2px; gap: 2px; border-radius: 7px; background: var(--seg); }
+.seg button { border: 0; border-radius: 5px; padding: 3px 9px; background: transparent; color: var(--win-text); font: 11.5px/1.3 var(--font-ui); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--seg-on); box-shadow: 0 1px 2px var(--shadow); }
+.seg button:disabled { color: var(--win-dim); opacity: 0.55; cursor: default; }
+@media (max-width: 600px) { .win-info { display: none; } .pop-up { flex: 1; max-width: none; } #stretchBox { display: none; } }
+.demo figcaption { font-size: 0.86rem; color: var(--ink-dim); }
+
+/* Feature list, set as FITS header cards. */
+.spec { padding-block: 72px 56px; border-top: 1px solid var(--line); }
+.spec h2 { margin: 0 0 8px; font: 500 1.5rem/1.2 var(--font-display); letter-spacing: -0.03em; }
+.spec .sub { margin: 0 0 28px; color: var(--ink-dim); max-width: 40em; }
+.cards { overflow-x: auto; padding: 18px 0 6px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 400 0.84rem/1.55 var(--font-display); }
+.card { display: grid; grid-template-columns: 8.5ch 2ch minmax(0, 30ch) minmax(0, 1fr); column-gap: 0.6ch; padding-block: 5px; }
+.card .k { font-weight: 700; color: var(--ink); }
+.card .e { color: var(--ink-faint); }
+.card .v { color: var(--gold); overflow-wrap: anywhere; }
+.card .c { color: var(--ink-dim); font-family: var(--font-body); font-size: 0.95rem; }
+.card .c::before { content: "/ "; color: var(--ink-faint); font-family: var(--font-display); font-size: 0.84rem; }
+.card.end .k { color: var(--ink-faint); }
+@media (max-width: 760px) {
+  .card { grid-template-columns: 8.5ch 2ch minmax(0, 1fr); }
+  .card .c { grid-column: 3; }
+}
+
+.foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 16px 32px; padding-block: 36px 48px; color: var(--ink-dim); font-size: 0.92rem; }
+.foot .who { display: flex; align-items: center; gap: 10px; color: var(--ink); font: 700 0.95rem/1 var(--font-display); }
+.foot .who img { width: 22px; height: 22px; }
+.foot .who span { color: var(--ink-dim); font-weight: 400; font-size: 0.8rem; }
+.foot nav { display: flex; flex-wrap: wrap; gap: 8px 22px; }
+.foot p { margin: 0; flex-basis: 100%; max-width: 46em; }
+.foot code { font: 0.78rem/1.7 var(--font-display); color: var(--ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  .win, .win.pop { animation: none; }
+  .view { transition: none; }
+}
+</style>
+</head>
+<body>
+<div class="band">
+  <canvas class="sky" id="sky" aria-hidden="true"></canvas>
+  <header class="wrap top">
+    <a class="brand" href="https://github.com/lmytime/uFits"><img src="favicon.png" alt="" width="30" height="30">uFits</a>
+    <nav aria-label="Project">
+      <a href="https://github.com/lmytime/uFits">GitHub</a>
+      <a href="https://github.com/lmytime/uFits/releases/latest">Releases</a>
+    </nav>
+  </header>
+
+  <main class="wrap hero">
+    <div class="pitch">
+      <p class="eyebrow">Quick Look for FITS · macOS</p>
+      <h1>See inside FITS files with one key.</h1>
+      <p class="lead">Select a <strong>.fits</strong> file in Finder and press <button class="key" id="space" type="button" aria-label="Space (shows the next example in the window)">space</button>. uFits shows the image, the spectrum or light curve, the catalog, the table or the header at once, even when the file holds gigabytes.</p>
+      <div class="install">
+        <div class="install-head"><span>Install: paste this in Terminal</span><button class="copy" type="button" data-copy="cmd">Copy</button></div>
+        <div class="install-cmd"><span class="sigil" aria-hidden="true">$ </span><code id="cmd">curl -fsSL https://github.com/<wbr>lmytime/<wbr>uFits/<wbr>releases/<wbr>latest/<wbr>download/<wbr><span class="nobr">install.sh | sh</span></code></div>
+      </div>
+      <p class="meta">
+        <span>macOS 11 or later</span>
+        <span>Apple silicon and Intel</span>
+        <span>1 MB</span>
+        <a href="https://github.com/lmytime/uFits/releases/latest">Download the disk image</a>
+      </p>
+    </div>
+
+    <figure class="demo">
+      <div class="win" id="win">
+        <div class="win-title"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>example.fits</div>
+        <div class="win-body" id="winBody">
+          <div class="view" id="imageView"><canvas class="fill" id="imageCanvas" aria-label="A spiral galaxy in a field of stars"></canvas></div>
+          <div class="view" id="plotView" hidden><canvas class="fill" id="plotCanvas" aria-label="A plot of the table"></canvas></div>
+          <div class="view rows" id="tableView" hidden></div>
+          <pre class="view hdr" id="headerView" hidden></pre>
+        </div>
+        <div class="win-bar">
+          <span class="win-info" id="winInfo"></span>
+          <span class="pop-up"><select id="hduMenu" aria-label="HDU"></select></span>
+          <span class="pop-up" id="stretchBox"><select id="stretchMenu" aria-label="Stretch">
+            <option value="auto">Auto stretch</option>
+            <option value="linear">Linear 0.5–99.5%</option>
+            <option value="minmax">Min – max</option>
+          </select></span>
+          <span class="seg" role="group" aria-label="Show">
+            <button type="button" id="segPicture" aria-pressed="true">Image</button><button type="button" id="segTable" aria-pressed="false">Table</button><button type="button" id="segHeader" aria-pressed="false">Header</button>
+          </span>
+        </div>
+      </div>
+      <figcaption>An example file, drawn live in this page. Pick an HDU or switch between the picture, the rows and the header, as in the real preview.</figcaption>
+    </figure>
+  </main>
+</div>
+
+<section class="spec" aria-labelledby="specTitle">
+  <div class="wrap">
+    <h2 id="specTitle">What it reads</h2>
+    <p class="sub">Images, cubes, tables and every header, from the files you already have. Written here the way a FITS header is: keyword, value, comment.</p>
+    <div class="cards" role="list">
+      <div class="card" role="listitem"><span class="k">SIMPLE</span><span class="e">=</span><span class="v">T</span><span class="c">Standard FITS, from any telescope or pipeline</span></div>
+      <div class="card" role="listitem"><span class="k">IMAGES</span><span class="e">=</span><span class="v">'every BITPIX'</span><span class="c">BSCALE and BZERO applied, blank pixels transparent, an automatic stretch</span></div>
+      <div class="card" role="listitem"><span class="k">CUBES</span><span class="e">=</span><span class="v">'a plane slider'</span><span class="c">RGB cubes and Bayer camera frames in colour</span></div>
+      <div class="card" role="listitem"><span class="k">FPACK</span><span class="e">=</span><span class="v">'RICE_1 GZIP_1 GZIP_2'</span><span class="c">and PLIO_1: only the tiles on show are decompressed</span></div>
+      <div class="card" role="listitem"><span class="k">PLOTS</span><span class="e">=</span><span class="v">'spectra, light curves'</span><span class="c">TESS, Kepler, SDSS, HST and JWST x1d, X-ray</span></div>
+      <div class="card" role="listitem"><span class="k">SKYMAP</span><span class="e">=</span><span class="v">'RA, Dec'</span><span class="c">catalogs as a map of the sky, RA growing to the left, crowded fields shaded</span></div>
+      <div class="card" role="listitem"><span class="k">TABLES</span><span class="e">=</span><span class="v">1000000</span><span class="c">rows scroll smoothly; ⌘C copies the ones you select</span></div>
+      <div class="card" role="listitem"><span class="k">HEADER</span><span class="e">=</span><span class="v">'in columns'</span><span class="c">CONTINUE strings joined, HIERARCH keywords in full; ⌘F finds</span></div>
+      <div class="card" role="listitem"><span class="k">HDUS</span><span class="e">=</span><span class="v">'all of them'</span><span class="c">a menu switches between SCI, ERR, DQ, tables and the rest</span></div>
+      <div class="card" role="listitem"><span class="k">THUMBTIM</span><span class="e">=</span><span class="v">0.02</span><span class="c">[s] for a Finder thumbnail: it reads only the pixels it shows</span></div>
+      <div class="card" role="listitem"><span class="k">APPSIZE</span><span class="e">=</span><span class="v">'1 MB'</span><span class="c">a native, universal app with no dependencies</span></div>
+      <div class="card end" role="listitem"><span class="k">END</span></div>
+    </div>
+  </div>
+</section>
+
+<footer class="wrap foot">
+  <div class="who"><img src="favicon.png" alt="" width="22" height="22">uFits <span data-version></span></div>
+  <nav aria-label="Links">
+    <a href="https://github.com/lmytime/uFits">Source on GitHub</a>
+    <a href="https://github.com/lmytime/uFits/releases">Releases</a>
+    <a href="https://github.com/lmytime/uFits/issues">Report a problem</a>
+  </nav>
+  <p>To uninstall: <code>curl -fsSL https://github.com/<wbr>lmytime/<wbr>uFits/<wbr>releases/<wbr>latest/<wbr>download/<wbr><span class="nobr">install.sh | sh -s -- --uninstall</span></code></p>
+  <p>FITS is the standard data format of astronomy. uFits teaches Finder to show it.</p>
+</footer>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const token = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const listeners = [];
+  const onTheme = (fn) => listeners.push(fn);
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => listeners.forEach((f) => f()));
+  new MutationObserver(() => listeners.forEach((f) => f())).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  // ---- Copy the install command -------------------------------------------
+  for (const button of document.querySelectorAll("[data-copy]")) {
+    button.addEventListener("click", () => {
+      const code = $(button.dataset.copy);
+      const done = (label) => {
+        button.textContent = label;
+        clearTimeout(button.timer);
+        button.timer = setTimeout(() => (button.textContent = "Copy"), 1800);
+      };
+      const select = () => {
+        const range = document.createRange();
+        range.selectNodeContents(code);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        done("Press ⌘C");
+      };
+      try {
+        navigator.clipboard.writeText(code.textContent.trim()).then(() => done("Copied"), select);
+      } catch (e) {
+        select();
+      }
+    });
+  }
+
+  // ---- The latest version, on the project site -----------------------------
+  if (location.hostname.endsWith("github.io")) {
+    fetch("https://api.github.com/repos/lmytime/uFits/releases/latest")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j && j.tag_name) document.querySelectorAll("[data-version]").forEach((el) => (el.textContent = j.tag_name));
+      })
+      .catch(() => {});
+  }
+
+  // ---- Seeded random numbers, so the example looks the same every time ----
+  function random(seed) {
+    return () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const rand = random(4535);
+  const gauss = () => (rand() + rand() + rand() + rand() + rand() + rand() - 3) * 1.4142;
+
+  // ---- Night sky (dark stars on the light theme: a photographic plate) ----
+  const sky = $("sky");
+  const skyCtx = sky.getContext("2d");
+  let stars = [], skyW = 0, skyH = 0, skyDpr = 1, skyColor = "#fff", skyLast = 0, skyVisible = true;
+  function sizeSky() {
+    const box = sky.getBoundingClientRect();
+    skyDpr = Math.min(window.devicePixelRatio || 1, 2);
+    skyW = box.width;
+    skyH = box.height;
+    sky.width = Math.round(skyW * skyDpr);
+    sky.height = Math.round(skyH * skyDpr);
+    const r = random(7);
+    const n = Math.min(420, Math.round((skyW * skyH) / 4200));
+    stars = Array.from({ length: n }, () => ({
+      x: r() * skyW, y: r() * skyH, size: 0.35 + Math.pow(r(), 4) * 1.6, phase: r() * 6.283, speed: 0.3 + r() * 1.1,
+    }));
+    // None behind the words, where a star would read as a stray dot.
+    const clear = [...document.querySelectorAll(".top > *, .pitch > *, .demo figcaption")].map((el) => {
+      const b = el.getBoundingClientRect();
+      return { x0: b.left - box.left - 8, x1: b.right - box.left + 8, y0: b.top - box.top - 6, y1: b.bottom - box.top + 6 };
+    });
+    stars = stars.filter((s) => !clear.some((c) => s.x > c.x0 && s.x < c.x1 && s.y > c.y0 && s.y < c.y1));
+    skyColor = token("--star");
+    drawSky(performance.now());
+  }
+  function drawSky(t) {
+    skyCtx.setTransform(skyDpr, 0, 0, skyDpr, 0, 0);
+    skyCtx.clearRect(0, 0, skyW, skyH);
+    skyCtx.fillStyle = skyColor;
+    for (const s of stars) {
+      const twinkle = reduceMotion ? 0.75 : 0.45 + 0.55 * (0.5 + 0.5 * Math.sin((t / 1000) * s.speed + s.phase));
+      skyCtx.globalAlpha = twinkle * (0.35 + 0.65 * Math.min(1, s.size));
+      skyCtx.beginPath();
+      skyCtx.arc(s.x, s.y, s.size, 0, 6.2832);
+      skyCtx.fill();
+    }
+    skyCtx.globalAlpha = 1;
+  }
+  function animateSky(t) {
+    requestAnimationFrame(animateSky);
+    if (!skyVisible || document.hidden || t - skyLast < 60) return;
+    skyLast = t;
+    drawSky(t);
+  }
+  sizeSky();
+  new ResizeObserver(sizeSky).observe(sky);
+  if (document.fonts) document.fonts.ready.then(sizeSky);   // the words move once the fonts arrive
+  new IntersectionObserver(([e]) => (skyVisible = e.isIntersecting)).observe(sky);
+  onTheme(() => { skyColor = token("--star"); drawSky(performance.now()); });
+  if (!reduceMotion) requestAnimationFrame(animateSky);
+
+  // ---- The example file ------------------------------------------------------
+  // HDU 1: a spiral galaxy in a star field (counts, before any stretch).
+  const IW = 720, IH = 480;
+  const pixels = new Float32Array(IW * IH);
+  function addStar(cx, cy, flux, sigma) {
+    const rad = Math.ceil(sigma * 4);
+    const norm = flux / (6.2832 * sigma * sigma);
+    for (let y = Math.max(0, Math.floor(cy - rad)); y <= Math.min(IH - 1, Math.ceil(cy + rad)); y++)
+      for (let x = Math.max(0, Math.floor(cx - rad)); x <= Math.min(IW - 1, Math.ceil(cx + rad)); x++) {
+        const d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+        pixels[y * IW + x] += norm * Math.exp(-d2 / (2 * sigma * sigma));
+      }
+  }
+  function makeGalaxy() {
+    const cx = IW * 0.53, cy = IH * 0.5, scale = IH * 0.44;
+    const ang = -0.45, ca = Math.cos(ang), sa = Math.sin(ang);
+    for (let j = 0; j < IH; j++)
+      for (let i = 0; i < IW; i++) {
+        const x = (i - cx) / scale, y = (j - cy) / scale;
+        const xr = x * ca - y * sa, yr = (x * sa + y * ca) / 0.58;
+        const r = Math.sqrt(xr * xr + yr * yr) + 1e-6;
+        const phase = Math.atan2(yr, xr) - Math.log(r) / 0.3;
+        const c = 0.5 + 0.5 * Math.cos(2 * phase);
+        const arms = c * c * c;
+        let v = Math.exp(-r / 0.23) * (0.22 + 1.6 * arms) + 3.2 * Math.exp(-Math.pow(r / 0.055, 1.1));
+        const lane = 0.5 + 0.5 * Math.cos(2 * phase - 0.9);
+        v *= 1 - 0.4 * Math.pow(lane, 6) * Math.exp(-r / 0.5);
+        pixels[j * IW + i] = 100 + 1600 * v + gauss() * 5;
+      }
+    for (let k = 0; k < 230; k++) addStar(rand() * IW, rand() * IH, 300 + Math.pow(rand(), 5) * 90000, 0.9 + rand() * 0.6);
+    for (let k = 0; k < 16; k++) {   // faint galaxies far behind
+      const gx = rand() * IW, gy = rand() * IH, a = 2 + rand() * 4, b = a * (0.3 + rand() * 0.6), t = rand() * 3.1416;
+      const f = 6 + rand() * 30;
+      for (let y = Math.max(0, Math.floor(gy - 3 * a)); y < Math.min(IH, gy + 3 * a); y++)
+        for (let x = Math.max(0, Math.floor(gx - 3 * a)); x < Math.min(IW, gx + 3 * a); x++) {
+          const dx = x - gx, dy = y - gy;
+          const u = (dx * Math.cos(t) + dy * Math.sin(t)) / a, w = (-dx * Math.sin(t) + dy * Math.cos(t)) / b;
+          pixels[y * IW + x] += f * Math.exp(-(u * u + w * w) / 2);
+        }
+    }
+  }
+  // The three stretches of the preview's menu.
+  function stretched(kind) {
+    const sample = new Float32Array(30000);
+    const r = random(11);
+    for (let k = 0; k < sample.length; k++) sample[k] = pixels[(r() * pixels.length) | 0];
+    sample.sort();
+    const pct = (q) => sample[Math.min(sample.length - 1, Math.floor(q * sample.length))];
+    let lo, hi, curve;
+    if (kind === "minmax") {
+      lo = Infinity; hi = -Infinity;
+      for (const v of pixels) { if (v < lo) lo = v; if (v > hi) hi = v; }
+      curve = (x) => x;
+    } else if (kind === "linear") {
+      lo = pct(0.005); hi = pct(0.995);
+      curve = (x) => x;
+    } else {   // midtones balanced so the sky sits at a quarter of full scale
+      const med = pct(0.5);
+      const dev = Array.from(sample, (v) => Math.abs(v - med)).sort((a, b) => a - b);
+      const mad = dev[dev.length >> 1] * 1.4826 || 1;
+      lo = med - 2.8 * mad; hi = pct(0.9998);
+      const xb = (med - lo) / (hi - lo), t = 0.25;
+      const m = (xb * (1 - t)) / (xb - 2 * t * xb + t);
+      curve = (x) => ((m - 1) * x) / ((2 * m - 1) * x - m);
+    }
+    const out = new ImageData(IW, IH);
+    const span = hi - lo || 1;
+    for (let k = 0; k < pixels.length; k++) {
+      let x = (pixels[k] - lo) / span;
+      x = x <= 0 ? 0 : x >= 1 ? 1 : curve(x);
+      const g = Math.round(x * 255);
+      out.data[4 * k] = out.data[4 * k + 1] = out.data[4 * k + 2] = g;
+      out.data[4 * k + 3] = 255;
+    }
+    return out;
+  }
+
+  // HDU 2: a TESS-like light curve, two-minute cadence, with transits.
+  const LC = { time: [], flux: [], err: [], quality: [] };
+  for (let k = 0; k < 3600; k++) {
+    const t = 1504 + k / 720;
+    const phase = ((((t - 1504.62) / 1.7286) % 1) + 1) % 1;
+    const dp = Math.min(phase, 1 - phase) * 1.7286;   // days from mid-transit
+    const transit = dp < 0.055 ? 1 : dp < 0.075 ? 1 - (dp - 0.055) / 0.02 : 0;
+    const f = 1000 * (1 + 0.0011 * Math.sin((2 * Math.PI * t) / 2.3) - 0.0062 * transit + 0.00085 * gauss());
+    LC.time.push(t);
+    LC.flux.push(f);
+    LC.err.push(0.85 + 0.05 * rand());
+    LC.quality.push(rand() < 0.01 ? 1024 : 0);
+  }
+  // HDU 3: a catalog around a cluster.
+  const CAT = { ra: [], dec: [], mag: [], cls: [] };
+  for (let k = 0; k < 2500; k++) {
+    const inCluster = rand() < 0.3;
+    CAT.ra.push(inCluster ? 188.58 + 0.03 * gauss() : 188.35 + 0.47 * rand());
+    CAT.dec.push(inCluster ? 8.2 + 0.03 * gauss() : 7.95 + 0.5 * rand());
+    CAT.mag.push(24.5 - 7 * Math.pow(rand(), 2.2));
+    CAT.cls.push((rand() * 5) | 0);
+  }
+
+  // Headers, card by card: [keyword, value, comment], or [COMMENT|HISTORY, text], or [END].
+  const HEADERS = [
+    [["SIMPLE", "T", "conforms to FITS standard"], ["BITPIX", "8", "array data type"], ["NAXIS", "0", "number of array dimensions"],
+     ["EXTEND", "T", ""], ["DATE", "'2026-10-09'", "date the file was written"], ["OBJECT", "'NGC 4535'", "target"],
+     ["ORIGIN", "'uFits example'", ""], ["COMMENT", "An example file for the uFits homepage."], ["END"]],
+    [["XTENSION", "'IMAGE'", "image extension"], ["BITPIX", "-32", "array data type"], ["NAXIS", "2", "number of array dimensions"],
+     ["NAXIS1", "2048", ""], ["NAXIS2", "2048", ""], ["PCOUNT", "0", "number of parameters"], ["GCOUNT", "1", "number of groups"],
+     ["EXTNAME", "'SCI'", "extension name"], ["BUNIT", "'ELECTRONS/S'", "brightness unit"], ["EXPTIME", "1200.0", "[s] exposure time"],
+     ["FILTER", "'r'", ""], ["CTYPE1", "'RA---TAN'", ""], ["CTYPE2", "'DEC--TAN'", ""],
+     ["CRVAL1", "188.5845833", "[deg] RA at the reference pixel"], ["CRVAL2", "8.1977778", "[deg] Dec at the reference pixel"],
+     ["CRPIX1", "1024.5", ""], ["CRPIX2", "1024.5", ""], ["CD1_1", "-6.944E-05", "[deg/pixel]"], ["CD2_2", "6.944E-05", "[deg/pixel]"],
+     ["HISTORY", "Bias, dark and flat corrected."], ["END"]],
+    [["XTENSION", "'BINTABLE'", "binary table extension"], ["BITPIX", "8", "array data type"], ["NAXIS", "2", "number of array dimensions"],
+     ["NAXIS1", "20", "length of dimension 1"], ["NAXIS2", "3600", "length of dimension 2"], ["PCOUNT", "0", "number of group parameters"],
+     ["GCOUNT", "1", "number of groups"], ["TFIELDS", "4", "number of table fields"],
+     ["TTYPE1", "'TIME'", "column title"], ["TFORM1", "'D'", ""], ["TUNIT1", "'BTJD'", "BJD - 2457000"],
+     ["TTYPE2", "'PDCSAP_FLUX'", ""], ["TFORM2", "'E'", ""], ["TUNIT2", "'e-/s'", ""],
+     ["TTYPE3", "'PDCSAP_FLUX_ERR'", ""], ["TFORM3", "'E'", ""], ["TUNIT3", "'e-/s'", ""],
+     ["TTYPE4", "'QUALITY'", ""], ["TFORM4", "'J'", ""], ["EXTNAME", "'LIGHTCURVE'", "extension name"], ["END"]],
+    [["XTENSION", "'BINTABLE'", "binary table extension"], ["BITPIX", "8", "array data type"], ["NAXIS", "2", "number of array dimensions"],
+     ["NAXIS1", "36", "length of dimension 1"], ["NAXIS2", "2500", "length of dimension 2"], ["PCOUNT", "0", "number of group parameters"],
+     ["GCOUNT", "1", "number of groups"], ["TFIELDS", "5", "number of table fields"],
+     ["TTYPE1", "'ID'", ""], ["TFORM1", "'K'", ""], ["TTYPE2", "'RA'", ""], ["TFORM2", "'D'", ""], ["TUNIT2", "'deg'", ""],
+     ["TTYPE3", "'DEC'", ""], ["TFORM3", "'D'", ""], ["TUNIT3", "'deg'", ""], ["TTYPE4", "'MAG'", ""], ["TFORM4", "'E'", ""],
+     ["TTYPE5", "'CLASS'", ""], ["TFORM5", "'J'", ""], ["EXTNAME", "'CATALOG'", "extension name"], ["END"]],
+  ];
+  const HDUS = [
+    { title: "HDU 0 — no data", picture: null, table: false, info: "" },
+    { title: "HDU 1  SCI — 2048 × 2048 float32", picture: "image", table: false, info: "HDU 1 SCI  ·  2048 × 2048  ·  float32" },
+    { title: "HDU 2  LIGHTCURVE — PDCSAP_FLUX vs TIME", picture: "lc", table: true,
+      info: "HDU 2 LIGHTCURVE  ·  3600 rows  ·  PDCSAP_FLUX vs TIME", rows: "HDU 2 LIGHTCURVE  ·  3600 rows × 4 columns" },
+    { title: "HDU 3  CATALOG — DEC vs RA", picture: "sky", table: true,
+      info: "HDU 3 CATALOG  ·  2500 rows  ·  DEC vs RA", rows: "HDU 3 CATALOG  ·  2500 rows × 5 columns" },
+  ];
+
+  // ---- Views -----------------------------------------------------------------
+  const escape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  // Keys in a column, values and comments lined up, as uFits lays them out.
+  function headerHTML(h) {
+    const cards = HEADERS[h];
+    let kw = 8, vw = 0;
+    for (const c of cards) {
+      if (c.length === 3) {
+        kw = Math.max(kw, c[0].length);
+        if (c[2]) vw = Math.max(vw, c[1].length);
+      }
+    }
+    const lines = [`<span class="h">——— ${escape(HDUS[h].title.split(" — ")[0])} ———</span>`];
+    for (const c of cards) {
+      if (c.length === 1) lines.push(`<span class="k">END</span>`);
+      else if (c.length === 2) lines.push(`<span class="k">${c[0]}</span>${" ".repeat(kw - c[0].length + 3)}<span class="c">${escape(c[1])}</span>`);
+      else {
+        let line = `<span class="k">${c[0]}</span>${" ".repeat(kw - c[0].length)}<span class="m"> = </span>${escape(c[1])}`;
+        if (c[2]) line += `${" ".repeat(Math.max(0, vw - c[1].length))}<span class="m"> / </span><span class="c">${escape(c[2])}</span>`;
+        lines.push(line);
+      }
+    }
+    return lines.join("\n");
+  }
+  function tableHTML(h) {
+    const n = 80;
+    let head, rows = [];
+    if (h === 2) {
+      head = ["#", "TIME", "PDCSAP_FLUX", "PDCSAP_FLUX_ERR", "QUALITY"];
+      for (let k = 0; k < n; k++)
+        rows.push([k + 1, LC.time[k].toPrecision(11), LC.flux[k].toPrecision(7), LC.err[k].toPrecision(4), LC.quality[k]]);
+    } else {
+      head = ["#", "ID", "RA", "DEC", "MAG", "CLASS"];
+      for (let k = 0; k < n; k++)
+        rows.push([k + 1, 100001 + k, CAT.ra[k].toPrecision(10), CAT.dec[k].toPrecision(9), CAT.mag[k].toPrecision(5), CAT.cls[k]]);
+    }
+    return `<table><thead><tr>${head.map((t) => `<th>${t}</th>`).join("")}</tr></thead><tbody>` +
+      rows.map((r) => `<tr>${r.map((v) => `<td>${v}</td>`).join("")}</tr>`).join("") + "</tbody></table>";
+  }
+  function niceTicks(lo, hi, target) {
+    const raw = (hi - lo) / target, p = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 5, 10].map((m) => m * p).find((s) => s >= raw) || 10 * p;
+    const out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(+v.toPrecision(12));
+    return out;
+  }
+  function drawPlot(kind) {
+    const canvas = $("plotCanvas");
+    const box = canvas.getBoundingClientRect();
+    if (!box.width) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(box.width * dpr);
+    canvas.height = Math.round(box.height * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const W = box.width, H = box.height;
+    ctx.fillStyle = token("--win-content");
+    ctx.fillRect(0, 0, W, H);
+    const left = 62, right = 16, top = 26, bottom = 34;
+    const pw = W - left - right, ph = H - top - bottom;
+    let xs, ys, x0, x1, y0, y1, xTitle, yTitle, flipX = false;
+    if (kind === "lc") {
+      xs = LC.time; ys = LC.flux; x0 = 1504; x1 = 1509; y0 = 988; y1 = 1006;
+      xTitle = "TIME [BTJD]"; yTitle = "PDCSAP_FLUX [e-/s]";
+    } else {
+      xs = CAT.ra; ys = CAT.dec; x0 = 188.33; x1 = 188.84; y0 = 7.93; y1 = 8.47;
+      xTitle = "RA [deg]"; yTitle = "DEC [deg]"; flipX = true;   // RA grows to the left
+    }
+    const px = (x) => (flipX ? left + pw - ((x - x0) / (x1 - x0)) * pw : left + ((x - x0) / (x1 - x0)) * pw);
+    const py = (y) => top + ph - ((y - y0) / (y1 - y0)) * ph;
+    ctx.strokeStyle = token("--win-line");
+    ctx.lineWidth = 1;
+    ctx.strokeRect(left - 0.5, top - 0.5, pw + 1, ph + 1);
+    ctx.fillStyle = token("--win-dim");
+    ctx.font = "10px ui-monospace, Menlo, monospace";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "right";
+    for (const t of niceTicks(y0, y1, 5)) {
+      const y = py(t);
+      ctx.fillText(String(+t.toPrecision(4)), left - 7, y);
+      ctx.fillRect(left - 4, Math.round(y) - 0.5, 4, 1);
+    }
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    for (const t of niceTicks(x0, x1, kind === "lc" ? 6 : 5)) {
+      const x = px(t);
+      ctx.fillText(String(+t.toPrecision(6)), x, top + ph + 7);
+      ctx.fillRect(Math.round(x) - 0.5, top + ph, 1, 4);
+    }
+    ctx.textAlign = "right";
+    ctx.fillText(xTitle, left + pw, top + ph + 20);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(yTitle, 6, top - 8);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, pw, ph);
+    ctx.clip();
+    ctx.fillStyle = token("--plot-ink");
+    const size = kind === "lc" ? 1.6 : 2;
+    ctx.globalAlpha = kind === "lc" ? 0.8 : 0.75;
+    for (let k = 0; k < xs.length; k++) {
+      if (kind === "sky") {
+        ctx.beginPath();
+        ctx.arc(px(xs[k]), py(ys[k]), (26 - CAT.mag[k]) * 0.28, 0, 6.2832);
+        ctx.fill();
+      } else {
+        ctx.fillRect(px(xs[k]) - size / 2, py(ys[k]) - size / 2, size, size);
+      }
+    }
+    ctx.restore();
+  }
+  let stretch = "auto", imageReady = false;
+  const sourceCanvas = document.createElement("canvas");
+  sourceCanvas.width = IW;
+  sourceCanvas.height = IH;
+  function drawImage() {
+    const canvas = $("imageCanvas");
+    const box = canvas.getBoundingClientRect();
+    if (!box.width || !imageReady) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(box.width * dpr);
+    canvas.height = Math.round(box.height * dpr);
+    const ctx = canvas.getContext("2d");
+    const s = Math.min(canvas.width / IW, canvas.height / IH);
+    const w = IW * s, h = IH * s;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(sourceCanvas, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+  }
+  function restretch() {
+    sourceCanvas.getContext("2d").putImageData(stretched(stretch), 0, 0);
+    drawImage();
+  }
+
+  // ---- The window: HDU menu, mode switch, stretch ----------------------------
+  const menu = $("hduMenu");
+  HDUS.forEach((h, i) => menu.add(new Option(h.title, String(i))));
+  const segPicture = $("segPicture"), segTable = $("segTable"), segHeader = $("segHeader");
+  let hdu = 1, mode = "picture";
+  function show(nextHdu, nextMode) {
+    hdu = nextHdu;
+    const h = HDUS[hdu];
+    // The mode asked for if this HDU has it; else its picture, its rows, its header.
+    const has = { picture: !!h.picture, table: h.table, header: true };
+    mode = has[nextMode] ? nextMode : has.picture ? "picture" : has.table ? "table" : "header";
+    menu.value = String(hdu);
+    segPicture.textContent = h.picture === "image" || !h.picture ? "Image" : "Plot";
+    segPicture.disabled = !has.picture;
+    segTable.disabled = !has.table;
+    segPicture.setAttribute("aria-pressed", String(mode === "picture"));
+    segTable.setAttribute("aria-pressed", String(mode === "table"));
+    segHeader.setAttribute("aria-pressed", String(mode === "header"));
+    $("stretchBox").hidden = !(mode === "picture" && h.picture === "image");
+    $("winInfo").textContent = mode === "table" ? h.rows : h.info;
+    $("imageView").hidden = !(mode === "picture" && h.picture === "image");
+    $("plotView").hidden = !(mode === "picture" && h.picture && h.picture !== "image");
+    $("tableView").hidden = mode !== "table";
+    $("headerView").hidden = mode !== "header";
+    if (mode === "picture" && h.picture === "image") drawImage();
+    else if (mode === "picture") drawPlot(h.picture);
+    else if (mode === "table") { $("tableView").innerHTML = tableHTML(hdu); $("tableView").scrollTop = 0; }
+    else { $("headerView").innerHTML = headerHTML(hdu); $("headerView").scrollTop = 0; }
+  }
+  // A short tour, until the visitor takes over.
+  const tour = [[1, "picture"], [2, "picture"], [2, "table"], [3, "picture"], [1, "header"], [3, "table"]];
+  let step = 0, touring = !reduceMotion, timer = 0;
+  function stopTour() { touring = false; clearInterval(timer); }
+  function next() { step = (step + 1) % tour.length; show(...tour[step]); }
+  menu.addEventListener("change", () => { stopTour(); show(+menu.value, mode); });
+  segPicture.addEventListener("click", () => { stopTour(); show(hdu, "picture"); });
+  segTable.addEventListener("click", () => { stopTour(); show(hdu, "table"); });
+  segHeader.addEventListener("click", () => { stopTour(); show(hdu, "header"); });
+  $("stretchMenu").addEventListener("change", (e) => { stopTour(); stretch = e.target.value; restretch(); });
+  for (const ev of ["pointerdown", "wheel", "keydown"]) $("winBody").addEventListener(ev, stopTour, { passive: true });
+  $("space").addEventListener("click", () => {
+    stopTour();
+    next();
+    const win = $("win");
+    win.classList.remove("pop");
+    void win.offsetWidth;
+    win.classList.add("pop");
+  });
+  // Canvases follow the window's size and the theme; rows and cards need not.
+  function redraw() {
+    const h = HDUS[hdu];
+    if (mode === "picture" && h.picture === "image") drawImage();
+    else if (mode === "picture") drawPlot(h.picture);
+  }
+  new ResizeObserver(redraw).observe($("winBody"));
+  onTheme(redraw);
+  show(1, "picture");
+  // Draw the galaxy after the first paint, then start the tour.
+  requestAnimationFrame(() => setTimeout(() => {
+    makeGalaxy();
+    imageReady = true;
+    restretch();
+    if (touring) timer = setInterval(() => { if (touring && !document.hidden) next(); }, 3600);
+  }, 30));
+})();
+</script>
+</body>
+</html>

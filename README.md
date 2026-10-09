@@ -3,6 +3,8 @@
 Quick Look for FITS files on macOS. Select a `.fits`, `.fit`, `.fts` or `.fz` file in
 Finder and press Space to see it, and get real thumbnails in Finder windows.
 
+Homepage: **[lmytime.github.io/uFits](https://lmytime.github.io/uFits/)**
+
 ## Install
 
 ```sh
