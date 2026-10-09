@@ -97,7 +97,8 @@ to see whether the extensions are registered and enabled; it also has a
 
 Every CI run also builds the app as `uFits.zip` and as a disk image (the `uFits` and
 `uFits-dmg` artifacts on the Actions page), ad hoc signed like the releases. Pushing a
-tag `vX.Y.Z` publishes release X.Y.Z with the disk image once all tests pass.
+tag `vX.Y.Z`, or running the build workflow by hand (Actions › build › Run workflow)
+with a release tag, publishes release X.Y.Z with the disk image once all tests pass.
 
 ### Build options
 

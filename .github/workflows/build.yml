@@ -2,11 +2,16 @@ name: build
 
 # Branches in this repository are tested on push (a pull request shows those
 # runs too); superseded runs of the same branch are cancelled. Pushing a tag
-# vX.Y.Z also publishes release X.Y.Z with the disk image, once every test
-# has passed.
+# vX.Y.Z, or running the workflow by hand with a release tag, also publishes
+# release X.Y.Z with the disk image once every test has passed.
 on:
   push:
   workflow_dispatch:
+    inputs:
+      release:
+        description: Publish this commit as a release, e.g. v0.0.1 (empty to only test)
+        required: false
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -41,9 +46,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Version
+        env:
+          RELEASE: ${{ inputs.release }}
         run: |
-          # A release tag sets the version; branches use the Makefile's.
-          if [ "$GITHUB_REF_TYPE" = tag ]; then echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"; fi
+          # A release sets the version; otherwise the Makefile's is used.
+          tag=$RELEASE
+          if [ "$GITHUB_REF_TYPE" = tag ]; then tag=$GITHUB_REF_NAME; fi
+          if [ -n "$tag" ]; then
+            echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "not a release tag: $tag"; exit 1; }
+            echo "VERSION=${tag#v}" >> "$GITHUB_ENV"
+          fi
       - name: Build
         run: |
           # Whatever clang and codesign come first on PATH (Homebrew, conda,
@@ -152,7 +164,7 @@ jobs:
 
   release:
     name: Release
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || inputs.release != ''
     needs: [core, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -167,9 +179,12 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release }}
         run: |
           cd dist
           dmg=$(ls uFits-*.dmg)
+          test "$dmg" = "uFits-${TAG#v}.dmg"
           sha256sum "$dmg" | tee "$dmg.sha256"
-          gh release create "$GITHUB_REF_NAME" "$dmg" "$dmg.sha256" --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --title "uFits ${GITHUB_REF_NAME#v}" --notes-file ../.github/release-notes.md
+          # Tags this commit, unless the tag was pushed.
+          gh release create "$TAG" "$dmg" "$dmg.sha256" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "uFits ${TAG#v}" --notes-file ../.github/release-notes.md
