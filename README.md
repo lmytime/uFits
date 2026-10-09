@@ -6,7 +6,8 @@ file in Finder to see the image, and get real thumbnails in Finder windows.
 uFits is built to be small and fast:
 
 - **No frameworks, no Python, no cfitsio.** A ~3,000 line C core (zlib is the only
-  dependency) plus thin Objective-C Quick Look extensions. The whole app is about 1 MB.
+  dependency) plus thin Objective-C Quick Look extensions. The whole app, universal
+  (Apple Silicon + Intel), is 1.4 MB, a third of which is its icon.
 - **Reads only what it shows.** Files are memory mapped; images are binned straight from
   the mapping, sampling a few pixels per output pixel when shrinking a lot, so a
   thumbnail of a 256 MB image touches a small fraction of the file. For tile-compressed
@@ -14,7 +15,11 @@ uFits is built to be small and fast:
 - **Uses every core.** Binning, tile decompression and the final mapping run in parallel
   (Grand Central Dispatch).
 
-Rough timings on a 4-core Linux VM (Apple Silicon is faster):
+On an Apple Silicon CI runner, a Finder-style thumbnail request (through
+`QLThumbnailGenerator`, including the round trip to the extension) takes 11–16 ms per
+file once the extension is running, 150 ms for the very first one.
+
+Time spent in the core alone, measured on a 4-core Linux VM:
 
 | file | thumbnail (512 px) | preview (2048 px) |
 | --- | --- | --- |
@@ -58,10 +63,10 @@ Then select a FITS file in Finder and press Space. Open uFits once from Applicat
 to see whether the extensions are registered and enabled; it also has a
 **Reset Quick Look** button. The app does not need to keep running.
 
-A pre-built, ad hoc signed `uFits.zip` is attached to every CI run. macOS quarantines
-downloaded apps that are not notarized: after unzipping run
-`xattr -dr com.apple.quarantine uFits.app`, or allow it under System Settings ›
-Privacy & Security, before moving it to Applications.
+A pre-built, ad hoc signed `uFits.zip` is attached to every CI run (the `uFits`
+artifact on the Actions page). macOS quarantines downloaded apps that are not
+notarized: after unzipping, run `xattr -dr com.apple.quarantine uFits.app` (or allow it
+under System Settings › Privacy & Security), move it to Applications and open it once.
 
 ### Build options
 
@@ -112,6 +117,8 @@ build/fqtool header image.fits 1
 
 `make test` writes about 50 FITS files covering every BITPIX, scaling, blanks, NaNs, MEF,
 cubes, RGB, Bayer, spectra, every supported compression, gzip and damaged files,
-and checks the decoded and binned values against astropy. `tests/fuzz.py` feeds
-damaged files to a sanitizer build. CI runs both on Linux and on macOS, then installs
-the app on the macOS runner and asks Quick Look for thumbnails.
+and checks the decoded and binned values against astropy, plus the stretch itself.
+`tests/fuzz.py` feeds damaged files to an AddressSanitizer/UBSan build. CI runs both
+on Linux and on macOS, then installs the app on the macOS runner, requests thumbnails
+through `QLThumbnailGenerator` and previews through `QLPreviewView` (the machinery
+behind Finder's Quick Look), and checks that no extension crashed.

@@ -63,6 +63,17 @@ jobs:
         if: always()
         timeout-minutes: 4
         run: build/qlpreview build/ql build/testdata/f32.fits build/testdata/spec1d.fits build/testdata/table_only.fits
+      - name: App windows (best effort)
+        if: always()
+        timeout-minutes: 2
+        run: |
+          open /Applications/uFits.app
+          sleep 4
+          screencapture -x build/ql/app-setup.png || true
+          open -a /Applications/uFits.app build/testdata/rgb.fits
+          sleep 4
+          screencapture -x build/ql/app-viewer.png || true
+          osascript -e 'quit app "uFits"' || true
       - name: Crash reports
         if: always()
         run: |
