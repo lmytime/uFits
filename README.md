@@ -108,6 +108,13 @@ so it is off by default.
 
 ## Troubleshooting
 
+- **`could not build module 'Cocoa'`, `_c_standard_library_obsolete` errors.** These come
+  from a compiler that does not match the macOS SDK, usually a Homebrew, MacPorts or conda
+  `clang` first on `PATH`. The Makefile uses Apple's clang through `xcrun`, so update to the
+  current version of this repository; if `xcrun` cannot find a compiler, run
+  `xcode-select --install` (or `sudo xcode-select -s /Applications/Xcode.app`). Don't pass
+  `CC=` to make unless it is an Apple clang.
+
 - **Nothing happens / generic icon.** Check System Settings › General › Login Items &
   Extensions › Quick Look (macOS 15+; Extensions › Quick Look on older systems) and make
   sure uFits is enabled, then run `qlmanage -r && qlmanage -r cache` or use the app's

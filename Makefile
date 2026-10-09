@@ -31,13 +31,16 @@ DEST       ?= /Applications
 NOTARY_PROFILE ?= uFits
 B          ?= build
 
-CC      := clang
+# Apple's clang from the selected Xcode or Command Line Tools, whatever is
+# first on PATH: a clang from Homebrew, MacPorts or conda cannot build
+# against the macOS SDK ("could not build module 'Cocoa'").
+CC      := $(shell xcrun -f clang 2>/dev/null || echo clang)
 HOSTCC  ?= cc
 ARCHF   := $(foreach a,$(ARCHS),-arch $(a))
 WARN    := -Wall -Wextra -Wno-unused-parameter
 COMMON  := $(ARCHF) -mmacosx-version-min=$(MINOS) -O2 $(WARN) -Icore -Imacos/Shared
 CFLAGS_ := -std=c11 $(COMMON)
-OBJC_   := -fobjc-arc -fmodules $(COMMON)
+OBJC_   := -fobjc-arc $(COMMON)
 EXT     := -fapplication-extension
 LDF     := $(ARCHF) -mmacosx-version-min=$(MINOS) -fobjc-arc
 
@@ -104,11 +107,13 @@ $(B)/obj/ext/%.o: macos/Thumbnail/%.m $(SHARED_H) $(CORE_H)
 
 $(APPDIR)/Contents/MacOS/$(APP): $(APP_OBJ) $(CORE_OBJ)
 	@mkdir -p $(dir $@)
-	$(CC) $(LDF) -o $@ $^ -framework Cocoa -framework QuartzCore -framework UniformTypeIdentifiers -lz
+	$(CC) $(LDF) -o $@ $^ -framework Cocoa -framework QuartzCore -framework CoreGraphics \
+	    -framework UniformTypeIdentifiers -lz
 
 $(PREVIEW)/Contents/MacOS/uFitsPreview: $(PREVIEW_OBJ) $(CORE_OBJ)
 	@mkdir -p $(dir $@)
-	$(CC) $(LDF) $(EXT) -Wl,-e,_NSExtensionMain -o $@ $^ -framework Cocoa -framework Quartz -framework QuartzCore -lz
+	$(CC) $(LDF) $(EXT) -Wl,-e,_NSExtensionMain -o $@ $^ -framework Cocoa -framework Quartz \
+	    -framework QuartzCore -framework CoreGraphics -lz
 
 $(THUMB)/Contents/MacOS/uFitsThumbnail: $(THUMB_OBJ) $(CORE_OBJ)
 	@mkdir -p $(dir $@)
@@ -211,16 +216,16 @@ qltools: $(B)/qlthumb $(B)/qlpreview $(B)/uitest
 
 $(B)/qlthumb: tests/macos/qlthumb.m
 	@mkdir -p $(B)
-	$(CC) -fobjc-arc -fmodules -O2 -o $@ $< -framework Foundation -framework QuickLookThumbnailing \
-	    -framework ImageIO -framework UniformTypeIdentifiers
+	$(CC) -fobjc-arc -O2 -o $@ $< -framework Foundation -framework CoreGraphics \
+	    -framework QuickLookThumbnailing -framework ImageIO -framework UniformTypeIdentifiers
 
 $(B)/qlpreview: tests/macos/qlpreview.m
 	@mkdir -p $(B)
-	$(CC) -fobjc-arc -fmodules -O2 -o $@ $< -framework Cocoa -framework Quartz
+	$(CC) -fobjc-arc -O2 -o $@ $< -framework Cocoa -framework Quartz
 
 $(B)/uitest: tests/macos/uitest.m $(B)/obj/app/FQPreviewController.o $(B)/obj/app/FQRender.o $(CORE_OBJ)
 	@mkdir -p $(B)
-	$(CC) $(OBJC_) -o $@ $^ -framework Cocoa -framework QuartzCore -lz
+	$(CC) $(OBJC_) -o $@ $^ -framework Cocoa -framework QuartzCore -framework CoreGraphics -lz
 
 clean:
 	rm -rf $(B)

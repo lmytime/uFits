@@ -39,7 +39,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build
-        run: make app
+        run: |
+          # Whatever clang comes first on PATH (Homebrew, conda, ...) must not
+          # be used: put a broken one there.
+          mkdir -p /tmp/badbin
+          printf '#!/bin/sh\necho "the clang on PATH was used" >&2\nexit 1\n' > /tmp/badbin/clang
+          chmod +x /tmp/badbin/clang
+          PATH=/tmp/badbin:$PATH make app
       - name: Bundle contents
         run: |
           find build/uFits.app -type f | sort
