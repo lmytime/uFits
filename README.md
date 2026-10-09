@@ -75,12 +75,26 @@ Not supported: `HCOMPRESS_1` tiles (such files still open on their header), rand
 
 ## Install
 
-**Download:** take `uFits-<version>.dmg` from the
-[Releases](https://github.com/lmytime/uFits/releases) page, open it and drag uFits onto
-Applications. Releases are ad hoc signed, not notarized, so macOS blocks the app at
-first: run `xattr -dr com.apple.quarantine /Applications/uFits.app` (or open it and
-click **Open Anyway** under System Settings › Privacy & Security). Then open uFits once
-to register the Quick Look extensions.
+One command in Terminal:
+
+```sh
+curl -fsSL https://github.com/lmytime/uFits/releases/latest/download/install.sh | sh
+```
+
+It downloads the latest release's disk image, checks its SHA-256, copies uFits to
+Applications and turns on its Quick Look extensions. Then select a FITS file in Finder
+and press Space. `... | sh -s -- --uninstall` removes it again. While this repository is
+private, release files need a GitHub login: with the GitHub CLI (`gh auth login`),
+`gh release download -R lmytime/uFits -p install.sh -O - | sh` does the same.
+
+Releases are ad hoc signed, not notarized. Files downloaded with curl are not
+quarantined, so the installed app opens without a Gatekeeper prompt. To install by hand
+instead, download `uFits-<version>.dmg` from the
+[Releases](https://github.com/lmytime/uFits/releases) page and drag uFits onto
+Applications; macOS then blocks it at first: run
+`xattr -dr com.apple.quarantine /Applications/uFits.app` (or open it and click
+**Open Anyway** under System Settings › Privacy & Security), and open uFits once to
+register the Quick Look extensions.
 
 **Build it yourself:** requirements: macOS 11 or later, the Xcode command line tools
 (`xcode-select --install`).
@@ -98,7 +112,9 @@ to see whether the extensions are registered and enabled; it also has a
 Every CI run also builds the app as `uFits.zip` and as a disk image (the `uFits` and
 `uFits-dmg` artifacts on the Actions page), ad hoc signed like the releases. Pushing a
 tag `vX.Y.Z`, or running the build workflow by hand (Actions › build › Run workflow)
-with a release tag, publishes release X.Y.Z with the disk image once all tests pass.
+with a release tag, publishes release X.Y.Z with the disk image and the installer once
+all tests pass. CI runs the installer too: from the latest release, from the disk image
+just built, and to uninstall.
 
 ### Build options
 

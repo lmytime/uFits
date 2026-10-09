@@ -97,8 +97,15 @@ jobs:
       - name: Core tests (Apple clang, GCD)
         run: make test
       - name: Install and register the extensions
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           make install
+          # The one-command installer over that: the latest release, downloaded
+          # (through the GitHub CLI while the repository is private), then the
+          # disk image built above, which the tests below use.
+          sh install.sh
+          UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh
           pluginkit -m -v -i io.github.lmytime.uFits.Preview
           pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail
           /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
@@ -143,6 +150,11 @@ jobs:
           log show --last 5m --style compact \
             --predicate 'process BEGINSWITH "uFits" OR (subsystem CONTAINS "quicklook" AND messageType >= 16)' \
             | tail -60 || true
+      - name: Uninstall
+        run: |
+          sh install.sh --uninstall
+          test ! -e /Applications/uFits.app
+          pluginkit -m -i io.github.lmytime.uFits.Preview || true
       - name: Images for review (base64)
         if: always()
         run: tests/macos/print_images.sh build/ql
@@ -185,6 +197,17 @@ jobs:
           dmg=$(ls uFits-*.dmg)
           test "$dmg" = "uFits-${TAG#v}.dmg"
           sha256sum "$dmg" | tee "$dmg.sha256"
-          # Tags this commit, unless the tag was pushed.
-          gh release create "$TAG" "$dmg" "$dmg.sha256" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "uFits ${TAG#v}" --notes-file ../.github/release-notes.md
+          # The installer installs the release it comes with.
+          sed "/^VERSION=/s/@VERSION@/${TAG#v}/" ../install.sh > install.sh
+          grep "^VERSION=" install.sh | grep -qF "${TAG#v}"
+          sed "s/@TAG@/$TAG/g" ../.github/release-notes.md > notes.md
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # Published already: its disk image stays as it is; the installer
+            # and the notes are brought up to date.
+            gh release upload "$TAG" install.sh --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          else
+            # Tags this commit, unless the tag was pushed.
+            gh release create "$TAG" "$dmg" "$dmg.sha256" install.sh --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "uFits ${TAG#v}" --notes-file notes.md
+          fi
