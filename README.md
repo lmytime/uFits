@@ -64,8 +64,10 @@ Time spent in the core alone, measured on a 4-core Linux VM:
   rows opens at once. Binary and ASCII tables, with array, string, logical, bit,
   complex and variable-length columns. ⌘C copies the selected rows as tab-separated
   text. Files whose tables have nothing to plot open on it.
-- **Header** lists every HDU and all header cards, plus the first 100 rows of each
-  table; ⌘F searches it.
+- **Header** lists every HDU and all its header cards in columns: keywords in bold at a
+  fixed width, values and comments lined up, long strings (`CONTINUE`) joined into one
+  line, `HIERARCH` keywords in full, `COMMENT`/`HISTORY` text under the values. ⌘F
+  searches it.
 - Changing the stretch only remaps the image already binned, so it is instant even for
   big or compressed files.
 
@@ -149,16 +151,17 @@ The core builds and runs anywhere, which keeps it easy to test:
 make test                                     # needs python3 with numpy + astropy
 make fqtool && build/fqtool render image.fits out.png --max 1024
 build/fqtool info image.fits                  # HDU list and what Quick Look would show
-build/fqtool header image.fits 1
+build/fqtool header image.fits 1              # header cards in columns (--raw: as in the file)
 build/fqtool table catalog.fits 1 20          # columns and first rows of a table
 ```
 
 `make test` writes about 60 FITS files covering every BITPIX, scaling, blanks, NaNs, MEF,
 cubes, RGB, Bayer, spectra, light curves and spectra in tables, every supported
 compression, gzip and damaged files, and checks the decoded and binned values and the
-plotted envelopes against astropy and numpy, plus the stretch itself and the table
-listings. `tests/fuzz.py` feeds damaged files to an AddressSanitizer/UBSan build. CI
-runs both on Linux and on macOS, then installs the app on the macOS runner, requests
+plotted envelopes against astropy and numpy, plus the stretch itself, the table
+listings and every header card as split into keyword, value and comment.
+`tests/fuzz.py` feeds damaged files to an AddressSanitizer/UBSan build. CI runs both
+on Linux and on macOS, then installs the app on the macOS runner, requests
 thumbnails through `QLThumbnailGenerator` and previews through `QLPreviewView` (the
 machinery behind Finder's Quick Look), drives the preview's controls (HDU menu, plane
 slider, find bar), and checks that no extension crashed.

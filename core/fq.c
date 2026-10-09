@@ -30,6 +30,38 @@
 
 /* ------------------------------------------------------------ utilities */
 
+void fqi_sb_add(fqi_sbuf *b, const char *s, size_t n)
+{
+    if (b->oom)
+        return;
+    if (b->len + n + 1 > b->cap) {
+        size_t cap = b->cap ? b->cap * 2 : 4096;
+        while (cap < b->len + n + 1)
+            cap *= 2;
+        char *p = realloc(b->s, cap);
+        if (!p) {
+            b->oom = 1;
+            return;
+        }
+        b->s = p;
+        b->cap = cap;
+    }
+    memcpy(b->s + b->len, s, n);
+    b->len += n;
+    b->s[b->len] = 0;
+}
+
+void fqi_sb_printf(fqi_sbuf *b, const char *fmt, ...)
+{
+    char tmp[512];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(tmp, sizeof tmp, fmt, ap);
+    va_end(ap);
+    if (n > 0)
+        fqi_sb_add(b, tmp, (size_t)n < sizeof tmp ? (size_t)n : sizeof tmp - 1);
+}
+
 void fqi_seterr(char *err, size_t n, const char *fmt, ...)
 {
     if (!err || !n)
@@ -594,6 +626,282 @@ int64_t fqi_parse_tform(const char *s, int64_t *repeat, char *type, char *desc)
     return fqi_mul_sat(rep, es);
 }
 
+/* ------------------------------------------------------- header cards */
+
+/* A card's value field from index i: a string (quotes removed, '' read as
+   a quote, trailing blanks dropped) or a token, then the comment. */
+typedef struct {
+    int string;
+    fqi_sbuf val, com;
+} cardval;
+
+static void add_printable(fqi_sbuf *b, const char *s, int n)
+{
+    for (int i = 0; i < n; i++) {
+        char ch = printable(s[i]);
+        fqi_sb_add(b, &ch, 1);
+    }
+}
+
+static void card_value(const char *c, int i, cardval *v)
+{
+    while (i < CARD && c[i] == ' ')
+        i++;
+    if (i < CARD && c[i] == '\'') {
+        v->string = 1;
+        for (i++; i < CARD; i++) {
+            if (c[i] == '\'') {
+                if (i + 1 < CARD && c[i + 1] == '\'') {
+                    fqi_sb_add(&v->val, "'", 1);
+                    i++;
+                    continue;
+                }
+                i++;
+                break;
+            }
+            add_printable(&v->val, c + i, 1);
+        }
+        while (v->val.len && v->val.s[v->val.len - 1] == ' ')
+            v->val.s[--v->val.len] = 0;
+    } else {
+        int j = i;
+        while (j < CARD && c[j] != '/')
+            j++;
+        int k = j;
+        while (k > i && c[k - 1] == ' ')
+            k--;
+        add_printable(&v->val, c + i, k - i);
+        i = j;
+    }
+    while (i < CARD && c[i] != '/')
+        i++;
+    if (i++ < CARD) {
+        while (i < CARD && c[i] == ' ')
+            i++;
+        int k = CARD;
+        while (k > i && c[k - 1] == ' ')
+            k--;
+        add_printable(&v->com, c + i, k - i);
+    }
+}
+
+static void cardval_free(cardval *v)
+{
+    free(v->val.s);
+    free(v->com.s);
+    memset(v, 0, sizeof *v);
+}
+
+/* One output line: kind, key, value, comment, separated by tabs (cards are
+   printable ASCII, so they hold no tabs or newlines). */
+static void card_line(fqi_sbuf *out, char kind, const char *key, const cardval *v)
+{
+    fqi_sb_add(out, &kind, 1);
+    fqi_sb_add(out, "\t", 1);
+    fqi_sb_add(out, key, strlen(key));
+    fqi_sb_add(out, "\t", 1);
+    if (v->string)
+        fqi_sb_add(out, "'", 1);
+    if (v->val.len)
+        fqi_sb_add(out, v->val.s, v->val.len);
+    if (v->string)
+        fqi_sb_add(out, "'", 1);
+    fqi_sb_add(out, "\t", 1);
+    if (v->com.len)
+        fqi_sb_add(out, v->com.s, v->com.len);
+    fqi_sb_add(out, "\n", 1);
+}
+
+char *fq_header_cards(fq_file *f, int idx, size_t *len)
+{
+    hdu_t *h = fqi_get_hdu(f, idx);
+    if (!h)
+        return NULL;
+    const char *p = (const char *)f->data + h->hdr_off;
+    const int64_t n = h->hdr_len / CARD;
+    fqi_sbuf out = { 0 };
+    char key[CARD + 1];
+    cardval v = { 0 };
+    int pending = 0;   /* v holds a keyword's value, which CONTINUE cards may extend */
+    for (int64_t i = 0; i < n; i++) {
+        const char *c = p + i * CARD;
+        if (pending && key_is(c, "CONTINUE") && v.string && v.val.len && v.val.s[v.val.len - 1] == '&') {
+            cardval cv = { 0 };
+            card_value(c, 8, &cv);
+            if (cv.string) {   /* a long string goes on: join it */
+                v.val.s[--v.val.len] = 0;
+                if (cv.val.len)
+                    fqi_sb_add(&v.val, cv.val.s, cv.val.len);
+                if (cv.com.len) {
+                    if (v.com.len)
+                        fqi_sb_add(&v.com, " ", 1);
+                    fqi_sb_add(&v.com, cv.com.s, cv.com.len);
+                }
+                cardval_free(&cv);
+                continue;
+            }
+            cardval_free(&cv);
+        }
+        if (pending) {
+            card_line(&out, 'v', key, &v);
+            cardval_free(&v);
+            pending = 0;
+        }
+        if (key_is(c, "END")) {
+            fqi_sb_add(&out, "e\tEND\t\t\n", 8);
+            break;
+        }
+        const char *eq = memcmp(c, "HIERARCH ", 9) == 0 ? memchr(c + 9, '=', CARD - 9) : NULL;
+        if (eq || (c[8] == '=' && c[9] == ' ')) {
+            int a = eq ? 9 : 0, b = eq ? (int)(eq - c) : 8, k = 0;
+            if (eq) {
+                memcpy(key, "HIERARCH ", 9);
+                k = 9;
+            }
+            while (a < b && c[a] == ' ')
+                a++;
+            while (b > a && c[b - 1] == ' ')
+                b--;
+            for (; a < b; a++)
+                key[k++] = printable(c[a]);
+            key[k] = 0;
+            card_value(c, eq ? (int)(eq - c) + 1 : 10, &v);
+            pending = 1;
+            continue;
+        }
+        /* Commentary: COMMENT, HISTORY, blank keyword or no value. */
+        int k = 8;
+        while (k > 0 && c[k - 1] == ' ')
+            k--;
+        for (int j = 0; j < k; j++)
+            key[j] = printable(c[j]);
+        key[k] = 0;
+        cardval t = { 0 };
+        int b = CARD;   /* the text keeps its indent */
+        while (b > 8 && c[b - 1] == ' ')
+            b--;
+        add_printable(&t.com, c + 8, b - 8);
+        card_line(&out, 'c', key, &t);
+        cardval_free(&t);
+    }
+    if (pending)
+        card_line(&out, 'v', key, &v);
+    cardval_free(&v);
+    if (out.oom) {
+        free(out.s);
+        return NULL;
+    }
+    if (!out.s)
+        fqi_sb_add(&out, "", 0);
+    if (len)
+        *len = out.len;
+    return out.s;
+}
+
+/* ----------------------------------------------------- header layout */
+
+/* The four fields of one line of fq_header_cards. Returns the next line. */
+typedef struct {
+    const char *s[4];
+    int n[4];
+} cardfields;
+
+static const char *card_fields(const char *line, cardfields *cf)
+{
+    const char *end = strchr(line, '\n');
+    if (!end)
+        end = line + strlen(line);
+    const char *s = line;
+    for (int i = 0; i < 4; i++) {
+        const char *tab = i < 3 ? memchr(s, '\t', (size_t)(end - s)) : NULL;
+        const char *e = tab ? tab : end;
+        cf->s[i] = s;
+        cf->n[i] = (int)(e - s);
+        s = tab ? tab + 1 : e;
+    }
+    return *end ? end + 1 : end;
+}
+
+static void add_span(fqi_sbuf *spans, size_t start, size_t len, int kind)
+{
+    fq_span sp = { (uint32_t)start, (uint32_t)len, kind };
+    if (len && start + len <= UINT32_MAX)
+        fqi_sb_add(spans, (const char *)&sp, sizeof sp);
+}
+
+static void add_spaces(fqi_sbuf *b, int n)
+{
+    static const char blanks[] = "                                        ";
+    for (; n > 0; n -= 40)
+        fqi_sb_add(b, blanks, n < 40 ? (size_t)n : 40);
+}
+
+char *fq_header_layout(fq_file *f, int idx, size_t *len, fq_span **spans, size_t *nspans)
+{
+    if (spans)
+        *spans = NULL;
+    if (nspans)
+        *nspans = 0;
+    char *cards = fq_header_cards(f, idx, NULL);
+    if (!cards)
+        return NULL;
+    /* Column widths: the longest key (at least the standard 8) and the
+       longest value followed by a comment, leaving out very long ones,
+       which would push all the others far to the right. */
+    int kw = 8, vw = 0;
+    cardfields cf;
+    for (const char *l = cards; *l;) {
+        l = card_fields(l, &cf);
+        char kind = cf.s[0][0];
+        if (kind != 'e' && cf.n[1] > kw && cf.n[1] <= 36)
+            kw = cf.n[1];
+        if (kind == 'v' && cf.n[3] && cf.n[2] > vw && cf.n[2] <= 30)
+            vw = cf.n[2];
+    }
+    fqi_sbuf out = { 0 }, sp = { 0 };
+    for (const char *l = cards; *l;) {
+        l = card_fields(l, &cf);
+        char kind = cf.s[0][0];
+        add_span(&sp, out.len, (size_t)cf.n[1], FQ_SPAN_KEY);
+        fqi_sb_add(&out, cf.s[1], (size_t)cf.n[1]);
+        if (kind == 'v') {
+            add_spaces(&out, kw - cf.n[1]);
+            add_span(&sp, out.len, 3, FQ_SPAN_MARK);
+            fqi_sb_add(&out, " = ", 3);
+            fqi_sb_add(&out, cf.s[2], (size_t)cf.n[2]);
+            if (cf.n[3]) {
+                add_spaces(&out, vw - cf.n[2]);
+                add_span(&sp, out.len, 3, FQ_SPAN_MARK);
+                fqi_sb_add(&out, " / ", 3);
+                add_span(&sp, out.len, (size_t)cf.n[3], FQ_SPAN_COMMENT);
+                fqi_sb_add(&out, cf.s[3], (size_t)cf.n[3]);
+            }
+        } else if (kind == 'c' && cf.n[3]) {   /* COMMENT, HISTORY: text under the values */
+            add_spaces(&out, kw - cf.n[1] + 3);
+            add_span(&sp, out.len, (size_t)cf.n[3], FQ_SPAN_COMMENT);
+            fqi_sb_add(&out, cf.s[3], (size_t)cf.n[3]);
+        }
+        fqi_sb_add(&out, "\n", 1);
+    }
+    free(cards);
+    if (!out.s)
+        fqi_sb_add(&out, "", 0);
+    if (out.oom || sp.oom) {
+        free(out.s);
+        free(sp.s);
+        return NULL;
+    }
+    if (len)
+        *len = out.len;
+    if (spans && nspans && sp.len) {
+        *spans = (fq_span *)(void *)sp.s;
+        *nspans = sp.len / sizeof(fq_span);
+    } else {
+        free(sp.s);
+    }
+    return out.s;
+}
+
 /* ------------------------------------------------------- header text */
 
 char *fq_header_text(fq_file *f, int idx, size_t *len)
@@ -670,8 +978,9 @@ char *fq_summary_text(fq_file *f)
         } else if (!strcmp(h.xtension, "BINTABLE") || !strcmp(h.xtension, "TABLE")) {
             int64_t tf = 0;
             fqi_kw_int(f, &f->hdu[i], "TFIELDS", &tf);
-            snprintf(desc, sizeof desc, "%lld columns x %lld rows", (long long)tf,
-                     (long long)(h.naxis >= 2 ? h.naxes[1] : 0));
+            long long rows = h.naxis >= 2 ? (long long)h.naxes[1] : 0;
+            snprintf(desc, sizeof desc, "%lld row%s x %lld column%s", rows, rows == 1 ? "" : "s",
+                     (long long)tf, tf == 1 ? "" : "s");
         } else if (h.naxis == 0 || h.data_len == 0) {
             snprintf(desc, sizeof desc, "no data");
         } else {

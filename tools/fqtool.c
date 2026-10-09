@@ -3,7 +3,9 @@
  *
  *   fqtool info FILE                 HDU list and what would be shown
  *   fqtool hdus FILE                 the HDUs a viewer can switch between
- *   fqtool header FILE [HDU]         header cards
+ *   fqtool header FILE [HDU] [--raw|--cards|--spans]   header cards lined up
+ *                                     as the preview shows them (or as in the
+ *                                     file, split by tabs, or the styled parts)
  *   fqtool table FILE HDU [ROWS]     columns and first rows of a table
  *   fqtool render FILE OUT.png [options]
  *   fqtool dump FILE OUT.f32 [options]   binned float32 values (tests)
@@ -152,7 +154,7 @@ static void usage(void)
     fprintf(stderr,
             "usage: fqtool info FILE\n"
             "       fqtool hdus FILE\n"
-            "       fqtool header FILE [HDU]\n"
+            "       fqtool header FILE [HDU] [--raw|--cards|--spans]\n"
             "       fqtool table FILE HDU [ROWS]\n"
             "       fqtool render FILE OUT.png [--max N] [--samples K] [--stretch auto|linear|minmax]\n"
             "                                 [--hdu N] [--plane P] [--mono] [--threads T] [--repeat R]\n"
@@ -302,15 +304,30 @@ int main(int argc, char **argv)
             free(s);
         }
     } else if (!strcmp(cmd, "header")) {
-        int hdu = argc > 3 ? atoi(argv[3]) : 0;
-        char *s = fq_header_text(f, hdu, NULL);
+        int hdu = 0;
+        const char *how = "";
+        for (int i = 3; i < argc; i++) {
+            if (!strncmp(argv[i], "--", 2))
+                how = argv[i] + 2;
+            else
+                hdu = atoi(argv[i]);
+        }
+        fq_span *spans = NULL;
+        size_t nspans = 0;
+        char *s = !strcmp(how, "raw")     ? fq_header_text(f, hdu, NULL)
+                : !strcmp(how, "cards")   ? fq_header_cards(f, hdu, NULL)
+                                          : fq_header_layout(f, hdu, NULL, &spans, &nspans);
         if (!s) {
             fprintf(stderr, "no HDU %d\n", hdu);
             rc = 1;
+        } else if (!strcmp(how, "spans")) {
+            for (size_t i = 0; i < nspans; i++)
+                printf("%d %u %u\n", spans[i].kind, spans[i].start, spans[i].len);
         } else {
             fputs(s, stdout);
-            free(s);
         }
+        free(s);
+        free(spans);
     } else if (!strcmp(cmd, "render") || !strcmp(cmd, "dump") || !strcmp(cmd, "plot")) {
         if (argc < 4) {
             usage();

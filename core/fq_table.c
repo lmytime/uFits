@@ -490,52 +490,14 @@ int fqi_table_plot(fq_file *f, int idx, const fq_opts *o, fq_image *img, char *e
 
 /* ------------------------------------------------------------- listings */
 
-typedef struct {
-    char *s;
-    size_t len, cap;
-    int oom;
-} sbuf;
-
-static void sb_add(sbuf *b, const char *s, size_t n)
-{
-    if (b->oom)
-        return;
-    if (b->len + n + 1 > b->cap) {
-        size_t cap = b->cap ? b->cap * 2 : 4096;
-        while (cap < b->len + n + 1)
-            cap *= 2;
-        char *p = realloc(b->s, cap);
-        if (!p) {
-            b->oom = 1;
-            return;
-        }
-        b->s = p;
-        b->cap = cap;
-    }
-    memcpy(b->s + b->len, s, n);
-    b->len += n;
-    b->s[b->len] = 0;
-}
-
-static void sb_printf(sbuf *b, const char *fmt, ...)
-{
-    char tmp[512];
-    va_list ap;
-    va_start(ap, fmt);
-    int n = vsnprintf(tmp, sizeof tmp, fmt, ap);
-    va_end(ap);
-    if (n > 0)
-        sb_add(b, tmp, (size_t)n < sizeof tmp ? (size_t)n : sizeof tmp - 1);
-}
-
-static void sb_pad(sbuf *b, const char *s, int width, int right)
+static void sb_pad(fqi_sbuf *b, const char *s, int width, int right)
 {
     int n = (int)strlen(s);
     for (int i = n; right && i < width; i++)
-        sb_add(b, " ", 1);
-    sb_add(b, s, (size_t)n);
+        fqi_sb_add(b, " ", 1);
+    fqi_sb_add(b, s, (size_t)n);
     for (int i = n; !right && i < width; i++)
-        sb_add(b, " ", 1);
+        fqi_sb_add(b, " ", 1);
 }
 
 static void fmt_number(const uint8_t *row, const tcol *t, int64_t e, char *out, size_t n)
@@ -770,7 +732,7 @@ char *fq_table_text(fq_file *f, int idx, int maxrows, size_t *len)
     int *width = calloc((size_t)shown, sizeof(int));
     char *cells = malloc((size_t)(show * shown + 1) * (CELL + 1));
     char(*sub)[CELL + 1] = malloc((size_t)shown * (CELL + 1));
-    sbuf b = { 0 };
+    fqi_sbuf b = { 0 };
     if (!width || !cells || !sub) {
         b.oom = 1;
         goto done;
@@ -797,24 +759,24 @@ char *fq_table_text(fq_file *f, int idx, int maxrows, size_t *len)
             if (w > width[c])
                 width[c] = w;
         }
-    sb_printf(&b, "%lld row%s x %d column%s", (long long)nrows, nrows == 1 ? "" : "s", nc,
+    fqi_sb_printf(&b, "%lld row%s x %d column%s", (long long)nrows, nrows == 1 ? "" : "s", nc,
               nc == 1 ? "" : "s");
     if (show < nrows)
-        sb_printf(&b, ", first %lld rows", (long long)show);
+        fqi_sb_printf(&b, ", first %lld rows", (long long)show);
     if (shown < nc)
-        sb_printf(&b, ", first %d columns", shown);
-    sb_add(&b, "\n\n", 2);
+        fqi_sb_printf(&b, ", first %d columns", shown);
+    fqi_sb_add(&b, "\n\n", 2);
     for (int line = 0; line < 2; line++)
         for (int c = 0; c < shown; c++) {
             char name[CELL + 1];
             fqi_scopy(name, sizeof name, line ? sub[c] : cols[c].name);
             sb_pad(&b, name, width[c], 0);
-            sb_add(&b, c + 1 < shown ? "  " : "\n", c + 1 < shown ? 2 : 1);
+            fqi_sb_add(&b, c + 1 < shown ? "  " : "\n", c + 1 < shown ? 2 : 1);
         }
     for (int c = 0; c < shown; c++) {
         for (int i = 0; i < width[c]; i++)
-            sb_add(&b, "-", 1);
-        sb_add(&b, c + 1 < shown ? "  " : "\n", c + 1 < shown ? 2 : 1);
+            fqi_sb_add(&b, "-", 1);
+        fqi_sb_add(&b, c + 1 < shown ? "  " : "\n", c + 1 < shown ? 2 : 1);
     }
     for (int64_t r = 0; r < show; r++)
         for (int c = 0; c < shown; c++) {
@@ -822,7 +784,7 @@ char *fq_table_text(fq_file *f, int idx, int maxrows, size_t *len)
             int right = t->type == 'a' ? toupper((unsigned char)t->form[0]) != 'A'
                                        : t->type != 'A' && t->type != 'L';
             sb_pad(&b, cells + (r * shown + c) * (CELL + 1), width[c], right);
-            sb_add(&b, c + 1 < shown ? "  " : "\n", c + 1 < shown ? 2 : 1);
+            fqi_sb_add(&b, c + 1 < shown ? "  " : "\n", c + 1 < shown ? 2 : 1);
         }
 done:
     free(width);

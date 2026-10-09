@@ -174,6 +174,24 @@ const fq_column *fq_table_column(const fq_table *t, int col);
 void fq_table_cell(const fq_table *t, int64_t row, int col, char *out, size_t n);
 /* Header cards of one HDU, one per line. malloc'd, NULL if no such HDU. */
 char *fq_header_text(fq_file *f, int hdu, size_t *len);
+/* The same cards split for display, one per line: kind, key, value and
+   comment separated by tabs. Kind 'v': a keyword with a value (strings in
+   quotes without their padding, long strings joined from CONTINUE cards,
+   HIERARCH keywords in full); 'c': commentary (COMMENT, HISTORY, a blank
+   keyword), its text in the comment; 'e': END. malloc'd, NULL if no such
+   HDU. */
+char *fq_header_cards(fq_file *f, int hdu, size_t *len);
+/* The cards laid out for reading: keys in a column, values after " = "
+   and comments after " / " lined up, COMMENT and HISTORY text where the
+   values go; one card per line, ASCII. *spans (malloc'd, NULL if none)
+   marks the parts to style, as byte offsets into the text. malloc'd, NULL
+   if no such HDU. */
+enum { FQ_SPAN_KEY = 1, FQ_SPAN_MARK = 2 /* " = ", " / " */, FQ_SPAN_COMMENT = 3 };
+typedef struct {
+    uint32_t start, len;
+    int kind;
+} fq_span;
+char *fq_header_layout(fq_file *f, int hdu, size_t *len, fq_span **spans, size_t *nspans);
 /* One line per HDU describing its contents. malloc'd. */
 char *fq_summary_text(fq_file *f);
 /* Value of a keyword (strings unquoted). Returns 1 if found. */

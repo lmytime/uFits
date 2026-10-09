@@ -1,11 +1,13 @@
 // uitest - drive the preview UI (FQPreviewController) in a window the way a
 // user would: switch HDUs (images, plots, tables), move the cube plane
-// slider, open the header and its find bar. Prints the state of the bar after every step and captures
-// the window to OUTDIR/ui-<step>.png.
+// slider, open the header (its cards in columns) and its find bar. Prints
+// the state of the bar after every step and captures the window to
+// OUTDIR/ui-<step>.png.
 //
 // Usage: uitest OUTDIR TESTDATA_DIR
 
 #import <Cocoa/Cocoa.h>
+#include <math.h>
 
 #import "FQPreviewController.h"
 
@@ -179,6 +181,37 @@ static void expectListing(NSString *step, NSString *text)
            top.UTF8String, text.UTF8String);
 }
 
+/// Checks the header listing's columns: the "=" of two cards in line on
+/// screen, keys in another font than values (bold), comments dimmed.
+static void expectColumns(NSString *step, NSString *card1, NSString *card2, NSString *comment)
+{
+    NSTextView *tv = findView(gWindow.contentView, NSTextView.class, ^BOOL(id v) {
+        return ![v isEditable];
+    });
+    NSTextStorage *ts = tv.textStorage;
+    NSRange r1 = [ts.string rangeOfString:card1], r2 = [ts.string rangeOfString:card2],
+            rc = [ts.string rangeOfString:comment];
+    BOOL found = tv && r1.location != NSNotFound && r2.location != NSNotFound && rc.location != NSNotFound;
+    CGFloat x[2] = {-1, -1};
+    NSUInteger eq[2] = {r1.location + [card1 rangeOfString:@"="].location,
+                        r2.location + [card2 rangeOfString:@"="].location};
+    for (int i = 0; i < 2 && found; i++) {
+        NSRange g = [tv.layoutManager glyphRangeForCharacterRange:NSMakeRange(eq[i], 1) actualCharacterRange:NULL];
+        x[i] = NSMinX([tv.layoutManager boundingRectForGlyphRange:g inTextContainer:tv.textContainer]);
+    }
+    NSFont *key = found ? [ts attribute:NSFontAttributeName atIndex:r1.location effectiveRange:NULL] : nil;
+    NSFont *value = found ? [ts attribute:NSFontAttributeName atIndex:eq[0] + 2 effectiveRange:NULL] : nil;
+    NSColor *vc = found ? [ts attribute:NSForegroundColorAttributeName atIndex:eq[0] + 2 effectiveRange:NULL] : nil;
+    NSColor *cc = found ? [ts attribute:NSForegroundColorAttributeName atIndex:rc.location effectiveRange:NULL] : nil;
+    BOOL ok = found && x[0] > 0 && fabs(x[0] - x[1]) < 0.5 && key && value && ![key isEqual:value] && cc &&
+              ![cc isEqual:vc];
+    if (!ok)
+        gFailures++;
+    printf("%s %s: \"=\" at x=%.1f and x=%.1f, key font %s, value font %s, comment colour %s\n", ok ? "ok  " : "FAIL",
+           step.UTF8String, x[0], x[1], key.fontName.UTF8String ?: "-", value.fontName.UTF8String ?: "-",
+           cc.description.UTF8String ?: "-");
+}
+
 int main(int argc, const char *argv[])
 {
     @autoreleasepool {
@@ -244,15 +277,18 @@ int main(int argc, const char *argv[])
         capture(@"catalog-table", @"grid=3000 rows [#,ID,RA,DEC,MAG,NAME]");
 
         // A file of tables that cannot be plotted opens on its first table;
-        // the menu switches tables; the header opens at the table picked, and
-        // Cmd-F opens its find bar.
+        // the menu switches tables; the header opens at the table picked, its
+        // cards in columns, and Cmd-F opens its find bar.
         load(vc, [data stringByAppendingPathComponent:@"tables_mixed.fits"]);
         capture(@"tables", @"menu=\"HDU 1  MIXED — 6 rows × 11 columns\" (2 items)");
         capture(@"tables-grid", @"grid=6 rows [#,NAME,FLAG,BITS");
         pickHDU(root, 1);
         capture(@"tables-ascii", @"grid=4 rows [#,ID,RA,NOTE] first=\"0\"");
         pickMode(root, 2);
-        expectListing(@"tables-header", @"——— HDU 2 ———");
+        expectListing(@"tables-header", @"——— HDU 2  ASCII ———");
+        expectListing(@"tables-header-cards", @"XTENSION = 'TABLE' / ASCII table extension");
+        expectColumns(@"tables-header-columns", @"XTENSION = 'TABLE'", @"TFORM2   = 'F10.5'",
+                      @"ASCII table extension");
         capture(@"tables-header", @"mode=2");
         NSEvent *cmdF = [NSEvent keyEventWithType:NSEventTypeKeyDown
                                          location:NSZeroPoint

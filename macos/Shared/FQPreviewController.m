@@ -233,7 +233,6 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     int _tableHDU;        // HDU in the table view, -1 = none
     BOOL _headerLoaded, _headerReady;   // listing asked for; in the text view
     int _headerTarget;    // HDU to scroll the listing to, -1 = none
-    BOOL _headerTargetRows;   // to its table rows rather than its cards
     BOOL _busy, _again;   // a render is running; another one is wanted after it
     NSInteger _generation;
     NSSize _fitting;
@@ -306,7 +305,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     _headerText = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, cs.width, cs.height)];
     _headerText.editable = NO;
     _headerText.selectable = YES;
-    _headerText.richText = NO;
+    _headerText.richText = YES;   // keys in bold, comments dimmed
     _headerText.usesFindBar = YES;
     _headerText.incrementalSearchingEnabled = YES;
     _headerText.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
@@ -710,29 +709,26 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     _headerLoaded = YES;
     NSString *path = _path;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSString *text = FQHeaderListing(path);
+        NSAttributedString *text = FQHeaderListing(path);
         dispatch_async(dispatch_get_main_queue(), ^{
             if (![path isEqualToString:self->_path] || self->_headerReady)
                 return;
-            self->_headerText.string = text;
+            [self->_headerText.textStorage setAttributedString:text];
             self->_headerReady = YES;
             [self scrollHeaderToTarget];
         });
     });
 }
 
-/// Scrolls the header listing to the rows of table _headerTarget, or to
-/// its header cards, once the listing is there and on screen.
+/// Scrolls the header listing to the cards of HDU _headerTarget, once the
+/// listing is there and on screen.
 - (void)scrollHeaderToTarget
 {
     if (!_headerReady || _headerTarget < 0 || _headerScroll.hidden)
         return;
     NSString *text = _headerText.string;
-    NSRange r = NSMakeRange(NSNotFound, 0);
-    if (_headerTargetRows)
-        r = [text rangeOfString:[NSString stringWithFormat:@"——— HDU %d table ———", _headerTarget]];
-    if (r.location == NSNotFound)   // also when the listing was cut short
-        r = [text rangeOfString:[NSString stringWithFormat:@"——— HDU %d ———", _headerTarget]];
+    // Its heading: "——— HDU 2 ———", or "——— HDU 2  NAME ———".
+    NSRange r = [text rangeOfString:[NSString stringWithFormat:@"——— HDU %d ", _headerTarget]];
     _headerTarget = -1;
     if (r.location == NSNotFound)
         return;
@@ -924,7 +920,6 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
         return;
     // The header listing then opens at this HDU's cards.
     _headerTarget = _selected;
-    _headerTargetRows = NO;
     if (item.kind == FQ_KIND_TABLE) {   // nothing to draw: its rows
         [self showMode:kModeTable];
         [self.view.window makeFirstResponder:_tableView];

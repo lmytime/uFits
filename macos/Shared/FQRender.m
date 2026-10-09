@@ -426,33 +426,56 @@ void FQDrawSpectrum(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat 
     CGContextRestoreGState(ctx);
 }
 
-NSString *FQHeaderListing(NSString *path)
+NSAttributedString *FQHeaderListing(NSString *path)
 {
+    NSFont *font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
+    NSFont *bold = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightSemibold];
+    NSDictionary *plain = @{NSFontAttributeName : font, NSForegroundColorAttributeName : NSColor.labelColor};
+    NSDictionary *heading = @{NSFontAttributeName : bold, NSForegroundColorAttributeName : NSColor.labelColor};
+    // Styles of the parts fq_header_layout marks: keys, " = " and " / ", comments.
+    NSDictionary *styles[] = {
+        [FQ_SPAN_KEY] = @{NSFontAttributeName : bold},
+        [FQ_SPAN_MARK] = @{NSForegroundColorAttributeName : NSColor.tertiaryLabelColor},
+        [FQ_SPAN_COMMENT] = @{NSForegroundColorAttributeName : NSColor.secondaryLabelColor},
+    };
+    NSMutableAttributedString *out = [NSMutableAttributedString new];
     char err[256] = "";
     fq_file *f = fq_open(path.fileSystemRepresentation, err, sizeof err);
-    if (!f)
-        return [NSString stringWithFormat:@"Cannot read this file: %@", FQString(err)];
-    NSMutableString *s = [NSMutableString string];
+    if (!f) {
+        NSString *msg = [NSString stringWithFormat:@"Cannot read this file: %@", FQString(err)];
+        [out appendAttributedString:[[NSAttributedString alloc] initWithString:msg attributes:plain]];
+        return out;
+    }
     char *sum = fq_summary_text(f);
-    [s appendString:FQString(sum)];
+    [out appendAttributedString:[[NSAttributedString alloc] initWithString:FQString(sum) attributes:plain]];
     free(sum);
     int n = fq_hdu_count(f), shown = 0;
-    for (int i = 0; i < n && s.length < 8000000; i++, shown++) {
-        char *h = fq_header_text(f, i, NULL);
-        if (!h)
+    for (int i = 0; i < n && out.length < 4000000; i++, shown++) {
+        fq_span *spans = NULL;
+        size_t len = 0, nspans = 0;
+        char *text = fq_header_layout(f, i, &len, &spans, &nspans);
+        if (!text)
             break;
-        [s appendFormat:@"\n——— HDU %d ———\n", i];
-        [s appendString:FQString(h)];
-        free(h);
-        char *t = s.length < 4000000 ? fq_table_text(f, i, 100, NULL) : NULL;
-        if (t) {
-            [s appendFormat:@"\n——— HDU %d table ———\n", i];
-            [s appendString:FQString(t)];
-            free(t);
-        }
+        char name[72] = "";
+        NSString *title = fq_keyword(f, i, "EXTNAME", name, sizeof name) && name[0]
+                              ? [NSString stringWithFormat:@"\n——— HDU %d  %@ ———\n", i, FQString(name)]
+                              : [NSString stringWithFormat:@"\n——— HDU %d ———\n", i];
+        [out appendAttributedString:[[NSAttributedString alloc] initWithString:title attributes:heading]];
+        // The layout is ASCII, so its byte offsets are character offsets.
+        NSString *cards = [[NSString alloc] initWithBytes:text length:len encoding:NSASCIIStringEncoding] ?: @"";
+        NSMutableAttributedString *a = [[NSMutableAttributedString alloc] initWithString:cards attributes:plain];
+        for (size_t k = 0; k < nspans; k++)
+            if (spans[k].kind >= FQ_SPAN_KEY && spans[k].kind <= FQ_SPAN_COMMENT &&
+                (NSUInteger)spans[k].start + spans[k].len <= cards.length)
+                [a addAttributes:styles[spans[k].kind] range:NSMakeRange(spans[k].start, spans[k].len)];
+        [out appendAttributedString:a];
+        free(text);
+        free(spans);
     }
-    if (shown < n)
-        [s appendFormat:@"\n… %d more HDUs not shown\n", n - shown];
+    if (shown < n) {
+        NSString *more = [NSString stringWithFormat:@"\n… %d more HDUs not shown\n", n - shown];
+        [out appendAttributedString:[[NSAttributedString alloc] initWithString:more attributes:plain]];
+    }
     fq_close(f);
-    return s;
+    return out;
 }

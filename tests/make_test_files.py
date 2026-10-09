@@ -37,13 +37,14 @@ def write(hdus, path):
 
 
 def add_cards(path, ext, cards):
-    """Insert header cards before END, in place (astropy will not write
-    some things, such as scaled integer columns with nulls)."""
+    """Insert header cards (keyword and value, or a card's text) before END,
+    in place (astropy will not write some things, such as scaled integer
+    columns with nulls)."""
     with fits.open(path) as hl:
         start, end = hl[ext]._header_offset, hl[ext]._data_offset
     raw = bytearray(open(path, "rb").read())
     pos = next(i for i in range(start, end, 80) if raw[i:i + 8] == b"END     ")
-    new = b"".join(fits.Card(k, v).image.encode() for k, v in cards)
+    new = b"".join((c if isinstance(c, str) else fits.Card(*c).image).ljust(80).encode() for c in cards)
     assert raw[pos + 80 + len(new) - 80:end].strip() == b"", "no room in the header block"
     raw[pos:pos + 80 + len(new)] = new + raw[pos:pos + 80]
     open(path, "wb").write(bytes(raw))
@@ -246,6 +247,27 @@ def main(out):
         fits.Column("NOTE", "A8", array=np.array(["a", "bb", "ccc", "dddd"])),
     ], name="ASCII")
     write([fits.PrimaryHDU(), mixed, ascii_tab], p("tables_mixed.fits"))
+
+    # A header with every kind of card: quotes, slashes, long strings
+    # (CONTINUE), HIERARCH keywords, commentary, blank and odd cards.
+    h = fits.PrimaryHDU(np.arange(600, dtype=np.int16).reshape(20, 30))
+    for k, v in [("OBJECT", ("NGC 4535", "target")), ("OBSERVER", ("O'Brien", "quote inside")),
+                 ("PATH", ("a/b/c", "slashes / in both")), ("EMPTY", ("", "empty string")),
+                 ("UNDEF", (None, "no value")), ("FLAG", (False, "boolean")),
+                 ("EXPTIME", (1200.5, "[s] exposure")), ("BIGINT", 1234567890123),
+                 ("CPLX", (1 + 2j, "complex")),
+                 ("LONGSTR", ("x" * 70 + " and a long tail " + "y" * 40, "comment of a long string")),
+                 ("HIERARCH ESO DET CHIP1 ID", ("ccd1", "chip")),
+                 ("HIERARCH ESO TEL AMBI FWHM START", (0.85, "seeing"))]:
+        h.header[k] = v
+    h.header.add_comment("a comment")
+    h.header.add_comment("   indented comment")
+    h.header.add_history("step 1: bias")
+    h.header[""] = "blank keyword text"
+    write([h], p("header_cards.fits"))
+    add_cards(p("header_cards.fits"), 0, [
+        "", "COMMENT", "NOEQUALS  this card has no value indicator",
+        "AMPER   = 'ends with &' / not continued", "D_EXP   =             1.5D+03 / Fortran exponent"])
 
     # Tile compressed images.
     big = sky(500, 600)

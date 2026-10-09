@@ -9,6 +9,7 @@ with a reference computed from astropy's reading of the same file. Tables
 holding a light curve or a spectrum are plotted: the plot envelope is
 compared with one computed by numpy, and table listings are spot-checked.
 """
+import gzip
 import math
 import os
 import re
@@ -263,6 +264,87 @@ def check_listings():
            ["null", "(1 values)", "[1 1 1 1 1 1 1 1 ...]"])
 
 
+def expected_card(card):
+    """How fqtool header --cards should split an astropy card: kind, key,
+    value as shown (strings quoted), comment or commentary text."""
+    img = card.image
+    if img[8:10] != "= " and not (img.startswith("HIERARCH ") and "=" in img[9:]):
+        return "c", card.keyword, "", str(card.value)
+    key = ("HIERARCH " if img.startswith("HIERARCH ") else "") + card.keyword
+    v = card.value
+    if isinstance(v, bool):
+        v = "T" if v else "F"
+    elif isinstance(v, str):
+        v = "'" + v + "'"
+    elif v is None or isinstance(v, fits.card.Undefined):
+        v = ""
+    return "v", key, v, card.comment
+
+
+def same_value(got, want):
+    if got == want or isinstance(want, str):
+        return got == want
+    try:
+        if isinstance(want, complex):
+            re_, im = got.strip("()").split(",")
+            return complex(float(re_.replace("D", "E")), float(im.replace("D", "E"))) == want
+        return float(got.replace("D", "E")) == want
+    except ValueError:
+        return False
+
+
+def check_headers(files):
+    """Every header card of every file, as split for the Header view,
+    against astropy; and the layout of one header."""
+    bad = checked = 0
+    for fn in files:
+        path = os.path.join(DATA, fn)
+        try:
+            with fits.open(path) as hl:
+                offsets = [(h._header_offset, h._data_offset) for h in hl]
+            raw = (gzip.open if fn.endswith(".gz") else open)(path, "rb").read()
+            headers = [fits.Header.fromstring(raw[a:b].decode("ascii")) for a, b in offsets]
+        except Exception:
+            continue
+        for i, hdr in enumerate(headers):
+            rc, out = fqtool("header", path, str(i), "--cards")
+            got = [l.split("\t") for l in out.splitlines()]
+            want = [expected_card(c) for c in hdr.cards] + [("e", "END", "", "")]
+            checked += 1
+            if len(got) != len(want) or any(
+                    g[:2] != list(w[:2]) or not same_value(g[2], w[2]) or g[3] != w[3] for g, w in zip(got, want)):
+                bad += 1
+                diff = next(((g, w) for g, w in zip(got, want) if g != list(w)), (len(got), len(want)))
+                failures.append(f"{fn} HDU {i} header cards: first difference {diff}")
+    print(f"  {'ok' if not bad else '--'}  header cards of {checked - bad} of {checked} HDUs match astropy")
+
+    # The layout: keys in a column, values and comments lined up, and
+    # spans that cover exactly the keys, separators and comments.
+    path = os.path.join(DATA, "header_cards.fits")
+    if not os.path.exists(path):
+        return
+    text = fqtool("header", path)[1]
+    lines = text.splitlines()
+    cards = [l.split("\t") for l in fqtool("header", path, "--cards")[1].splitlines()]
+    eq = {l.index(" = ") for l, c in zip(lines, cards) if c[0] == "v" and len(c[1]) <= 36}
+    slash = {l.index(" / ", len(c[1]) + 3 + len(c[2])) for l, c in zip(lines, cards)
+             if c[0] == "v" and c[3] and len(c[2]) <= 30}
+    texts = {l.index(c[3]) for l, c in zip(lines, cards) if c[0] == "c" and c[3]}
+    ok = len(lines) == len(cards) and len(eq) == 1 and len(slash) == 1 and texts == {eq.pop() + 3}
+    spans = [tuple(map(int, l.split())) for l in fqtool("header", path, "--spans")[1].splitlines()]
+    raw = text.encode()
+    parts = {1: [], 2: set(), 3: []}
+    for kind, start, n in spans:
+        part = raw[start:start + n].decode()
+        parts[kind].add(part) if kind == 2 else parts[kind].append(part)
+    ok = ok and parts[1] == [c[1] for c in cards if c[1]] and parts[2] == {" = ", " / "} and \
+        parts[3] == [c[3] for c in cards if c[3]]
+    if not ok:
+        failures.append(f"header layout of header_cards.fits:\n{text}\n{spans}")
+    else:
+        print(f"  ok  header layout: keys in {len(lines)} lines, \"=\" and \"/\" lined up, spans")
+
+
 def is_image(i, h):
     if isinstance(h, fits.CompImageHDU):
         return h.header.get("ZCMPTYPE", "") != "HCOMPRESS_1" or True
@@ -475,6 +557,7 @@ def main():
     check_restretch()
     check_listings()
     files = sorted(f for f in os.listdir(DATA) if f.endswith((".fits", ".fits.gz")))
+    check_headers(files)
     for fn in files:
         path = os.path.join(DATA, fn)
         try:

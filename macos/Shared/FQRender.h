@@ -61,8 +61,8 @@ void FQDrawSpectrum(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat 
 /// NSString from a C string that may not be valid UTF-8. Never nil.
 NSString *FQString(const char *_Nullable s);
 
-/// Full header listing: HDU summary followed by every header and the
-/// first rows of every table (capped).
-NSString *FQHeaderListing(NSString *path);
+/// Full header listing: HDU summary followed by every header (capped), its
+/// cards lined up in key, value and comment columns.
+NSAttributedString *FQHeaderListing(NSString *path);
 
 NS_ASSUME_NONNULL_END

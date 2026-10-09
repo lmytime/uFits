@@ -80,7 +80,16 @@ typedef struct {
     char xname[32], yname[32];
 } fqi_plotspec;
 
+/* A growing string; oom is set (and nothing more added) when out of memory. */
+typedef struct {
+    char *s;
+    size_t len, cap;
+    int oom;
+} fqi_sbuf;
+
 /* fq.c */
+void fqi_sb_add(fqi_sbuf *b, const char *s, size_t n);
+void fqi_sb_printf(fqi_sbuf *b, const char *fmt, ...);
 void fqi_seterr(char *err, size_t n, const char *fmt, ...);
 void fqi_scopy(char *dst, size_t n, const char *src);
 int64_t fqi_mul_sat(int64_t a, int64_t b);

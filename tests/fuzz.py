@@ -5,7 +5,7 @@ Usage: fuzz.py FQTOOL TESTDATA_DIR [ITERATIONS]
 
 Build fqtool with -fsanitize=address,undefined to catch memory errors that
 do not crash outright. Mutations: random byte flips in the header and data,
-truncation, edited keyword values, swapped header blocks.
+truncation, edited keyword values, swapped header blocks, odd header cards.
 """
 import os
 import random
@@ -24,11 +24,16 @@ KEYS = [b"BITPIX  =", b"NAXIS   =", b"NAXIS1  =", b"NAXIS2  =", b"NAXIS3  =", b"
 VALUES = [b"0", b"-1", b"1", b"2", b"3", b"7", b"-32", b"64", b"999999999", b"-2147483648",
           b"9223372036854775807", b"1E300", b"'1PB(0)'", b"'1QB(99999999)'", b"'abc'", b"T",
           b"'1000000D'", b"'E'", b"'0J'", b"'F99999.3'", b"'A0'", b"'2X'", b"'3M'", b"'PE()'"]
+# Header cards that are hard to split into key, value and comment.
+CARDS = [b"CONTINUE  'abc&'", b"CONTINUE  '&", b"CONTINUE  ", b"LONG    = 'abc&'", b"LONG    = '&'",
+         b"LONG    = '" + b"x" * 69, b"HIERARCH " + b"A" * 71, b"HIERARCH =", b"HIERARCH A B = 'x''",
+         b"HIERARCH" + b"=" * 72, b"QUOTE   = " + b"'" * 15, b"SLASH   = //////////", b"'" * 80, b"=" * 80,
+         b"COMMENT " + b"\t\x00\xff" * 24, b"KEY     =", b"KEY     = '", b"        = 'x' / y", b"END"]
 
 
 def mutate(data):
     d = bytearray(data)
-    kind = rnd.randrange(6)
+    kind = rnd.randrange(7)
     if kind == 0:   # flip bytes anywhere
         for _ in range(rnd.randrange(1, 50)):
             d[rnd.randrange(len(d))] = rnd.randrange(256)
@@ -49,6 +54,11 @@ def mutate(data):
         if len(d) > 2880 * 2:
             b = rnd.randrange(len(d) // 2880)
             d[2880:2880] = d[b * 2880:(b + 1) * 2880]
+    elif kind == 5:  # odd cards in the first header, often several in a row
+        at = rnd.randrange(min(len(d), 2880) // 80) * 80
+        for _ in range(rnd.randrange(1, 6)):
+            d[at:at + 80] = rnd.choice(CARDS).ljust(80)[:80]
+            at += 80
     else:            # zero a random span
         a = rnd.randrange(len(d))
         b = min(len(d), a + rnd.randrange(1, 20000))
@@ -71,7 +81,8 @@ def main():
             open(target, "wb").write(data)
             for args in (["render", target, png, "--max", str(rnd.choice([16, 100, 512])),
                           "--samples", str(rnd.choice([0, 1, 2, 4]))],
-                         ["info", target], ["header", target, str(rnd.randrange(3))],
+                         ["info", target],
+                         ["header", target, str(rnd.randrange(3))] + rnd.choice([[], ["--cards"], ["--spans"]]),
                          ["hdus", target], ["table", target, str(rnd.randrange(1, 3)), "50"],
                          ["rows", target, str(rnd.randrange(1, 3)), str(rnd.choice([0, 3, 999])), "5"]):
                 try:
