@@ -124,10 +124,12 @@ jobs:
         run: |
           cd build/testdata
           ../qlpreview ../ql f32.fits spec1d.fits mef.fits lc_tess.fits catalog_gaia.fits tables_mixed.fits
-      - name: Preview UI (HDU menu, plane slider, plots, tables, find bar)
+      - name: Preview UI (HDU menu, plane slider, plots, tables, find bar, timings)
         if: always()
-        timeout-minutes: 3
-        run: build/uitest build/ql build/testdata
+        timeout-minutes: 6
+        run: |
+          python3 tests/macos/make_big_files.py build/testdata
+          build/uitest build/ql build/testdata
       - name: App windows (best effort)
         if: always()
         timeout-minutes: 2

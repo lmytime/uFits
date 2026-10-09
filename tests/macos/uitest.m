@@ -7,6 +7,7 @@
 // Usage: uitest OUTDIR TESTDATA_DIR
 
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 #include <math.h>
 
 #import "FQPreviewController.h"
@@ -212,6 +213,100 @@ static void expectColumns(NSString *step, NSString *card1, NSString *card2, NSSt
            cc.description.UTF8String ?: "-");
 }
 
+#pragma mark Timings
+
+static double msSince(CFTimeInterval t0)
+{
+    return (CACurrentMediaTime() - t0) * 1000.0;
+}
+
+/// Whether the preview shows the content of mode: a picture, a table with
+/// rows, or a header listing.
+static BOOL contentReady(NSInteger mode)
+{
+    NSView *root = gWindow.contentView;
+    if (mode == 1) {
+        NSTableView *tv = findView(root, NSTableView.class, nil);
+        return tv && tv.numberOfRows > 0;
+    }
+    if (mode == 2) {
+        NSTextView *tv = findView(root, NSTextView.class, ^BOOL(id v) {
+            return ![v isEditable];
+        });
+        return tv && tv.string.length > 0;
+    }
+    return findView(root, NSClassFromString(@"FQImageView"), nil) ||
+           findView(root, NSClassFromString(@"FQSpectrumView"), nil);
+}
+
+/// Clicks segment mode of the mode switch; reports how long the window was
+/// busy (could not draw or take clicks) and how long until the content was
+/// on screen.
+static void timeSwitch(NSString *name, NSInteger mode)
+{
+    NSSegmentedControl *seg = findView(gWindow.contentView, NSSegmentedControl.class, nil);
+    if (!seg)
+        return;
+    seg.selectedSegment = mode;
+    CFTimeInterval t0 = CACurrentMediaTime();
+    [seg sendAction:seg.action to:seg.target];
+    [gWindow layoutIfNeeded];
+    [gWindow displayIfNeeded];
+    double busy = msSince(t0);
+    while (!contentReady(mode) && msSince(t0) < 20000)
+        spin(0.005);
+    [gWindow displayIfNeeded];
+    printf("time %-36s busy %7.1f ms   on screen after %7.1f ms\n", name.UTF8String, busy, msSince(t0));
+}
+
+/// Scrolls the table on show a page down (or half a width sideways) at a
+/// time, drawing each step; reports the time per step.
+static void timeScroll(NSString *name, BOOL sideways, int steps)
+{
+    NSTableView *tv = findView(gWindow.contentView, NSTableView.class, nil);
+    if (!tv || !tv.numberOfRows) {
+        printf("FAIL %s: no table on show\n", name.UTF8String);
+        gFailures++;
+        return;
+    }
+    NSScrollView *sv = tv.enclosingScrollView;
+    NSClipView *clip = sv.contentView;
+    [gWindow displayIfNeeded];
+    CFTimeInterval t0 = CACurrentMediaTime();
+    for (int i = 0; i < steps; i++) {
+        NSPoint p = clip.bounds.origin;
+        if (sideways)
+            p.x += NSWidth(clip.bounds) / 2;
+        else
+            p.y += NSHeight(clip.bounds);
+        [clip scrollToPoint:p];
+        [sv reflectScrolledClipView:clip];
+        [gWindow displayIfNeeded];
+    }
+    printf("time %-36s %7.2f ms per step (%d steps)\n", name.UTF8String, msSince(t0) / steps, steps);
+}
+
+/// Jumps the table on show to row, drawing it; reports the time.
+static void timeJump(NSString *name, NSInteger row)
+{
+    NSTableView *tv = findView(gWindow.contentView, NSTableView.class, nil);
+    if (!tv || row >= tv.numberOfRows)
+        return;
+    CFTimeInterval t0 = CACurrentMediaTime();
+    [tv scrollRowToVisible:row];
+    [gWindow displayIfNeeded];
+    printf("time %-36s %7.1f ms\n", name.UTF8String, msSince(t0));
+}
+
+/// Opens path and reports how long until it is on screen.
+static void timeLoad(FQPreviewController *vc, NSString *name, NSString *path)
+{
+    CFTimeInterval t0 = CACurrentMediaTime();
+    load(vc, path);
+    [gWindow displayIfNeeded];
+    printf("time %-36s %7.1f ms\n", name.UTF8String, msSince(t0));
+}
+
 int main(int argc, const char *argv[])
 {
     @autoreleasepool {
@@ -306,6 +401,31 @@ int main(int argc, const char *argv[])
         if (!handled)
             gFailures++;
         capture(@"tables-find", nil);
+
+        // Timings with big files (tests/macos/make_big_files.py): opening,
+        // switching modes, scrolling a big table down and a wide one across.
+        NSString *catalog = [data stringByAppendingPathComponent:@"big_catalog.fits"];
+        if ([NSFileManager.defaultManager fileExistsAtPath:catalog]) {
+            timeLoad(vc, @"open 1M-row catalog (sky plot)", catalog);
+            timeSwitch(@"catalog: Plot -> Table", 1);
+            timeScroll(@"catalog: scroll down", NO, 200);
+            timeJump(@"catalog: jump to row 900000", 900000);
+            timeScroll(@"catalog: scroll right", YES, 4);
+            timeSwitch(@"catalog: Table -> Header", 2);
+            timeSwitch(@"catalog: Header -> Plot", 0);
+            timeSwitch(@"catalog: Plot -> Table again", 1);
+            timeSwitch(@"catalog: Table -> Header again", 2);
+            timeSwitch(@"catalog: Header -> Table again", 1);
+            capture(@"big-catalog", nil);
+            timeLoad(vc, @"open 300-column table", [data stringByAppendingPathComponent:@"wide_table.fits"]);
+            timeScroll(@"wide table: scroll right", YES, 40);
+            timeScroll(@"wide table: scroll down", NO, 50);
+            capture(@"wide-table", nil);
+            timeLoad(vc, @"open 200-HDU file", [data stringByAppendingPathComponent:@"many_hdus.fits"]);
+            timeSwitch(@"200 HDUs: Image -> Header", 2);
+            timeSwitch(@"200 HDUs: Header -> Image", 0);
+            timeSwitch(@"200 HDUs: Image -> Header again", 2);
+        }
 
         printf("%d failures\n", gFailures);
     }
