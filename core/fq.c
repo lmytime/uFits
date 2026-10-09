@@ -41,9 +41,10 @@
 #define BLOCK 2880
 #define MAX_HDUS 100000
 #define BIG ((int64_t)1 << 62)
-#define GZ_LIMIT ((int64_t)2 << 30)     /* never inflate more than 2 GiB */
+#define GZ_LIMIT ((int64_t)1 << 30)     /* never inflate more than 1 GiB */
 #define STAT_SAMPLES 200000
 #define MAX_K 64
+#define MAX_SIDE ((int64_t)1 << 28)    /* longest image axis we accept */
 #define N_RANDOM 10000
 
 /* ------------------------------------------------------------ utilities */
@@ -775,7 +776,7 @@ static int parse_comp(fq_file *f, const hdu_t *h, comp_t *c, char *cmp, size_t c
     char key[32];
     for (int a = 0; a < c->znaxis; a++) {
         snprintf(key, sizeof key, "ZNAXIS%d", a + 1);
-        if (!kw_int(f, h, key, &iv) || iv < 1 || iv > INT_MAX)
+        if (!kw_int(f, h, key, &iv) || iv < 1 || iv > MAX_SIDE)
             return -1;
         c->znaxes[a] = iv;
         snprintf(key, sizeof key, "ZTILE%d", a + 1);
@@ -789,13 +790,16 @@ static int parse_comp(fq_file *f, const hdu_t *h, comp_t *c, char *cmp, size_t c
         c->ztile[1] = 1;
     }
     c->maxtile = 1;
-    int64_t npix = 1;
+    int64_t npix = 1, ntiles = 1;
     for (int a = 0; a < c->znaxis; a++) {
         c->ntile[a] = (c->znaxes[a] - 1) / c->ztile[a] + 1;
         c->maxtile = mul_sat(c->maxtile, c->ztile[a]);
         npix = mul_sat(npix, c->znaxes[a]);
+        ntiles = mul_sat(ntiles, c->ntile[a]);
     }
-    if (c->maxtile > ((int64_t)1 << 28) || npix > ((int64_t)1 << 40))
+    /* A band of tiles is decoded at once: keep it and the tiles sane. */
+    if (c->maxtile > ((int64_t)1 << 24) || npix > ((int64_t)1 << 40) ||
+        mul_sat(c->znaxes[0], c->ztile[1]) > ((int64_t)1 << 27))
         return -1;
 
     c->blocksize = 32;
@@ -877,7 +881,7 @@ static int parse_comp(fq_file *f, const hdu_t *h, comp_t *c, char *cmp, size_t c
     }
     c->rowlen = h->naxes[0];
     c->nrows = h->naxis >= 2 ? h->naxes[1] : 0;
-    if (off > c->rowlen || !c->cdata.present)
+    if (off > c->rowlen || !c->cdata.present || c->nrows < ntiles)
         return -1;
     c->theap = mul_sat(c->rowlen, c->nrows);
     if (kw_int(f, h, "THEAP", &iv) && iv >= c->theap)
@@ -1674,6 +1678,10 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
         P->truncated = 1;
     if (s->avail < 0)
         s->avail = 0;
+    if (P->W > MAX_SIDE || s->avail < P->W * s->bpp) {
+        seterr(err, errlen, "the file ends before the image data");
+        return -1;
+    }
 
     /* Wide integer and double data can carry a large offset that float32
        cannot resolve; measure values relative to a pixel near the centre. */
@@ -1849,9 +1857,16 @@ static void bin_task(void *ctx, size_t ci)
     if (oy0 >= oy1)
         return;
     const int w = P->w;
-    int64_t tmpn = P->W > w ? P->W : w;
+    /* Scratch for what one pass reads: whole blocks when every pixel is
+       averaged, one value per output column when sampling. */
+    const int bayer = P->color == FQ_COLOR_BAYER;
+    int64_t span = (int64_t)w * P->f * (bayer ? 2 : 1);
+    if (span > P->W)
+        span = P->W;
+    int64_t tmpn = P->k == P->f ? (span > w ? span : w) : w;
+    int64_t coln = P->k == P->f ? (bayer ? 4 : 2) * span : 1;
     float *tmp = malloc((size_t)tmpn * sizeof(float));
-    float *col = malloc(4 * (size_t)tmpn * sizeof(float));
+    float *col = malloc((size_t)coln * sizeof(float));
     float *acc = malloc(3 * (size_t)w * sizeof(float));
     float *cnt = malloc(3 * (size_t)w * sizeof(float));
     int hasnan = 0;
@@ -2142,15 +2157,6 @@ static int render_spectrum(fq_file *f, const fq_opts *o, plan_t *P, fq_image *im
     const src_t *s = &P->src;
     const int64_t W = P->W;
     const uint8_t *row = src_row(s, 0, 0);
-    float *v = malloc((size_t)W * sizeof(float));
-    if (!v)
-        return -1;
-    if (row) {
-        decode_run(s, row, 0, 1, W, v);
-    } else {
-        for (int64_t i = 0; i < W; i++)
-            v[i] = NAN;
-    }
     int ncol = o->max_width > 0 ? o->max_width : 1024;
     if (ncol > W)
         ncol = (int)W;
@@ -2158,30 +2164,51 @@ static int render_spectrum(fq_file *f, const fq_opts *o, plan_t *P, fq_image *im
     img->spec_points = W;
     img->spec_lo = malloc((size_t)ncol * sizeof(float));
     img->spec_hi = malloc((size_t)ncol * sizeof(float));
-    float *samp = malloc((size_t)(W < STAT_SAMPLES ? W : STAT_SAMPLES) * sizeof(float));
-    if (!img->spec_lo || !img->spec_hi || !samp) {
-        free(v);
+    /* Stream through the row: min/max per output column plus a regular
+       subsample for the plot range. Memory does not grow with W. */
+    const int64_t chunk = 65536, step = W / STAT_SAMPLES + 1;
+    float *vals = malloc((size_t)(W < chunk ? W : chunk) * sizeof(float));
+    float *samp = malloc((size_t)(W / step + 1) * sizeof(float));
+    if (!img->spec_lo || !img->spec_hi || !vals || !samp) {
+        free(vals);
         free(samp);
         return -1;
     }
-    double ref = s->ref;
-    for (int c = 0; c < ncol; c++) {
-        int64_t i0 = W * c / ncol, i1 = W * (c + 1) / ncol;
-        float lo = NAN, hi = NAN;
-        for (int64_t i = i0; i < i1; i++) {
-            float x = v[i];
+    for (int c = 0; c < ncol; c++)
+        img->spec_lo[c] = img->spec_hi[c] = NAN;
+    int64_t n = 0, cend = W / ncol;
+    int c = 0;
+    for (int64_t x0 = 0; x0 < W; x0 += chunk) {
+        int64_t m = W - x0 < chunk ? W - x0 : chunk;
+        if (row)
+            decode_run(s, row, x0, 1, m, vals);
+        else
+            for (int64_t j = 0; j < m; j++)
+                vals[j] = NAN;
+        for (int64_t j = 0; j < m; j++) {
+            int64_t i = x0 + j;
+            while (i >= cend) {
+                c++;
+                cend = W * (c + 1) / ncol;
+            }
+            float x = vals[j];
             if (!is_finite(x))
                 continue;
-            if (!(x >= lo)) lo = x;
-            if (!(x <= hi)) hi = x;
+            if (!(x >= img->spec_lo[c]))
+                img->spec_lo[c] = x;
+            if (!(x <= img->spec_hi[c]))
+                img->spec_hi[c] = x;
+            if (i % step == 0)
+                samp[n++] = x;
         }
-        img->spec_lo[c] = lo + (float)ref;
-        img->spec_hi[c] = hi + (float)ref;
     }
-    int64_t step = W / STAT_SAMPLES + 1, n = 0;
-    for (int64_t i = 0; i < W; i += step)
-        if (is_finite(v[i]))
-            samp[n++] = v[i];
+    free(vals);
+    double ref = s->ref;
+    if (ref != 0)
+        for (int k = 0; k < ncol; k++) {
+            img->spec_lo[k] += (float)ref;
+            img->spec_hi[k] += (float)ref;
+        }
     if (n > 0) {
         float mn = samp[0], mx = samp[0];
         for (int64_t i = 1; i < n; i++) {
@@ -2212,7 +2239,6 @@ static int render_spectrum(fq_file *f, const fq_opts *o, plan_t *P, fq_image *im
         img->y_max = 1;
     }
     free(samp);
-    free(v);
 
     hdu_t *h = get_hdu(f, P->d.hdu);
     double crval, cdelt, crpix = 1;
@@ -2381,8 +2407,10 @@ fq_image *fq_render(fq_file *f, const fq_opts *opts, char *err, size_t errlen)
     img->info.sigma = st[0].sig;
     img->info.black = st[0].lo + ref;
     img->info.white = st[0].hi + ref;
-    if (!any_valid)
+    if (!any_valid) {
         has_nan = 1;
+        img->info.empty = 1;
+    }
 
     img->width = P.w;
     img->height = P.h;

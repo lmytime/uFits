@@ -64,6 +64,7 @@ typedef struct {
     int width, height;        /* output size in pixels */
     int flipped;              /* 1 = first FITS row is at the bottom */
     int truncated;            /* file ends before the data does */
+    int empty;                /* no finite pixel values at all */
     double median, sigma;     /* channel 0 statistics in data units */
     double black, white;      /* display range of channel 0 */
 } fq_info;

@@ -63,7 +63,7 @@ APP_OBJ     := $(B)/obj/app/main.o $(B)/obj/app/FQRender.o $(B)/obj/app/FQPrevie
 PREVIEW_OBJ := $(B)/obj/ext/PreviewViewController.o $(B)/obj/ext/FQRender.o $(B)/obj/ext/FQPreviewController.o
 THUMB_OBJ   := $(B)/obj/ext/ThumbnailProvider.o $(B)/obj/ext/FQRender.o
 
-.PHONY: all app install uninstall zip test fqtool clean
+.PHONY: all app install uninstall zip test fqtool qltools clean
 
 all: app
 
@@ -185,6 +185,19 @@ $(B)/fqtool: tools/fqtool.c core/fq.c core/fq_codec.c $(CORE_H)
 test: $(B)/fqtool
 	python3 tests/make_test_files.py $(B)/testdata
 	python3 tests/test_core.py $(B)/fqtool $(B)/testdata
+
+# Quick Look checks used by CI: thumbnails through QLThumbnailGenerator and
+# previews through QLPreviewView, both served by the installed extensions.
+qltools: $(B)/qlthumb $(B)/qlpreview
+
+$(B)/qlthumb: tests/macos/qlthumb.m
+	@mkdir -p $(B)
+	$(CC) -fobjc-arc -fmodules -O2 -o $@ $< -framework Foundation -framework QuickLookThumbnailing \
+	    -framework ImageIO -framework UniformTypeIdentifiers
+
+$(B)/qlpreview: tests/macos/qlpreview.m
+	@mkdir -p $(B)
+	$(CC) -fobjc-arc -fmodules -O2 -o $@ $< -framework Cocoa -framework Quartz
 
 clean:
 	rm -rf $(B)

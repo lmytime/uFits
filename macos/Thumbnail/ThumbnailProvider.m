@@ -28,7 +28,7 @@
                                      samples:2
                                      stretch:FQ_STRETCH_AUTO
                                        error:&error];
-    if (!r || r.kind == FQ_KIND_NONE) {
+    if (!r || r.kind == FQ_KIND_NONE || r.info.empty) {
         handler(nil, [NSError errorWithDomain:@"uFits"
                                          code:1
                                      userInfo:@{

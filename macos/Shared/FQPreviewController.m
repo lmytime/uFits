@@ -323,7 +323,10 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
         _info.stringValue = error.length ? error : @"No image";
         _info.toolTip = nil;
     }
-    _message.stringValue = error.length ? error : @"";
+    if (kind == FQ_KIND_IMAGE && r.info.empty)
+        _message.stringValue = @"Every pixel of this image is blank (NaN or BLANK).";
+    else
+        _message.stringValue = error.length ? error : @"";
 
     CGSize px = r ? r.pixelSize : CGSizeMake(800, 600);
     CGFloat w = MAX(px.width, 1), h = MAX(px.height, 1);
@@ -345,7 +348,7 @@ static NSArray<NSNumber *> *FQNiceTicks(double lo, double hi, int target)
     _headerScroll.hidden = !header;
     _imageView.hidden = header || kind != FQ_KIND_IMAGE;
     _spectrumView.hidden = header || kind != FQ_KIND_SPECTRUM;
-    _message.hidden = YES;
+    _message.hidden = header || !(kind == FQ_KIND_IMAGE && _rendering.info.empty);
     _stretchMenu.hidden = header || kind != FQ_KIND_IMAGE;
     if (header && !_headerLoaded && _path) {
         _headerLoaded = YES;

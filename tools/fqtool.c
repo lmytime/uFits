@@ -164,10 +164,11 @@ static void print_info(const fq_info *in)
     for (int i = 0; i < in->naxis; i++)
         printf(i ? "x%lld" : "%lld", (long long)in->naxes[i]);
     printf(" compressed=%d%s%s plane=%lld/%lld color=%d bayer=%s bin=%d samples=%d out=%dx%d"
-           " flipped=%d truncated=%d median=%.6g sigma=%.6g black=%.6g white=%.6g\n",
+           " flipped=%d truncated=%d empty=%d median=%.6g sigma=%.6g black=%.6g white=%.6g\n",
            in->compressed, in->compressed ? ":" : "", in->cmptype, (long long)in->plane,
            (long long)in->nplanes, in->color, in->bayer, in->bin, in->samples, in->width,
-           in->height, in->flipped, in->truncated, in->median, in->sigma, in->black, in->white);
+           in->height, in->flipped, in->truncated, in->empty, in->median, in->sigma, in->black,
+           in->white);
 }
 
 int main(int argc, char **argv)

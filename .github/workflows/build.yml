@@ -50,12 +50,33 @@ jobs:
           make install
           pluginkit -m -v -i io.github.lmytime.uFits.Preview
           pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail
-          mdls -name kMDItemContentType build/testdata/f32.fits || true
-      - name: Quick Look thumbnails
-        run: tests/ql_smoke.sh build/testdata build/ql
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
+            | grep -B2 -A8 "gov.nasa.gsfc.fits" | head -40 || true
+      - name: Quick Look thumbnails (QLThumbnailGenerator)
+        timeout-minutes: 4
+        run: |
+          make qltools
+          cd build/testdata
+          ../qlthumb ../ql f32.fits u16.fits rgb.fits bayer_rggb.fits rice_f32_sd1.fits \
+            footprint_f32.fits mef.fits spec1d.fits cube5.fits
+      - name: Quick Look preview (QLPreviewView)
+        if: always()
+        timeout-minutes: 4
+        run: build/qlpreview build/ql build/testdata/f32.fits build/testdata/spec1d.fits build/testdata/table_only.fits
+      - name: Crash reports
+        if: always()
+        run: |
+          ls ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i ufits || echo "no uFits crash reports"
+          for f in ~/Library/Logs/DiagnosticReports/*uFits*; do [ -f "$f" ] && head -150 "$f"; done; true
       - name: Quick Look logs
         if: always()
-        run: log show --last 5m --style compact --predicate 'process CONTAINS "uFits" OR (subsystem CONTAINS "quicklook" AND messageType >= 16)' | tail -80 || true
+        run: |
+          log show --last 5m --style compact \
+            --predicate 'process BEGINSWITH "uFits" OR (subsystem CONTAINS "quicklook" AND messageType >= 16)' \
+            | tail -60 || true
+      - name: Images for review (base64)
+        if: always()
+        run: tests/macos/print_images.sh build/ql
       - name: Package
         if: always()
         run: make zip
