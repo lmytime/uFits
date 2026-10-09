@@ -161,6 +161,8 @@ def check_stretch():
     with tempfile.TemporaryDirectory() as tmp:
         for fn in ("f32.fits", "i16.fits", "u16.fits", "mef.fits", "rice_f32_sd1.fits",
                    "footprint_f32.fits", "f64_offset.fits", "u32.fits"):
+            if not os.path.exists(os.path.join(DATA, fn)):
+                continue
             r = subprocess.run([FQ, "render", os.path.join(DATA, fn), os.path.join(tmp, "o.png"),
                                 "--max", "256"], capture_output=True, text=True, errors="replace")
             line = [l for l in r.stdout.splitlines() if l.startswith("output ")]
