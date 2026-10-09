@@ -36,7 +36,8 @@ Time spent in the core alone, measured on a 4-core Linux VM:
 - An automatic midtone stretch (median/MAD based, like PixInsight's STF) that shows faint
   structure without burning out bright sources. The preview's menu switches to a linear
   0.5–99.5 % or min–max stretch; the choice is remembered.
-- Cubes: the middle plane. Three-plane cubes without a spectral `CTYPE3`: an RGB image.
+- Cubes: the middle plane. Three-plane cubes are shown in colour unless `CTYPE3` names
+  another axis (frequency, wavelength, ...).
 - One-shot-colour camera frames with `BAYERPAT` (`XBAYROFF`/`YBAYROFF`, `ROWORDER`
   honoured) are debayered to colour.
 - 1-D data (spectra) as a plot, with the wavelength axis from `CRVAL1`/`CDELT1`.
@@ -74,7 +75,7 @@ under System Settings › Privacy & Security), move it to Applications and open 
 make                   # build/uFits.app only
 make ARCHS=arm64       # native-only build (default is universal)
 make GZIP=1 install    # also preview .gz files (claims every gzip file, see below)
-make SIGN="Developer ID Application: Your Name (TEAMID)" zip   # signed for distribution
+make SIGN="Developer ID Application: Your Name (TEAMID)" zip   # hardened runtime, ready to notarize
 make uninstall
 ```
 
