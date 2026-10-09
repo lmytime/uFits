@@ -40,11 +40,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build
         run: |
-          # Whatever clang comes first on PATH (Homebrew, conda, ...) must not
-          # be used: put a broken one there.
+          # Whatever clang and codesign come first on PATH (Homebrew, conda,
+          # Nix, ...) must not be used: put broken ones there.
           mkdir -p /tmp/badbin
-          printf '#!/bin/sh\necho "the clang on PATH was used" >&2\nexit 1\n' > /tmp/badbin/clang
-          chmod +x /tmp/badbin/clang
+          for tool in clang codesign; do
+            printf '#!/bin/sh\necho "the %s on PATH was used" >&2\nexit 1\n' $tool > /tmp/badbin/$tool
+            chmod +x /tmp/badbin/$tool
+          done
           PATH=/tmp/badbin:$PATH make app
       - name: Bundle contents
         run: |

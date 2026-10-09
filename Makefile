@@ -36,6 +36,11 @@ B          ?= build
 # cannot build against the macOS SDK ("could not build module 'Cocoa'").
 CC      := xcrun clang
 HOSTCC  ?= cc
+# Apple's codesign by its path: conda and Nix put a stand-in (sigtool) first
+# on PATH that cannot sign app bundles (SigTool::NotAMachOFileException),
+# and may point codesign at their own codesign_allocate.
+CODESIGN := /usr/bin/codesign
+unexport CODESIGN_ALLOCATE
 ARCHF   := $(foreach a,$(ARCHS),-arch $(a))
 WARN    := -Wall -Wextra -Wno-unused-parameter
 COMMON  := $(ARCHF) -mmacosx-version-min=$(MINOS) -O2 $(WARN) -Icore -Imacos/Shared
@@ -152,10 +157,10 @@ BUNDLE_PARTS := $(APPDIR)/Contents/MacOS/$(APP) $(APPDIR)/Contents/Info.plist \
 
 $(APPDIR)/Contents/_CodeSignature/CodeResources: $(BUNDLE_PARTS) macos/Preview/Preview.entitlements macos/Thumbnail/Thumbnail.entitlements
 	printf 'APPL????' > $(APPDIR)/Contents/PkgInfo
-	codesign --force --sign "$(SIGN)" $(SIGNFLAGS) --entitlements macos/Preview/Preview.entitlements $(PREVIEW)
-	codesign --force --sign "$(SIGN)" $(SIGNFLAGS) --entitlements macos/Thumbnail/Thumbnail.entitlements $(THUMB)
-	codesign --force --sign "$(SIGN)" $(SIGNFLAGS) $(APPDIR)
-	codesign --verify --deep --strict $(APPDIR)
+	$(CODESIGN) --force --sign "$(SIGN)" $(SIGNFLAGS) --entitlements macos/Preview/Preview.entitlements $(PREVIEW)
+	$(CODESIGN) --force --sign "$(SIGN)" $(SIGNFLAGS) --entitlements macos/Thumbnail/Thumbnail.entitlements $(THUMB)
+	$(CODESIGN) --force --sign "$(SIGN)" $(SIGNFLAGS) $(APPDIR)
+	$(CODESIGN) --verify --deep --strict $(APPDIR)
 	@echo "Built $(APPDIR)"
 
 # --- install ---------------------------------------------------------------
