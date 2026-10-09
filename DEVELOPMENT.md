@@ -139,6 +139,7 @@ core/       C core: parsing, decompression, binning, stretch (portable, zlib onl
 tools/      fqtool command line front end, icon generator
 macos/      Objective-C: app, Quick Look preview and thumbnail extensions
 tests/      astropy-based test file generator, comparisons, fuzzer, Quick Look smoke test
+docs/       the homepage, one static page (GitHub Pages: branch main, folder /docs)
 Makefile    builds everything with clang; no Xcode project
 ```
 
