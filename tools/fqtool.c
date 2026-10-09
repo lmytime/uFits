@@ -265,6 +265,23 @@ int main(int argc, char **argv)
                            img->y_unit);
                     write_spectrum_png(argv[3], img);
                 } else {
+                    /* Output statistics: median grey of the opaque pixels and
+                       the transparent fraction, for tests of the stretch. */
+                    size_t npx = (size_t)img->width * img->height, nop = 0;
+                    unsigned long hist[256] = { 0 };
+                    for (int y = 0; y < img->height; y++)
+                        for (int x = 0; x < img->width; x++) {
+                            const uint8_t *p = img->pixels + y * img->row_bytes + x * img->components;
+                            if (img->components == 4 && p[3] == 0)
+                                continue;
+                            hist[p[0]]++;
+                            nop++;
+                        }
+                    int med = 0;
+                    for (unsigned long acc = 0; med < 255 && (acc += hist[med]) * 2 < nop; med++)
+                        ;
+                    printf("output median=%d transparent=%.4f\n", nop ? med : -1,
+                           npx ? 1.0 - (double)nop / (double)npx : 0.0);
                     write_png(argv[3], img->pixels, img->width, img->height, img->components,
                               img->row_bytes);
                 }

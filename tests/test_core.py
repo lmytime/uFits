@@ -156,7 +156,26 @@ def compare(name, got, exp, rtol):
     print(f"  ok  {name}")
 
 
+def check_stretch():
+    """The automatic stretch puts the sky background near 25% grey."""
+    with tempfile.TemporaryDirectory() as tmp:
+        for fn in ("f32.fits", "i16.fits", "u16.fits", "mef.fits", "rice_f32_sd1.fits",
+                   "footprint_f32.fits", "f64_offset.fits", "u32.fits"):
+            r = subprocess.run([FQ, "render", os.path.join(DATA, fn), os.path.join(tmp, "o.png"),
+                                "--max", "256"], capture_output=True, text=True, errors="replace")
+            line = [l for l in r.stdout.splitlines() if l.startswith("output ")]
+            if r.returncode or not line:
+                failures.append(f"{fn}: render failed: {r.stderr.strip()}")
+                continue
+            med = int(line[0].split("median=")[1].split()[0])
+            if abs(med - 64) > 16:
+                failures.append(f"{fn}: background grey {med}, expected about 64")
+            else:
+                print(f"  ok  {fn} stretch: background grey {med}")
+
+
 def main():
+    check_stretch()
     files = sorted(f for f in os.listdir(DATA) if f.endswith((".fits", ".fits.gz")))
     for fn in files:
         path = os.path.join(DATA, fn)
