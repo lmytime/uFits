@@ -18,16 +18,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Martian+Mono:wght@400;500;700&display=swap">
 <style>
-/* Layout: a night-sky band holding the pitch (left) and a live Quick Look
-   window (right); below it the feature list set as FITS header cards; a
-   quiet footer. Dark first (the night sky); the light theme is a
-   photographic plate: dark stars on pale glass. */
+/* One screen: the pitch (left) and a live Quick Look window (right) under
+   a night sky. Dark first; the light theme is a photographic plate: dark
+   stars on pale glass. */
 :root {
   --sky: #070a14;
   --sky-raised: #0e1427;
   --ink: #e9edf7;
   --ink-dim: #9ba4bb;
-  --ink-faint: #5f6984;
   --line: #1c2440;
   --gold: #f2b65c;
   --on-gold: #1a1204;
@@ -61,7 +59,6 @@
     --sky-raised: #ffffff;
     --ink: #0b1122;
     --ink-dim: #4a5470;
-    --ink-faint: #8a93aa;
     --line: #dce1ee;
     --gold: #a65a00;
     --on-gold: #fffaf2;
@@ -89,7 +86,6 @@
   --sky-raised: #ffffff;
   --ink: #0b1122;
   --ink-dim: #4a5470;
-  --ink-faint: #8a93aa;
   --line: #dce1ee;
   --gold: #a65a00;
   --on-gold: #fffaf2;
@@ -126,26 +122,28 @@ a:hover { text-decoration-thickness: 2px; }
 :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
 img { max-width: 100%; }
 
-.wrap { max-width: 1160px; margin-inline: auto; padding-inline: clamp(16px, 4vw, 40px); }
+.wrap { width: 100%; max-width: 1240px; margin-inline: auto; padding-inline: clamp(16px, 4vw, 40px); }
 
-/* Night-sky band: the stars sit behind the header and the hero. */
-.band { position: relative; overflow: hidden; background: radial-gradient(70% 60% at 78% 18%, var(--glow), transparent 70%); }
+/* The night sky fills the screen; the hero sits in its middle. */
+.page {
+  position: relative; overflow: hidden; display: flex; flex-direction: column;
+  min-height: 100vh; min-height: 100svh;
+  background: radial-gradient(60% 70% at 76% 46%, var(--glow), transparent 72%);
+}
 .sky { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
 .top { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 22px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; font: 700 1.05rem/1 var(--font-display); letter-spacing: -0.02em; }
-.brand img, .foot .who img { filter: drop-shadow(0 0 0.6px var(--icon-rim)); }
-.brand img { width: 34px; height: 34px; margin: -2px -1px; }
+.brand img { width: 34px; height: 34px; margin: -2px -1px; filter: drop-shadow(0 0 0.6px var(--icon-rim)); }
 .top nav { display: flex; gap: 22px; font-size: 0.95rem; }
 .top nav a { color: var(--ink-dim); text-decoration: none; }
 .top nav a:hover { color: var(--ink); }
 
-.hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 48px; padding-block: 28px 84px; }
+.hero { position: relative; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); align-content: center; gap: 44px; padding-block: 20px 56px; }
 @media (min-width: 980px) {
-  .hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); align-items: center; gap: 56px; padding-block: 40px 104px; }
+  .hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 64px; padding-block: 24px 80px; }
 }
 .pitch { min-width: 0; display: flex; flex-direction: column; gap: 22px; }
-.eyebrow { margin: 0; font: 500 0.72rem/1.4 var(--font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); }
 h1 {
   margin: 0;
   font: 500 clamp(2rem, 1.1rem + 2.7vw, 3.3rem)/1.06 var(--font-display);
@@ -221,32 +219,6 @@ canvas.fill { width: 100%; height: 100%; display: block; }
 .seg button[aria-pressed="true"] { background: var(--seg-on); box-shadow: 0 1px 2px var(--shadow); }
 .seg button:disabled { color: var(--win-dim); opacity: 0.55; cursor: default; }
 @media (max-width: 600px) { .win-info { display: none; } .pop-up { flex: 1; max-width: none; } #stretchBox { display: none; } }
-.demo figcaption { font-size: 0.86rem; color: var(--ink-dim); }
-
-/* Feature list, set as FITS header cards. */
-.spec { padding-block: 72px 56px; border-top: 1px solid var(--line); }
-.spec h2 { margin: 0 0 8px; font: 500 1.5rem/1.2 var(--font-display); letter-spacing: -0.03em; }
-.spec .sub { margin: 0 0 28px; color: var(--ink-dim); max-width: 40em; }
-.cards { overflow-x: auto; padding: 18px 0 6px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 400 0.84rem/1.55 var(--font-display); }
-.card { display: grid; grid-template-columns: 8.5ch 2ch minmax(0, 30ch) minmax(0, 1fr); column-gap: 0.6ch; padding-block: 5px; }
-.card .k { font-weight: 700; color: var(--ink); }
-.card .e { color: var(--ink-faint); }
-.card .v { color: var(--gold); overflow-wrap: anywhere; }
-.card .c { color: var(--ink-dim); font-family: var(--font-body); font-size: 0.95rem; }
-.card .c::before { content: "/ "; color: var(--ink-faint); font-family: var(--font-display); font-size: 0.84rem; }
-.card.end .k { color: var(--ink-faint); }
-@media (max-width: 760px) {
-  .card { grid-template-columns: 8.5ch 2ch minmax(0, 1fr); }
-  .card .c { grid-column: 3; }
-}
-
-.foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 16px 32px; padding-block: 36px 48px; color: var(--ink-dim); font-size: 0.92rem; }
-.foot .who { display: flex; align-items: center; gap: 10px; color: var(--ink); font: 700 0.95rem/1 var(--font-display); }
-.foot .who img { width: 22px; height: 22px; }
-.foot .who span { color: var(--ink-dim); font-weight: 400; font-size: 0.8rem; }
-.foot nav { display: flex; flex-wrap: wrap; gap: 8px 22px; }
-.foot p { margin: 0; flex-basis: 100%; max-width: 46em; }
-.foot code { font: 0.78rem/1.7 var(--font-display); color: var(--ink); }
 
 @media (prefers-reduced-motion: reduce) {
   .win, .win.pop { animation: none; }
@@ -255,7 +227,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
 </style>
 </head>
 <body>
-<div class="band">
+<div class="page">
   <canvas class="sky" id="sky" aria-hidden="true"></canvas>
   <header class="wrap top">
     <a class="brand" href="https://github.com/lmytime/uFits"><img src="favicon.png" alt="" width="30" height="30">uFits</a>
@@ -267,7 +239,6 @@ canvas.fill { width: 100%; height: 100%; display: block; }
 
   <main class="wrap hero">
     <div class="pitch">
-      <p class="eyebrow">Quick Look for FITS · macOS</p>
       <h1>See inside FITS files with one key.</h1>
       <p class="lead">Select a <strong>.fits</strong> file in Finder and press <button class="key" id="space" type="button" aria-label="Space (shows the next example in the window)">space</button>. uFits shows the image, the spectrum or light curve, the catalog, the table or the header at once, even when the file holds gigabytes.</p>
       <div class="install">
@@ -304,42 +275,9 @@ canvas.fill { width: 100%; height: 100%; display: block; }
           </span>
         </div>
       </div>
-      <figcaption>An example file, drawn live in this page. Pick an HDU or switch between the picture, the rows and the header, as in the real preview.</figcaption>
     </figure>
   </main>
 </div>
-
-<section class="spec" aria-labelledby="specTitle">
-  <div class="wrap">
-    <h2 id="specTitle">What it reads</h2>
-    <p class="sub">Images, cubes, tables and every header, from the files you already have. Written here the way a FITS header is: keyword, value, comment.</p>
-    <div class="cards" role="list">
-      <div class="card" role="listitem"><span class="k">SIMPLE</span><span class="e">=</span><span class="v">T</span><span class="c">Standard FITS, from any telescope or pipeline</span></div>
-      <div class="card" role="listitem"><span class="k">IMAGES</span><span class="e">=</span><span class="v">'every BITPIX'</span><span class="c">BSCALE and BZERO applied, blank pixels transparent, an automatic stretch</span></div>
-      <div class="card" role="listitem"><span class="k">CUBES</span><span class="e">=</span><span class="v">'a plane slider'</span><span class="c">RGB cubes and Bayer camera frames in colour</span></div>
-      <div class="card" role="listitem"><span class="k">FPACK</span><span class="e">=</span><span class="v">'RICE_1 GZIP_1 GZIP_2'</span><span class="c">and PLIO_1: only the tiles on show are decompressed</span></div>
-      <div class="card" role="listitem"><span class="k">PLOTS</span><span class="e">=</span><span class="v">'spectra, light curves'</span><span class="c">TESS, Kepler, SDSS, HST and JWST x1d, X-ray</span></div>
-      <div class="card" role="listitem"><span class="k">SKYMAP</span><span class="e">=</span><span class="v">'RA, Dec'</span><span class="c">catalogs as a map of the sky, RA growing to the left, crowded fields shaded</span></div>
-      <div class="card" role="listitem"><span class="k">TABLES</span><span class="e">=</span><span class="v">1000000</span><span class="c">rows scroll smoothly; ⌘C copies the ones you select</span></div>
-      <div class="card" role="listitem"><span class="k">HEADER</span><span class="e">=</span><span class="v">'in columns'</span><span class="c">CONTINUE strings joined, HIERARCH keywords in full; ⌘F finds</span></div>
-      <div class="card" role="listitem"><span class="k">HDUS</span><span class="e">=</span><span class="v">'all of them'</span><span class="c">a menu switches between SCI, ERR, DQ, tables and the rest</span></div>
-      <div class="card" role="listitem"><span class="k">THUMBTIM</span><span class="e">=</span><span class="v">0.02</span><span class="c">[s] for a Finder thumbnail: it reads only the pixels it shows</span></div>
-      <div class="card" role="listitem"><span class="k">APPSIZE</span><span class="e">=</span><span class="v">'1 MB'</span><span class="c">a native, universal app with no dependencies</span></div>
-      <div class="card end" role="listitem"><span class="k">END</span></div>
-    </div>
-  </div>
-</section>
-
-<footer class="wrap foot">
-  <div class="who"><img src="favicon.png" alt="" width="22" height="22">uFits <span data-version></span></div>
-  <nav aria-label="Links">
-    <a href="https://github.com/lmytime/uFits">Source on GitHub</a>
-    <a href="https://github.com/lmytime/uFits/releases">Releases</a>
-    <a href="https://github.com/lmytime/uFits/issues">Report a problem</a>
-  </nav>
-  <p>To uninstall: <code>curl -fsSL https://github.com/<wbr>lmytime/<wbr>uFits/<wbr>releases/<wbr>latest/<wbr>download/<wbr><span class="nobr">install.sh | sh -s -- --uninstall</span></code></p>
-  <p>FITS is the standard data format of astronomy. uFits teaches Finder to show it.</p>
-</footer>
 
 <script>
 (() => {
@@ -377,16 +315,6 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     });
   }
 
-  // ---- The latest version, on the project site -----------------------------
-  if (location.hostname.endsWith("github.io")) {
-    fetch("https://api.github.com/repos/lmytime/uFits/releases/latest")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => {
-        if (j && j.tag_name) document.querySelectorAll("[data-version]").forEach((el) => (el.textContent = j.tag_name));
-      })
-      .catch(() => {});
-  }
-
   // ---- Seeded random numbers, so the example looks the same every time ----
   function random(seed) {
     return () => {
@@ -416,7 +344,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
       x: r() * skyW, y: r() * skyH, size: 0.35 + Math.pow(r(), 4) * 1.6, phase: r() * 6.283, speed: 0.3 + r() * 1.1,
     }));
     // None behind the words, where a star would read as a stray dot.
-    const clear = [...document.querySelectorAll(".top > *, .pitch > *, .demo figcaption")].map((el) => {
+    const clear = [...document.querySelectorAll(".top > *, .pitch > *")].map((el) => {
       const b = el.getBoundingClientRect();
       return { x0: b.left - box.left - 8, x1: b.right - box.left + 8, y0: b.top - box.top - 6, y1: b.bottom - box.top + 6 };
     });
