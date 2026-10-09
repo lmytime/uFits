@@ -5,6 +5,8 @@
 #   make            build/uFits.app (universal, ad hoc signed)
 #   make install    copy it to /Applications and register the extensions
 #   make zip        build/uFits.zip, ready to share
+#   make dmg        build/uFits-VERSION.dmg, a disk image to drag the app
+#                   from into Applications
 #   make notarize   notarize and staple a Developer ID build (see SIGN)
 #   make test       check the core against astropy (needs python3 with
 #                   numpy and astropy; also works on Linux)
@@ -21,7 +23,7 @@
 
 APP        := uFits
 BUNDLE_ID  ?= io.github.lmytime.uFits
-VERSION    ?= 1.0.0
+VERSION    ?= 0.0.1
 BUILD_NUM  ?= 1
 MINOS      ?= 11.0
 ARCHS      ?= arm64 x86_64
@@ -76,7 +78,7 @@ APP_OBJ     := $(B)/obj/app/main.o $(B)/obj/app/FQRender.o $(B)/obj/app/FQPrevie
 PREVIEW_OBJ := $(B)/obj/ext/PreviewViewController.o $(B)/obj/ext/FQRender.o $(B)/obj/ext/FQPreviewController.o
 THUMB_OBJ   := $(B)/obj/ext/ThumbnailProvider.o $(B)/obj/ext/FQRender.o
 
-.PHONY: all app install uninstall zip notarize test fqtool qltools clean
+.PHONY: all app install uninstall zip dmg notarize test fqtool qltools clean
 
 all: app
 
@@ -188,6 +190,26 @@ zip: app
 	rm -f $(B)/$(APP).zip
 	ditto -c -k --keepParent $(APPDIR) $(B)/$(APP).zip
 	@echo "Wrote $(B)/$(APP).zip"
+
+# A disk image holding the app and a link to /Applications to drop it on.
+# hdiutil now and then finds the folder busy right after it was written
+# (Spotlight, XProtect), so it gets a few tries.
+DMG := $(B)/$(APP)-$(VERSION).dmg
+
+dmg: app
+	rm -rf $(B)/dmg $(DMG)
+	mkdir -p $(B)/dmg
+	ditto $(APPDIR) $(B)/dmg/$(APP).app
+	ln -s /Applications $(B)/dmg/Applications
+	ok=0; for i in 1 2 3 4 5; do \
+	    if hdiutil create -volname "$(APP) $(VERSION)" -srcfolder $(B)/dmg -fs HFS+ -format UDZO -ov $(DMG); \
+	    then ok=1; break; fi; sleep 3; \
+	done; [ $$ok = 1 ]
+ifneq ($(SIGN),-)
+	$(CODESIGN) --force --sign "$(SIGN)" --timestamp $(DMG)
+endif
+	rm -rf $(B)/dmg
+	@echo "Wrote $(DMG)"
 
 # Apple's notary service needs a Developer ID signature with the hardened
 # runtime, which SIGN=... gives. The stapled app is zipped again.

@@ -75,7 +75,15 @@ Not supported: `HCOMPRESS_1` tiles (such files still open on their header), rand
 
 ## Install
 
-Requirements: macOS 11 or later, the Xcode command line tools (`xcode-select --install`).
+**Download:** take `uFits-<version>.dmg` from the
+[Releases](https://github.com/lmytime/uFits/releases) page, open it and drag uFits onto
+Applications. Releases are ad hoc signed, not notarized, so macOS blocks the app at
+first: run `xattr -dr com.apple.quarantine /Applications/uFits.app` (or open it and
+click **Open Anyway** under System Settings › Privacy & Security). Then open uFits once
+to register the Quick Look extensions.
+
+**Build it yourself:** requirements: macOS 11 or later, the Xcode command line tools
+(`xcode-select --install`).
 
 ```sh
 git clone https://github.com/lmytime/uFits.git
@@ -87,10 +95,9 @@ Then select a FITS file in Finder and press Space. Open uFits once from Applicat
 to see whether the extensions are registered and enabled; it also has a
 **Reset Quick Look** button. The app does not need to keep running.
 
-A pre-built, ad hoc signed `uFits.zip` is attached to every CI run (the `uFits`
-artifact on the Actions page). macOS quarantines downloaded apps that are not
-notarized: after unzipping, run `xattr -dr com.apple.quarantine uFits.app` (or allow it
-under System Settings › Privacy & Security), move it to Applications and open it once.
+Every CI run also builds the app as `uFits.zip` and as a disk image (the `uFits` and
+`uFits-dmg` artifacts on the Actions page), ad hoc signed like the releases. Pushing a
+tag `vX.Y.Z` publishes release X.Y.Z with the disk image once all tests pass.
 
 ### Build options
 
@@ -98,6 +105,7 @@ under System Settings › Privacy & Security), move it to Applications and open 
 make                   # build/uFits.app only
 make ARCHS=arm64       # native-only build (default is universal)
 make GZIP=1 install    # also preview .gz files (claims every gzip file, see below)
+make dmg               # build/uFits-0.0.1.dmg: the app and a link to Applications
 make SIGN="Developer ID Application: Your Name (TEAMID)" zip   # hardened runtime, ready to notarize
 make SIGN="Developer ID Application: Your Name (TEAMID)" notarize   # notarize and staple (see below)
 make uninstall

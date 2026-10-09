@@ -1,7 +1,9 @@
 name: build
 
 # Branches in this repository are tested on push (a pull request shows those
-# runs too); superseded runs of the same branch are cancelled.
+# runs too); superseded runs of the same branch are cancelled. Pushing a tag
+# vX.Y.Z also publishes release X.Y.Z with the disk image, once every test
+# has passed.
 on:
   push:
   workflow_dispatch:
@@ -38,6 +40,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Version
+        run: |
+          # A release tag sets the version; branches use the Makefile's.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"; fi
       - name: Build
         run: |
           # Whatever clang and codesign come first on PATH (Homebrew, conda,
@@ -54,6 +60,22 @@ jobs:
           lipo -info build/uFits.app/Contents/MacOS/uFits build/uFits.app/Contents/PlugIns/*.appex/Contents/MacOS/*
           codesign -d --entitlements - build/uFits.app/Contents/PlugIns/uFitsPreview.appex
           du -sh build/uFits.app
+      - name: Disk image
+        run: |
+          make dmg
+          dmg=$(ls build/uFits-*.dmg)
+          hdiutil verify "$dmg"
+          mkdir -p /tmp/dmg
+          hdiutil attach -nobrowse -readonly -mountpoint /tmp/dmg "$dmg"
+          ls -la /tmp/dmg
+          test "$(readlink /tmp/dmg/Applications)" = /Applications
+          codesign --verify --deep --strict /tmp/dmg/uFits.app
+          version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' /tmp/dmg/uFits.app/Contents/Info.plist)
+          echo "version $version"
+          test "$dmg" = "build/uFits-$version.dmg"
+          diff -r build/uFits.app /tmp/dmg/uFits.app   # the app tested below
+          hdiutil detach /tmp/dmg
+          ls -l "$dmg"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -122,3 +144,32 @@ jobs:
           path: |
             build/uFits.zip
             build/ql/*.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uFits-dmg
+          path: build/uFits-*.dmg
+          if-no-files-found: error
+
+  release:
+    name: Release
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    needs: [core, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: uFits-dmg
+          path: dist
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          dmg=$(ls uFits-*.dmg)
+          sha256sum "$dmg" | tee "$dmg.sha256"
+          gh release create "$GITHUB_REF_NAME" "$dmg" "$dmg.sha256" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "uFits ${GITHUB_REF_NAME#v}" --notes-file ../.github/release-notes.md
