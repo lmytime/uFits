@@ -178,6 +178,14 @@ $(APPDIR)/Contents/Resources/Assets.car: macos/App/AppIcon.icon/icon.json $(wild
 	    --output-partial-info-plist $(B)/icon/partial.plist --warnings --notices --errors
 	cp $(B)/icon/Assets.car $@
 
+$(APPDIR)/Contents/Resources/LICENSE: LICENSE
+	@mkdir -p $(dir $@)
+	cp $< $@
+
+$(APPDIR)/Contents/Resources/zstd-LICENSE: third_party/zstd/LICENSE
+	@mkdir -p $(dir $@)
+	cp $< $@
+
 # --- signing ---------------------------------------------------------------
 # Extensions must be signed (sandboxed) before the app that contains them.
 
