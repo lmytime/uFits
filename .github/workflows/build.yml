@@ -129,16 +129,10 @@ jobs:
         run: |
           python3 tests/macos/make_big_files.py build/testdata
           build/uitest build/ql build/testdata
-      - name: Click latency (diagnostic)
+      - name: Quick Look clicks (HDU menu and mode switch answer at once)
         if: always()
-        timeout-minutes: 6
-        run: |
-          # The app again, built with a probe: its preview logs when clicks reach it.
-          make B=build/probe PROBE=1 install > /dev/null
-          killall -9 QuickLookUIService uFitsPreview 2>/dev/null || true
-          build/clicklag build/ql build/testdata/mef.fits || true
-          log show --last 3m --style compact --predicate 'subsystem == "io.github.lmytime.uFits"' | tail -200 || true
-          make install > /dev/null   # back to the normal build
+        timeout-minutes: 3
+        run: build/clicklag build/ql build/testdata/mef.fits
       - name: App windows (best effort)
         if: always()
         timeout-minutes: 2

@@ -46,10 +46,6 @@ unexport CODESIGN_ALLOCATE
 ARCHF   := $(foreach a,$(ARCHS),-arch $(a))
 WARN    := -Wall -Wextra -Wno-unused-parameter
 COMMON  := $(ARCHF) -mmacosx-version-min=$(MINOS) -O2 $(WARN) -Icore -Imacos/Shared
-# make PROBE=1: a diagnostic build for CI whose preview logs when clicks reach it.
-ifeq ($(PROBE),1)
-COMMON  += -DFQ_CLICKPROBE
-endif
 CFLAGS_ := -std=c11 $(COMMON)
 OBJC_   := -fobjc-arc $(COMMON)
 EXT     := -fapplication-extension
@@ -241,8 +237,9 @@ test: $(B)/fqtool
 	python3 tests/test_core.py $(B)/fqtool $(B)/testdata
 
 # Checks used by CI: thumbnails through QLThumbnailGenerator and previews
-# through QLPreviewView, both served by the installed extensions, and the
-# preview UI driven directly (HDU menu, plane slider, find bar).
+# through QLPreviewView, both served by the installed extensions, the
+# preview UI driven directly (HDU menu, plane slider, find bar), and clicks
+# on the preview in Quick Look answered at once.
 qltools: $(B)/qlthumb $(B)/qlpreview $(B)/uitest $(B)/clicklag
 
 $(B)/qlthumb: tests/macos/qlthumb.m
