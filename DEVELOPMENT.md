@@ -25,11 +25,11 @@ file once the extension is running, and about 0.2 s for the very first one.
 
 Time spent in the core alone, measured on a 4-core Linux VM:
 
-| file | thumbnail (512 px) | preview (2048 px) |
+| file | thumbnail (512 px) | preview (2560 px) |
 | --- | --- | --- |
-| 4096×4096 int16 (32 MB) | 2 ms | 10 ms |
-| 8192×8192 float32 (256 MB) | 2 ms | 25 ms |
-| 4096×4096 Rice-compressed `.fz` | 12 ms | 37 ms |
+| 4096×4096 int16 (32 MB) | 7 ms | 17 ms |
+| 8192×8192 float32 (256 MB) | 9 ms | 43 ms |
+| 4096×4096 Rice-compressed `.fz` | 21 ms | 53 ms |
 
 ## What the core handles
 
@@ -41,7 +41,11 @@ Time spent in the core alone, measured on a 4-core Linux VM:
   as transparent pixels, so mosaics keep their footprint shape.
 - An automatic midtone stretch (median/MAD based, like PixInsight's STF) that shows faint
   structure without burning out bright sources. The preview's menu switches to a linear
-  0.5–99.5 % or min–max stretch; the choice is remembered.
+  0.5–99.5 % or min–max stretch; the choice is remembered. Thumbnails always use the
+  automatic stretch. Whatever the size an image is drawn at, its stretch is worked out from
+  the image as Quick Look's preview shows it (binned to fit 2560 pixels, up to 4×4 samples
+  a pixel), from 128 or more of that view's rows: a thumbnail reads those rows again (a few
+  milliseconds) and then looks like the preview.
 - Cubes: the middle plane first, and a slider to step through the others. Three-plane
   cubes are shown in colour unless `CTYPE3` names another axis (frequency, wavelength,
   ...).

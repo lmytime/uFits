@@ -35,6 +35,15 @@
 #define MAX_SIDE ((int64_t)1 << 28)    /* longest image axis we accept */
 #define N_RANDOM 10000
 
+/* An image's stretch is the same at every size it is shown at: its
+   statistics come from one reference view, the image binned to fit
+   REF_BOX x REF_BOX with up to REF_SAMPLES x REF_SAMPLES samples a bin
+   (the view Quick Look's preview shows), so that a thumbnail looks like
+   the preview. Other sizes read that view's statistics rows again. */
+#define REF_BOX 2560
+#define REF_SAMPLES 4
+#define STAT_ROWS 128
+
 /* --------------------------------------------------------- parallel for */
 
 typedef void (*task_fn)(void *ctx, size_t i);
@@ -804,7 +813,7 @@ DECODE_FN(decode_step, x0 + i * step)
 
 /* ----------------------------------------------------------- the plan */
 
-typedef struct {
+typedef struct plan_s {
     imgdesc d;
     int kind, color, nch, flip;
     char bayer[8];
@@ -814,6 +823,8 @@ typedef struct {
     int64_t rx, ry, rw, rh;   /* the part shown, in cells */
     int f, k, offs[MAX_K];
     int w, h;
+    int stat_only;            /* only the rows of the statistics grid are read */
+    const struct plan_s *donor; /* compressed: bands it decoded may be used */
     int truncated;
     src_t src;
     float **bands;            /* compressed: allocated band buffers */
@@ -830,6 +841,56 @@ static void plan_free(plan_t *P)
     free(P->src.rows);
     P->bands = NULL;
     P->src.rows = NULL;
+}
+
+/* Bin factor that fits rw x rh cells into mw x mh. */
+static int bin_factor(int64_t rw, int64_t rh, int mw, int mh)
+{
+    int64_t f1 = (rw + mw - 1) / mw, f2 = (rh + mh - 1) / mh;
+    int64_t fb = f1 > f2 ? f1 : f2;
+    if (fb < 1)
+        fb = 1;
+    if (fb > INT_MAX / 4)
+        fb = INT_MAX / 4;
+    return (int)fb;
+}
+
+/* Samples per axis in a bin of f: max_samples (0: all), at most MAX_K. */
+static int bin_samples(int max_samples, int f)
+{
+    int k = max_samples <= 0 ? f : (max_samples < f ? max_samples : f);
+    if (k > MAX_K)
+        k = MAX_K;
+    return k < 1 ? 1 : k;
+}
+
+/* The grid of a w x h binned plane that the stretch statistics read:
+   everything when it is small, else nr rows across the whole image (at
+   least STAT_ROWS, so few rows of the file are read) and nc evenly spaced
+   values in each, about STAT_SAMPLES in all. */
+static void stat_grid(int w, int h, int *nr, int *nc)
+{
+    if ((int64_t)w * h <= STAT_SAMPLES) {
+        *nr = h;
+        *nc = w;
+        return;
+    }
+    int64_t r = (STAT_SAMPLES + w - 1) / w;
+    if (r < STAT_ROWS)
+        r = STAT_ROWS;
+    if (r > h)
+        r = h;
+    int64_t c = STAT_SAMPLES / r;
+    if (c > w)
+        c = w;
+    *nr = (int)r;
+    *nc = (int)(c < 1 ? 1 : c);
+}
+
+/* Position of the i-th of n evenly spaced points in len. */
+static inline int grid_pos(int i, int n, int len)
+{
+    return (int)(((2 * (int64_t)i + 1) * len) / (2 * (int64_t)n));
 }
 
 static int bayer_channel(char c)
@@ -930,8 +991,11 @@ static uint8_t *needed_rows(const plan_t *P)
         need[0] = 1;
         return need;
     }
-    for (int oy = 0; oy < P->h; oy++)
-        for (int j = 0; j < P->k; j++) {
+    int nr = P->h, nc;
+    if (P->stat_only)
+        stat_grid(P->w, P->h, &nr, &nc);
+    for (int i = 0; i < nr; i++)
+        for (int j = 0, oy = P->stat_only ? grid_pos(i, nr, P->h) : i; j < P->k; j++) {
             int64_t cy = P->ry + (int64_t)oy * P->f + P->offs[j];
             if (P->color == FQ_COLOR_BAYER) {
                 for (int dy = 0; dy < 2; dy++)
@@ -977,14 +1041,22 @@ static int load_compressed(fq_file *f, plan_t *P, int threads, char *err, size_t
         fqi_seterr(err, errlen, "out of memory");
         return -1;
     }
+    /* Bands the plan these statistics are for decoded already are shared. */
+    const plan_t *D = P->donor;
+    if (D && !(D->bands && D->src.rows && D->H == P->H && D->nbands_alloc == P->nbands_alloc))
+        D = NULL;
     int64_t njobs = 0;
     for (int slot = 0; slot < nslots; slot++)
         for (int64_t b = 0; b < nbands; b++) {
             int any = 0;
             for (int64_t y = b * band_h; y < (b + 1) * band_h && y < P->H && !any; y++)
                 any = need_r[y];
-            if (any)
+            if (any && D && D->bands[slot * nbands + b]) {
+                for (int64_t y = b * band_h; y < (b + 1) * band_h && y < P->H; y++)
+                    P->src.rows[slot * P->H + y] = D->src.rows[slot * P->H + y];
+            } else if (any) {
                 jobs[njobs++] = slot * nbands + b;
+            }
         }
     free(need_r);
     bandjob J = { &c, P, band_h, nbands, jobs, P->src.ref, 0 };
@@ -1095,22 +1167,11 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
     }
     int mw = o->max_width > 0 ? o->max_width : 1024;
     int mh = o->max_height > 0 ? o->max_height : 1024;
-    int64_t f1 = (P->rw + mw - 1) / mw, f2 = (P->rh + mh - 1) / mh;
-    int64_t fb = f1 > f2 ? f1 : f2;
-    if (fb < 1)
-        fb = 1;
-    if (fb > INT_MAX / 4)
-        fb = INT_MAX / 4;
-    P->f = (int)fb;
-    int64_t w = P->rw / fb, hh = P->rh / fb;
+    P->f = bin_factor(P->rw, P->rh, mw, mh);
+    int64_t w = P->rw / P->f, hh = P->rh / P->f;
     P->w = (int)(w < 1 ? 1 : w);
     P->h = (int)(hh < 1 ? 1 : hh);
-    int k = o->max_samples <= 0 ? P->f : (o->max_samples < P->f ? o->max_samples : P->f);
-    if (k > MAX_K)
-        k = MAX_K;
-    if (k < 1)
-        k = 1;
-    P->k = k;
+    int k = P->k = bin_samples(o->max_samples, P->f);
     for (int i = 0; i < k; i++)
         P->offs[i] = (int)(((2 * (int64_t)i + 1) * P->f) / (2 * k));
 
@@ -1185,7 +1246,7 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
         }
     }
 #if defined(POSIX_MADV_WILLNEED)
-    if (P->k == P->f && f->map && f->maplen && !f->z) {
+    if (P->k == P->f && !P->stat_only && f->map && f->maplen && !f->z) {
         /* Everything will be read: ask for read-ahead. */
         uintptr_t a = (uintptr_t)s->base & ~(uintptr_t)4095;
         uintptr_t e = (uintptr_t)(s->base + s->avail);
@@ -1200,10 +1261,12 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
 
 typedef struct {
     const plan_t *P;
-    float *out;          /* nch planes of w * h */
+    float *out;          /* nch planes of w * nrows */
     int nchunks;
     int *nan_flag;
     int oom;
+    const int *rows;     /* the output rows to bin, NULL: all (nrows = h) */
+    int nrows;
 } binjob;
 
 /* Accumulate n values (already gathered per output column) into acc/cnt. */
@@ -1343,9 +1406,9 @@ static void bin_task(void *ctx, size_t ci)
 {
     binjob *J = ctx;
     const plan_t *P = J->P;
-    int oy0 = (int)((int64_t)P->h * (int64_t)ci / J->nchunks);
-    int oy1 = (int)((int64_t)P->h * (int64_t)(ci + 1) / J->nchunks);
-    if (oy0 >= oy1)
+    int i0 = (int)((int64_t)J->nrows * (int64_t)ci / J->nchunks);
+    int i1 = (int)((int64_t)J->nrows * (int64_t)(ci + 1) / J->nchunks);
+    if (i0 >= i1)
         return;
     const int w = P->w;
     /* Scratch for what one pass reads: whole blocks when every pixel is
@@ -1365,8 +1428,9 @@ static void bin_task(void *ctx, size_t ci)
         J->oom = 1;
         goto done;
     }
-    const size_t plane = (size_t)w * P->h;
-    for (int oy = oy0; oy < oy1; oy++) {
+    const size_t plane = (size_t)w * J->nrows;
+    for (int i = i0; i < i1; i++) {
+        int oy = J->rows ? J->rows[i] : i;
         if (P->color == FQ_COLOR_BAYER) {
             bin_bayer_row(P, oy, tmp, col, acc, cnt);
         }
@@ -1375,7 +1439,7 @@ static void bin_task(void *ctx, size_t ci)
                 bin_plane_row(P, c, oy, tmp, col, acc, cnt);
             const float *a = P->color == FQ_COLOR_BAYER ? acc + c * w : acc;
             const float *n = P->color == FQ_COLOR_BAYER ? cnt + c * w : cnt;
-            float *o = J->out + c * plane + (size_t)oy * w;
+            float *o = J->out + c * plane + (size_t)i * w;
             for (int ox = 0; ox < w; ox++) {
                 if (n[ox] > 0) {
                     o[ox] = a[ox] / n[ox];
@@ -1394,19 +1458,20 @@ done:
     free(cnt);
 }
 
-/* Bin the plan's source into nch float planes. */
-static float *bin_image(const plan_t *P, int threads, int *has_nan)
+/* Bin output rows rows[0..nrows) of the plan's source (rows NULL: all of
+   them, nrows = h) into nch float planes of w * nrows. */
+static float *bin_rows(const plan_t *P, const int *rows, int nrows, int threads, int *has_nan)
 {
-    size_t plane = (size_t)P->w * P->h;
+    size_t plane = (size_t)P->w * nrows;
     float *out = malloc(plane * P->nch * sizeof(float));
-    int nchunks = P->h < 256 ? P->h : 256;
+    int nchunks = nrows < 256 ? nrows : 256;
     int *flags = calloc((size_t)nchunks, sizeof(int));
     if (!out || !flags) {
         free(out);
         free(flags);
         return NULL;
     }
-    binjob J = { P, out, nchunks, flags, 0 };
+    binjob J = { P, out, nchunks, flags, 0, rows, nrows };
     par_for((size_t)nchunks, threads, &J, bin_task);
     *has_nan = 0;
     for (int i = 0; i < nchunks; i++)
@@ -1419,7 +1484,27 @@ static float *bin_image(const plan_t *P, int threads, int *has_nan)
     return out;
 }
 
+/* Bin the plan's source into nch float planes of w * h. */
+static float *bin_image(const plan_t *P, int threads, int *has_nan)
+{
+    return bin_rows(P, NULL, P->h, threads, has_nan);
+}
+
 /* ----------------------------------------------------------- statistics */
+
+/* Statistics samples of each channel of an image, from its reference view
+   (REF_BOX), values relative to the ref of the binned values they go with. */
+typedef struct {
+    float *v[3];
+    int64_t n[3];
+} samples_t;
+
+static void samples_free(samples_t *S)
+{
+    for (int c = 0; c < 3; c++)
+        free(S->v[c]);
+    memset(S, 0, sizeof *S);
+}
 
 /* k-th smallest of a[0..n) (reorders a). All values must be finite. */
 static float select_kth(float *a, int64_t n, int64_t k)
@@ -1461,23 +1546,28 @@ float fqi_percentile(float *a, int64_t n, double p)
     return select_kth(a, n, k);
 }
 
-/* Finite samples of one plane on a regular grid, at most about maxn. */
-static int64_t gather(const float *pl, int w, int h, float *buf, int64_t maxn)
+/* Finite values of a w x h plane at its statistics grid (stat_grid), at
+   most STAT_SAMPLES; with grid_rows, pl holds only the grid's rows. When
+   the grid finds almost nothing (a mostly empty image), the first finite
+   values of the whole plane instead: -1 when pl lacks rows for that. */
+static int64_t gather(const float *pl, int w, int h, int grid_rows, float *buf)
 {
-    double total = (double)w * h;
-    int step = (int)ceil(sqrt(total / (double)maxn));
-    if (step < 1)
-        step = 1;
+    int nr, nc;
+    stat_grid(w, h, &nr, &nc);
     int64_t n = 0;
-    for (int y = step / 2; y < h; y += step)
-        for (int x = step / 2; x < w; x += step) {
-            float v = pl[(size_t)y * w + x];
+    for (int i = 0; i < nr; i++) {
+        const float *row = pl + (size_t)(grid_rows ? i : grid_pos(i, nr, h)) * w;
+        for (int j = 0; j < nc; j++) {
+            float v = row[grid_pos(j, nc, w)];
             if (fqi_finite(v))
                 buf[n++] = v;
         }
-    if (n < 1000 && step > 1) {   /* mostly empty image: take everything */
+    }
+    if (n < 1000 && (int64_t)nr * nc < (int64_t)w * h) {
+        if (grid_rows && nr < h)
+            return -1;
         n = 0;
-        for (size_t i = 0; i < (size_t)w * h && n < maxn; i++)
+        for (size_t i = 0; i < (size_t)w * h && n < STAT_SAMPLES; i++)
             if (fqi_finite(pl[i]))
                 buf[n++] = pl[i];
     }
@@ -1805,10 +1895,12 @@ static void fill_info(fq_file *f, const plan_t *P, fq_info *in)
     }
 }
 
-static int prepare(fq_file *f, const fq_opts *o, plan_t *P, int force_image, int *table,
-                   char *err, size_t errlen)
+static int prepare(fq_file *f, const fq_opts *o, plan_t *P, int force_image, int stat_only,
+                   const plan_t *donor, int *table, char *err, size_t errlen)
 {
     memset(P, 0, sizeof *P);
+    P->stat_only = stat_only;
+    P->donor = donor;
     if (select_target(f, o, &P->d, table, err, errlen) != 0)
         return -1;
     if (*table)
@@ -1818,6 +1910,73 @@ static int prepare(fq_file *f, const fq_opts *o, plan_t *P, int force_image, int
         return -1;
     }
     return 0;
+}
+
+/* Statistics samples of the image plan P shows, relative to P's ref: from
+   its reference view (REF_BOX), which is P itself when P shows the whole
+   image that way (bin: P's binned values), else the view's grid rows,
+   binned here (all of its rows when those hold almost nothing). */
+static int ref_samples(fq_file *f, const fq_opts *o, const plan_t *P, const float *bin,
+                       samples_t *S, char *err, size_t errlen)
+{
+    memset(S, 0, sizeof *S);
+    for (int c = 0; c < P->nch; c++)
+        if (!(S->v[c] = malloc((size_t)STAT_SAMPLES * sizeof(float)))) {
+            samples_free(S);
+            fqi_seterr(err, errlen, "out of memory");
+            return -1;
+        }
+    int fr = bin_factor(P->cw, P->ch, REF_BOX, REF_BOX);
+    if (P->rx == 0 && P->ry == 0 && P->rw == P->cw && P->rh == P->ch && P->f == fr &&
+        P->k == bin_samples(REF_SAMPLES, fr)) {
+        for (int c = 0; c < P->nch; c++)
+            S->n[c] = gather(bin + (size_t)c * P->w * P->h, P->w, P->h, 0, S->v[c]);
+        return 0;
+    }
+    fq_opts ro = *o;
+    ro.max_width = ro.max_height = REF_BOX;
+    ro.max_samples = REF_SAMPLES;
+    memset(ro.region, 0, sizeof ro.region);
+    ro.keep = 0;
+    for (int all = 0; all < 2; all++) {
+        plan_t R;
+        int table = 0, has_nan, nr, nc;
+        if (prepare(f, &ro, &R, 0, !all, P, &table, err, errlen) != 0)
+            break;
+        if (table || R.kind != FQ_KIND_IMAGE || R.nch != P->nch) {
+            plan_free(&R);
+            fqi_seterr(err, errlen, "cannot read the image again");
+            break;
+        }
+        stat_grid(R.w, R.h, &nr, &nc);
+        int nb = all ? R.h : nr;
+        int *rows = all ? NULL : malloc((size_t)nr * sizeof(int));
+        for (int i = 0; rows && i < nr; i++)
+            rows[i] = grid_pos(i, nr, R.h);
+        float *rb = all || rows ? bin_rows(&R, rows, nb, o->threads, &has_nan) : NULL;
+        double shift = R.src.ref - P->src.ref;
+        int w = R.w, h = R.h;
+        plan_free(&R);
+        free(rows);
+        if (!rb) {
+            fqi_seterr(err, errlen, "out of memory");
+            break;
+        }
+        int again = 0;
+        for (int c = 0; c < P->nch; c++) {
+            S->n[c] = gather(rb + (size_t)c * w * nb, w, h, !all, S->v[c]);
+            again |= S->n[c] < 0;
+        }
+        free(rb);
+        if (again)
+            continue;
+        for (int c = 0; shift != 0 && c < P->nch; c++)
+            for (int64_t i = 0; i < S->n[c]; i++)
+                S->v[c][i] = (float)(S->v[c][i] + shift);
+        return 0;
+    }
+    samples_free(S);
+    return -1;
 }
 
 float *fq_decode_float(fq_file *f, const fq_opts *opts, int *w, int *h, int *nch,
@@ -1830,7 +1989,7 @@ float *fq_decode_float(fq_file *f, const fq_opts *opts, int *w, int *h, int *nch
         fq_opts_default(&o);
     plan_t P;
     int table;
-    if (prepare(f, &o, &P, 1, &table, err, errlen) != 0)
+    if (prepare(f, &o, &P, 1, 0, NULL, &table, err, errlen) != 0)
         return NULL;
     if (table) {
         fqi_seterr(err, errlen, "HDU %d is a table, not an image", P.d.hdu);
@@ -1855,17 +2014,19 @@ float *fq_decode_float(fq_file *f, const fq_opts *opts, int *w, int *h, int *nch
 }
 
 /* Binned values kept for fq_restretch: nch planes of w * h floats, values
-   relative to ref. */
+   relative to ref, and the samples their stretch is made from. */
 struct fq_kept {
     float *bin;
     int w, h, nch, flip, has_nan;
     double ref;
+    samples_t samp;
 };
 
 static void kept_free(fq_kept *k)
 {
     if (k) {
         free(k->bin);
+        samples_free(&k->samp);
         free(k);
     }
 }
@@ -1893,10 +2054,8 @@ static int map_pixels(fq_image *img, const float *bin, int w, int h, int nch, in
 static int stretch_map(fq_image *img, const fq_kept *k, int mode, int threads)
 {
     stretch_t st[3];
-    const size_t plane = (size_t)k->w * k->h;
-    const int64_t cap = STAT_SAMPLES + k->w + k->h + 16;
-    float *sv = malloc((size_t)cap * sizeof(float));
-    float *sd = malloc((size_t)cap * sizeof(float));
+    float *sv = malloc((size_t)STAT_SAMPLES * sizeof(float));
+    float *sd = malloc((size_t)STAT_SAMPLES * sizeof(float));
     if (!sv || !sd) {
         free(sv);
         free(sd);
@@ -1904,7 +2063,10 @@ static int stretch_map(fq_image *img, const fq_kept *k, int mode, int threads)
     }
     int any_valid = 0;
     for (int c = 0; c < k->nch; c++) {
-        int64_t n = gather(k->bin + c * plane, k->w, k->h, sv, STAT_SAMPLES);
+        /* make_stretch reorders (and may drop) samples: give it a copy. */
+        int64_t n = k->samp.n[c];
+        if (n > 0)
+            memcpy(sv, k->samp.v[c], (size_t)n * sizeof(float));
         make_stretch(sv, sd, n, mode, &st[c]);
         any_valid |= st[c].valid;
     }
@@ -1935,7 +2097,7 @@ fq_image *fq_render(fq_file *f, const fq_opts *opts, char *err, size_t errlen)
         fq_opts_default(&o);
     plan_t P;
     int table;
-    if (prepare(f, &o, &P, 0, &table, err, errlen) != 0)
+    if (prepare(f, &o, &P, 0, 0, NULL, &table, err, errlen) != 0)
         return NULL;
     fq_image *img = calloc(1, sizeof *img);
     if (!img) {
@@ -1971,16 +2133,24 @@ fq_image *fq_render(fq_file *f, const fq_opts *opts, char *err, size_t errlen)
         fqi_seterr(err, errlen, "out of memory");
         return NULL;
     }
+    samples_t S;
+    int rs = ref_samples(f, &o, &P, bin, &S, err, errlen);
     plan_free(&P);
+    if (rs != 0) {
+        free(bin);
+        fq_image_free(img);
+        return NULL;
+    }
 
     fq_kept *k = calloc(1, sizeof *k);
     if (!k) {
         free(bin);
+        samples_free(&S);
         fq_image_free(img);
         fqi_seterr(err, errlen, "out of memory");
         return NULL;
     }
-    *k = (fq_kept){ bin, P.w, P.h, P.nch, P.flip, has_nan, P.src.ref };
+    *k = (fq_kept){ bin, P.w, P.h, P.nch, P.flip, has_nan, P.src.ref, S };
     if (stretch_map(img, k, o.stretch, o.threads) != 0) {
         kept_free(k);
         fq_image_free(img);
@@ -2004,7 +2174,7 @@ fq_image *fq_render_detail(fq_file *f, const fq_opts *opts, const fq_stretch *st
     fq_opts o = *opts;
     plan_t P;
     int table;
-    if (prepare(f, &o, &P, 0, &table, err, errlen) != 0)
+    if (prepare(f, &o, &P, 0, 0, NULL, &table, err, errlen) != 0)
         return NULL;
     if (table || P.kind != FQ_KIND_IMAGE || P.nch != stretch->nch) {
         plan_free(&P);
