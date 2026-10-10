@@ -75,3 +75,7 @@ You can also open FITS files in the uFits app (File › Open, or drop them on it
   random-groups files.
 
 Building from source and how uFits works: [DEVELOPMENT.md](DEVELOPMENT.md).
+
+## License
+
+uFits is free and open source, under the [BSD 3-Clause License](LICENSE).
