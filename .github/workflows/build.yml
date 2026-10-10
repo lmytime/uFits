@@ -153,63 +153,43 @@ jobs:
         timeout-minutes: 5
         run: |
           app=/Applications/uFits.app
-          ls -d /Applications/Xcode*.app; xcrun --find actool; xcrun actool --version | head -12 || true
-          # What actool makes of the icon catalog (Dusk for any appearance, the
-          # light icon for light mode), and of the usual way round (light for
-          # any, Dusk for dark).
+          mkdir -p build/ql
+          xcode=$(ls -d /Applications/Xcode_26*.app | sort | tail -1)
+          DEVELOPER_DIR=$xcode/Contents/Developer xcrun actool --help 2>&1 | grep -i -E "icon|appear|stack|fallback" || true
+          # What actool made of AppIcon.icon.
           cat > /tmp/renditions.py <<'PY'
-          import json, sys
+          import collections, json, sys
+          seen = collections.Counter()
           for r in json.load(sys.stdin):
-              if r.get("AssetType") in ("Icon Image", "MultiSized Image", "Image") or "Appearance" in r:
-                  print("  ", r.get("Name"), r.get("Appearance", "-"), r.get("PixelWidth", ""), r.get("Idiom", ""),
-                        r.get("RenditionName", ""))
+              key = (r.get("AssetType"), r.get("Name"), r.get("Appearance", "-"), r.get("Idiom", ""))
+              seen[key] += 1
+          for key, n in sorted(seen.items(), key=str):
+              print("  ", n, "x", key)
           PY
+          ls -la $app/Contents/Resources
+          plutil -p build/icon/partial.plist || true
           xcrun assetutil --info $app/Contents/Resources/Assets.car | python3 /tmp/renditions.py || true
-          mkdir -p /tmp/catalog-b/out
-          cp -R macos/App/Assets.xcassets /tmp/catalog-b/
-          python3 - <<'PY'
-          import json
-          p = "/tmp/catalog-b/Assets.xcassets/AppIcon.appiconset/Contents.json"
-          d = json.load(open(p))
-          for im in d["images"]:
-              if im.pop("appearances", None):
-                  im["filename"] = im["filename"].replace("light-", "dusk-")
-                  im["appearances"] = [{"appearance": "luminosity", "value": "dark"}]
-              else:
-                  im["filename"] = im["filename"].replace("dusk-", "light-")
-          json.dump(d, open(p, "w"), indent=2)
-          PY
-          xcrun actool /tmp/catalog-b/Assets.xcassets --compile /tmp/catalog-b/out --platform macosx \
-            --minimum-deployment-target 11.0 --app-icon AppIcon --output-partial-info-plist /tmp/catalog-b/p.plist \
-            --warnings --notices --errors || true
-          xcrun assetutil --info /tmp/catalog-b/out/Assets.car | python3 /tmp/renditions.py || true
-          # The icon as drawn in light and dark mode, then with macOS itself in
-          # dark mode and back.
-          build/iconsize build/ql/app-icon-modes.png --appearance aqua $app --appearance dark $app || true
-          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true' || true
-          sleep 3
-          build/iconsize /tmp/icon-dark.png $app || true
-          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true
-          sleep 3
-          build/iconsize /tmp/icon-light.png $app || true
+          # Which icon is drawn: with macOS in light mode, then in dark mode.
+          for mode in false true false; do
+            osascript -e "tell application \"System Events\" to tell appearance preferences to set dark mode to $mode" || true
+            sleep 4
+            echo "dark mode: $mode"
+            build/iconsize /tmp/icon-$mode.png $app || true
+            build/iconsize /tmp/icon-$mode.png --appearance aqua $app --appearance dark $app || true
+            killall Dock 2>/dev/null || true
+            sleep 4
+            screencapture -x build/ql/app-dock-dark-$mode.png || true
+          done
           # The icon of choice: a custom icon on the app. It still opens, and
           # Quick Look still uses its extensions.
           $app/Contents/MacOS/uFits --set-icon light && echo "set: light" || echo "could not set the icon"
-          ls -la $app | head -8
           build/iconsize build/ql/app-icon-chosen.png $app || true
-          codesign --verify --deep --strict $app 2>&1 && echo "signature: whole" || echo "signature: not whole"
           open $app
           sleep 4
           pgrep -x uFits > /dev/null && echo "uFits opens with an icon chosen" || echo "uFits did not open"
           screencapture -x build/ql/app-dock-chosen.png || true
           pkill -x uFits || true
-          mkdir -p /tmp/iconcheck
-          cp build/testdata/f32.fits /tmp/iconcheck/chosen.fits
-          make qltools > /dev/null 2>&1 || true
-          build/qlthumb /tmp/iconcheck /tmp/iconcheck/chosen.fits || true
-          pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail || true
           $app/Contents/MacOS/uFits --set-icon auto && echo "set: auto" || echo "could not unset the icon"
-          ls -la $app | head -8
           build/iconsize /tmp/icon-auto.png $app || true
       - name: Quick Look thumbnails (QLThumbnailGenerator)
         timeout-minutes: 4

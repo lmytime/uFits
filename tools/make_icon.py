@@ -4,7 +4,8 @@ light versions, and write
 
   macos/App/AppIcon.icns          the app's icon: Dusk (macOS 15 and earlier)
   macos/App/AppIconLight.icns     the light one, for the app's icon setting
-  macos/App/Assets.xcassets       both: macOS 26 follows light and dark mode
+  macos/App/AppIcon.icon          both, for macOS 26 to follow light and dark
+                                  mode (Icon Composer's format)
   docs/icon.png, docs/icon-light.png, docs/favicon.png, docs/favicon-light.png
 
 The galaxy is drawn cell by cell from the maps below: 32 cells across the
@@ -164,26 +165,42 @@ def icns(palette, path):
         f.write(b"icns" + struct.pack(">I", len(body) + 8) + body)
 
 
-def catalog(path):
-    """An asset catalog with the app's icon: Dusk for any appearance, the
-    light one for light mode (macOS 26; earlier versions show Dusk)."""
-    iconset = os.path.join(path, "AppIcon.appiconset")
-    os.makedirs(iconset, exist_ok=True)
-    with open(os.path.join(path, "Contents.json"), "w") as f:
-        json.dump({"info": {"author": "xcode", "version": 1}}, f, indent=2)
-    images = []
-    for palette, appearance in (("dusk", None), ("light", "light")):
-        for pt in (16, 32, 128, 256, 512):
-            for scale in (1, 2):
-                px = pt * scale
-                name = f"{palette}-{px}.png"
-                render(palette, px).save(os.path.join(iconset, name), optimize=True)
-                image = {"filename": name, "idiom": "mac", "scale": f"{scale}x", "size": f"{pt}x{pt}"}
-                if appearance:
-                    image["appearances"] = [{"appearance": "luminosity", "value": appearance}]
-                images.append(image)
-    with open(os.path.join(iconset, "Contents.json"), "w") as f:
-        json.dump({"images": images, "info": {"author": "xcode", "version": 1}}, f, indent=2)
+def full_bleed(palette, n=1024):
+    """The icon's shape filled edge to edge, as Icon Composer's layers are
+    (macOS 26 cuts the shape): the cells inside the shape, scaled to n."""
+    art = cells(ART32)
+    g = len(art)
+    rgb = {k: [int(v[i:i + 2], 16) for i in (1, 3, 5)] for k, v in PALETTES[palette].items()}
+    a = np.array([[rgb[c] for c in row] for row in art], np.uint8)
+    margin = (1 - SHAPE) / 2 * g  # cells outside the shape, on each side
+    k = np.floor(margin + (np.arange(n) + 0.5) / n * SHAPE * g).astype(int)
+    return Image.fromarray(a[k][:, k], "RGB")
+
+
+def icon_composer(path):
+    """Icon Composer's icon: the light one over Dusk, hidden in dark mode;
+    flat (no glass, shadow or highlights)."""
+    os.makedirs(os.path.join(path, "Assets"), exist_ok=True)
+    for palette in ("light", "dusk"):
+        full_bleed(palette).save(os.path.join(path, "Assets", f"{palette}.png"), optimize=True)
+    flat = {"glass": False}
+    icon = {
+        "fill": {"solid": "srgb:0.08627,0.09412,0.14510,1.00000"},
+        "groups": [{
+            "layers": [
+                dict(flat, **{"image-name": "light.png", "name": "light",
+                              "hidden-specializations": [{"appearance": "dark", "value": True}]}),
+                dict(flat, **{"image-name": "dusk.png", "name": "dusk"}),
+            ],
+            "shadow": {"kind": "none", "opacity": 0},
+            "specular": False,
+            "translucency": {"enabled": False, "value": 0},
+        }],
+        "supported-platforms": {"squares": ["macOS"]},
+    }
+    with open(os.path.join(path, "icon.json"), "w") as f:
+        json.dump(icon, f, indent=2)
+        f.write("\n")
 
 
 def main(root):
@@ -191,7 +208,7 @@ def main(root):
     docs = os.path.join(root, "docs")
     icns("dusk", os.path.join(app, "AppIcon.icns"))
     icns("light", os.path.join(app, "AppIconLight.icns"))
-    catalog(os.path.join(app, "Assets.xcassets"))
+    icon_composer(os.path.join(app, "AppIcon.icon"))
     for palette, suffix in (("dusk", ""), ("light", "-light")):
         render(palette, 256).save(os.path.join(docs, f"icon{suffix}.png"), optimize=True)
         render(palette, 64).save(os.path.join(docs, f"favicon{suffix}.png"), optimize=True)

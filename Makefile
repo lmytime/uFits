@@ -162,32 +162,28 @@ $(APPDIR)/Contents/Resources/%.icns: macos/App/%.icns
 	@mkdir -p $(dir $@)
 	cp $< $@
 
-# The icon for macOS 26, which follows light and dark mode (Assets.xcassets,
-# by tools/make_icon.py): compiled by Xcode's actool, when there is one.
-ACTOOL := $(shell xcrun --find actool 2>/dev/null)
-ICON_CATALOG := $(wildcard macos/App/Assets.xcassets/*.json macos/App/Assets.xcassets/*/*)
+# The icon for macOS 26, which follows light and dark mode (AppIcon.icon, by
+# tools/make_icon.py), compiled by the actool of Xcode 26 or later: the newest
+# Xcode 26 in /Applications, else the one selected. Without one, the app has
+# the Dusk icon (AppIcon.icns) everywhere.
+XCODE26 := $(lastword $(sort $(wildcard /Applications/Xcode_26*.app /Applications/Xcode-26*.app)))
+ACTOOL := $(if $(XCODE26),DEVELOPER_DIR=$(XCODE26)/Contents/Developer) xcrun actool
+ACTOOL_MAJOR := $(shell $(ACTOOL) --version 2>/dev/null | sed -n 's|.*<string>\([0-9]*\)\..*</string>.*|\1|p' | tail -1)
+ICON26 := $(if $(filter 2% 3% 4% 5% 6% 7% 8% 9%,$(ACTOOL_MAJOR)),$(APPDIR)/Contents/Resources/Assets.car)
 
-$(APPDIR)/Contents/Resources/Assets.car: $(ICON_CATALOG)
-	@mkdir -p $(dir $@) $(B)/assets
-	xcrun actool macos/App/Assets.xcassets --compile $(B)/assets --platform macosx \
+$(APPDIR)/Contents/Resources/Assets.car: macos/App/AppIcon.icon/icon.json $(wildcard macos/App/AppIcon.icon/Assets/*)
+	@mkdir -p $(dir $@) $(B)/icon
+	$(ACTOOL) macos/App/AppIcon.icon --compile $(B)/icon --platform macosx \
 	    --minimum-deployment-target $(MINOS) --app-icon AppIcon \
-	    --output-partial-info-plist $(B)/assets/partial.plist --warnings --notices --errors
-	cp $(B)/assets/Assets.car $@
-
-$(APPDIR)/Contents/Resources/LICENSE: LICENSE
-	@mkdir -p $(dir $@)
-	cp $< $@
-
-$(APPDIR)/Contents/Resources/zstd-LICENSE: third_party/zstd/LICENSE
-	@mkdir -p $(dir $@)
-	cp $< $@
+	    --output-partial-info-plist $(B)/icon/partial.plist --warnings --notices --errors
+	cp $(B)/icon/Assets.car $@
 
 # --- signing ---------------------------------------------------------------
 # Extensions must be signed (sandboxed) before the app that contains them.
 
 BUNDLE_PARTS := $(APPDIR)/Contents/MacOS/$(APP) $(APPDIR)/Contents/Info.plist \
 	$(APPDIR)/Contents/Resources/AppIcon.icns $(APPDIR)/Contents/Resources/AppIconLight.icns \
-	$(if $(ACTOOL),$(APPDIR)/Contents/Resources/Assets.car) $(APPDIR)/Contents/Resources/LICENSE \
+	$(ICON26) $(APPDIR)/Contents/Resources/LICENSE \
 	$(APPDIR)/Contents/Resources/zstd-LICENSE \
 	$(PREVIEW)/Contents/MacOS/uFitsPreview $(PREVIEW)/Contents/Info.plist \
 	$(THUMB)/Contents/MacOS/uFitsThumbnail $(THUMB)/Contents/Info.plist
