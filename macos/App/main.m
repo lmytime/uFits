@@ -22,15 +22,22 @@ static NSArray<NSString *> *FQExtensions(void)
               @"hk", @"mkf", @"dph" ];
 }
 
-/// Those that macOS takes for something else (another app's type, or its
-/// own: .img is a disk image too), with what it takes them for.
+/// Types of other files that the preview takes too, handing back those
+/// that are not FITS (Preview/Info.plist): to macOS, .img is a disk image.
+static BOOL FQAlsoPreviewed(UTType *t)
+{
+    return [t.identifier isEqualToString:@"com.apple.disk-image-udif"];
+}
+
+/// Those that macOS takes for something that Quick Look does not show with
+/// uFits (another app's type), with what it takes them for.
 static NSDictionary<NSString *, UTType *> *FQExtensionsElsewhere(void)
 {
     NSMutableDictionary *out = [NSMutableDictionary dictionary];
     UTType *fits = [UTType typeWithIdentifier:kFITSType];
     for (NSString *ext in FQExtensions()) {
         UTType *t = [UTType typeWithFilenameExtension:ext];
-        if (!t || !fits || ![t conformsToType:fits])
+        if (!t || !fits || !([t conformsToType:fits] || FQAlsoPreviewed(t)))
             out[ext] = t ?: UTTypeData;
     }
     return out;
@@ -648,7 +655,9 @@ int main(int argc, const char *argv[])
             for (NSString *ext in FQExtensions()) {
                 UTType *t = [UTType typeWithFilenameExtension:ext];
                 printf(".%-5s %-40s %s\n", ext.UTF8String, t.identifier.UTF8String ?: "?",
-                       t && fits && [t conformsToType:fits] ? "FITS" : "NOT FITS");
+                       t && fits && [t conformsToType:fits] ? "FITS"
+                       : FQAlsoPreviewed(t)                 ? "previewed (not FITS to macOS: no Finder icons)"
+                                                            : "NOT FITS");
             }
             return 0;
         }

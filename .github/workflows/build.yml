@@ -142,8 +142,10 @@ jobs:
         timeout-minutes: 4
         run: |
           cd build/testdata
+          # image.img is FITS; disk.img a disk image (Quick Look shows it as usual).
+          cp ../uFits-*.dmg disk.img
           ../qlpreview ../ql f32.fits spec1d.fits mef.fits lc_tess.fits catalog_gaia.fits tables_mixed.fits \
-            spectrum.pha events.evt
+            spectrum.pha events.evt image.img disk.img
       - name: Preview UI (HDU menu, plane slider, plots, tables, find bar, timings)
         if: always()
         timeout-minutes: 6

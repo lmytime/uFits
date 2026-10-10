@@ -37,6 +37,10 @@
 				<string>gov.nasa.gsfc.fits</string>
 				<string>io.github.lmytime.ufits.fz</string>
 				<string>io.github.lmytime.ufits.ogip</string>
+				<!-- .img: as often a FITS image from an X-ray mission as a disk
+				     image, which macOS takes it for. Files that are not FITS go
+				     back to Quick Look (PreviewViewController). -->
+				<string>com.apple.disk-image-udif</string>
 				<!--@EXTRA_TYPES@-->
 			</array>
 			<key>QLSupportsSearchableItems</key>

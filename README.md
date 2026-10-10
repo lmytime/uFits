@@ -3,7 +3,8 @@
 Quick Look for FITS files on macOS. Select a FITS file in Finder and press Space to see
 it, and get real thumbnails in Finder windows. Files named `.fits`, `.fit`, `.fts` and
 `.fz` work, and so do the FITS files of X-ray missions: `.pha`, `.pi`, `.arf`, `.rmf`,
-`.rsp`, `.rsp2`, `.evt`, `.lc`, `.img`, `.hk`, `.mkf` and `.dph`.
+`.rsp`, `.rsp2`, `.evt`, `.lc`, `.hk`, `.mkf`, `.dph` and `.img` (which macOS takes for
+a disk image: Space shows it, but Finder icons stay plain).
 
 Homepage: **[lmytime.github.io/uFits](https://lmytime.github.io/uFits/)**
 
@@ -54,9 +55,9 @@ To zoom into an image, pinch, ⌥-click (⇧⌥-click zooms out), or scroll with
 held; in the uFits app ⌘+, ⌘− and ⌘0 work too. Zoomed in, the part on view is shown at
 full resolution.
 
-When a new version of uFits is out, **Update available** appears in the bar: click it to
-update in a few seconds. uFits looks for new versions on GitHub at most once a day, in
-the background; turn this off in the uFits app.
+When a new version of uFits is out, **Update available** appears in the bar; open the
+uFits app and it updates itself in a few seconds. uFits looks for new versions on GitHub
+at most once a day, in the background; turn this off in the uFits app.
 
 You can also open FITS files in the uFits app (File › Open, or drop them on its icon).
 
