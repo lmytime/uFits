@@ -17,7 +17,8 @@
 //        clicklag OUTDIR FILE --update
 // With uFits 99.0.0 noted as out in the app's settings (the caller writes
 // it there), checks that the preview shows "Update available" in Quick
-// Look and that a click on it opens the uFits app (which it then quits).
+// Look and that a click on it opens the uFits app (which it then quits) or,
+// if Quick Look will not, says how to update.
 
 #import <Cocoa/Cocoa.h>
 #import <Quartz/Quartz.h>
@@ -163,25 +164,51 @@ static NSArray<NSRunningApplication *> *uFitsApps(void)
     return [NSRunningApplication runningApplicationsWithBundleIdentifier:@"io.github.lmytime.uFits"];
 }
 
-/// Clicks "Update available" at p: ms until the uFits app runs (-1: not in
-/// 8 s). Quits it again.
-static double timeUpdateClick(NSWindow *w, NSPoint p)
+/// A window on screen that was not in before, of the preview (or of Quick
+/// Look, showing it).
+static NSDictionary *newWindow(NSSet<NSNumber *> *before)
+{
+    NSDictionary *found = nil;
+    CFArrayRef list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+    for (NSDictionary *w in (__bridge NSArray *)list) {
+        NSString *owner = w[(__bridge id)kCGWindowOwnerName] ?: @"";
+        if (!found && ![before containsObject:w[(__bridge id)kCGWindowNumber]] &&
+            [w[(__bridge id)kCGWindowOwnerPID] intValue] != getpid() &&
+            ([owner hasPrefix:@"uFits"] || [owner rangeOfString:@"QuickLook"].location != NSNotFound)) {
+            found = w;
+            printf("     (a window of %s came up)\n", owner.UTF8String);
+        }
+    }
+    if (list)
+        CFRelease(list);
+    return found;
+}
+
+/// Clicks "Update available" at p. Quick Look may open the uFits app for
+/// the preview (1: then quits it again), or the preview explains in a
+/// popover how to update (2); 0: neither within 8 s. *ms: when.
+static int clickUpdate(NSWindow *w, NSPoint p, NSString *png, double *ms)
 {
     for (NSRunningApplication *a in uFitsApps())
         [a forceTerminate];
     spin(0.5);
-    double t0 = click(w, p), ms = -1;
-    while (uptime() - t0 < 8) {
+    NSSet *before = windowNumbers();
+    double t0 = click(w, p);
+    int what = 0;
+    while (!what && uptime() - t0 < 8) {
         spin(0.05);
-        if (uFitsApps().count) {
-            ms = (uptime() - t0) * 1000;
-            break;
-        }
+        what = uFitsApps().count ? 1 : newWindow(before) ? 2 : 0;
     }
-    spin(1);   // its update offer comes up
+    *ms = (uptime() - t0) * 1000;
+    spin(1);   // the app's update offer, or the popover, comes up
+    NSTask *t = [NSTask launchedTaskWithExecutableURL:[NSURL fileURLWithPath:@"/usr/sbin/screencapture"]
+                                            arguments:@[ @"-x", png ]
+                                                error:nil
+                                   terminationHandler:nil];
+    [t waitUntilExit];
     for (NSRunningApplication *a in uFitsApps())
         [a forceTerminate];
-    return ms;
+    return what;
 }
 
 /// Clicks the HDU menu: ms until it is open (-1: not in 3 s). Closes it.
@@ -435,13 +462,17 @@ int main(int argc, const char *argv[])
         if (update) {
             // "Update available" is on the left of the bar.
             screenshot(w, [out stringByAppendingPathComponent:@"ui-update-ql.png"]);
-            double ms = timeUpdateClick(w, NSMakePoint(NSMinX(rf) + NSMidX(nf), dy + NSMidY(nf)));
+            double ms = 0;
+            int what = clickUpdate(w, NSMakePoint(NSMinX(rf) + NSMidX(nf), dy + NSMidY(nf)),
+                                   [out stringByAppendingPathComponent:@"ui-update-click.png"], &ms);
             [pv close];
-            printf("%s update in Quick Look: %s\n", ms >= 0 ? "ok  " : "FAIL",
-                   ms >= 0 ? [NSString stringWithFormat:@"a click on \"Update available\" opened uFits after %.0f ms",
-                                                        ms].UTF8String
-                           : "a click on \"Update available\" did not open uFits");
-            return ms >= 0 ? 0 : 1;
+            printf("%s update in Quick Look: a click on \"Update available\" %s\n", what ? "ok  " : "FAIL",
+                   what == 1   ? [NSString stringWithFormat:@"opened uFits after %.0f ms", ms].UTF8String
+                   : what == 2 ? [NSString stringWithFormat:@"explained how to update after %.0f ms (Quick Look "
+                                                            @"did not open uFits)",
+                                                            ms].UTF8String
+                               : "neither opened uFits nor explained how to update");
+            return what ? 0 : 1;
         }
         NSPoint imageAt = NSMakePoint(dx + NSMinX(sf) + NSWidth(sf) / 6, dy + NSMidY(sf));
         NSPoint headerAt = NSMakePoint(dx + NSMinX(sf) + NSWidth(sf) * 5 / 6, dy + NSMidY(sf));

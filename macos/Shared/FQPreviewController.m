@@ -1045,12 +1045,47 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
         self.updateAction(v);
         return;
     }
-    // In Quick Look: the uFits app updates itself.
+    // In Quick Look the uFits app updates itself, but a preview may not
+    // open it (its sandbox denies it): Quick Look is asked to, and if it
+    // will not, the notice says how.
     NSURL *app = [NSURL URLWithString:[@"ufits://update?version=" stringByAppendingString:v]];
-    BOOL opened = app && [NSWorkspace.sharedWorkspace openURL:app];
-    NSLog(@"uFits: \"Update available\" clicked: %@ %@", app, opened ? @"opened" : @"could not be opened");
-    if (!opened)
-        [NSWorkspace.sharedWorkspace openURL:[FQUpdate releasePage:v]];
+    NSExtensionContext *context = self.extensionContext;
+    if (!context) {
+        if (![NSWorkspace.sharedWorkspace openURL:app])
+            [self explainUpdate:v];
+        return;
+    }
+    __weak FQPreviewController *weakSelf = self;
+    [context openURL:app
+        completionHandler:^(BOOL success) {
+            NSLog(@"uFits: \"Update available\" clicked: Quick Look %@ %@", success ? @"opened" : @"did not open", app);
+            if (!success)
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [weakSelf explainUpdate:v];
+                });
+        }];
+}
+
+/// How to update, under "Update available", when the app cannot be opened
+/// from here.
+- (void)explainUpdate:(NSString *)version
+{
+    NSTextField *text = [NSTextField
+        wrappingLabelWithString:[NSString stringWithFormat:@"uFits %@ is out (this is %@).\nOpen the uFits app to update: "
+                                                           @"it takes a few seconds.",
+                                                           version, FQUpdate.currentVersion]];
+    text.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+    text.preferredMaxLayoutWidth = 240;
+    NSSize size = text.fittingSize;
+    text.frame = NSMakeRect(12, 10, size.width, size.height);
+    NSViewController *content = [NSViewController new];
+    content.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, size.width + 24, size.height + 20)];
+    [content.view addSubview:text];
+    NSPopover *popover = [NSPopover new];
+    popover.behavior = NSPopoverBehaviorTransient;
+    popover.contentViewController = content;
+    [popover showRelativeToRect:_update.bounds ofView:_update preferredEdge:NSRectEdgeMaxY];
+    NSLog(@"uFits: explained how to update to %@", version);
 }
 
 /// The HDU picked in the menu.
