@@ -6,6 +6,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
 #include <dlfcn.h>
+#include <objc/runtime.h>
 
 struct keyfmt { uint32_t tag, version, count; uint32_t attrs[]; };
 struct token { uint16_t identifier, value; };
@@ -20,6 +21,10 @@ struct token { uint16_t identifier, value; };
 - (void)removeAssetForKey:(NSData *)key;
 - (BOOL)updateBitmapInfo;
 - (BOOL)writeToDiskAndCompact:(BOOL)compact;
+@end
+
+@protocol RenditionKey
+- (const struct token *)keyList;
 @end
 
 enum { kAppearance = 7, kName = 17 };
@@ -41,6 +46,31 @@ static int nameID(id<CarStorage> s, const char *name)
     return -1;
 }
 
+/// A rendition's key as the catalog stores it: its attributes' values, in
+/// the order of the catalog's key format.
+static NSData *rawKey(id<CarStorage> s, id key)
+{
+    if ([key isKindOfClass:[NSData class]])
+        return key;
+    if (![key respondsToSelector:@selector(keyList)]) {
+        unsigned n = 0;
+        Method *m = class_copyMethodList([key class], &n);
+        for (unsigned k = 0; k < n; k++)
+            fprintf(stderr, "  %s - %s\n", class_getName([key class]), sel_getName(method_getName(m[k])));
+        free(m);
+        exit(3);
+    }
+    const struct keyfmt *f = [s keyFormat];
+    NSMutableData *d = [NSMutableData dataWithLength:f->count * sizeof(uint16_t)];
+    uint16_t *v = d.mutableBytes;
+    for (const struct token *t = [(id<RenditionKey>)key keyList]; t && t->identifier; t++) {
+        int i = attrIndex(f, t->identifier);
+        if (i >= 0)
+            v[i] = t->value;
+    }
+    return d;
+}
+
 static void dump(id<CarStorage> s)
 {
     const struct keyfmt *f = [s keyFormat];
@@ -48,7 +78,8 @@ static void dump(id<CarStorage> s)
     for (uint32_t i = 0; i < f->count; i++)
         printf(" %u", f->attrs[i]);
     printf("\n");
-    for (NSData *key in [s allAssetKeys]) {
+    for (id k in [s allAssetKeys]) {
+        NSData *key = rawKey(s, k);
         const uint16_t *v = key.bytes;
         NSData *data = [s assetForKey:key];
         const uint8_t *b = data.bytes;
@@ -95,7 +126,8 @@ int main(int argc, char **argv)
             return 1;
         NSMutableArray<NSData *> *gone = [NSMutableArray array];
         NSMutableDictionary<NSData *, NSData *> *added = [NSMutableDictionary dictionary];
-        for (NSData *key in [s allAssetKeys]) {
+        for (id k in [s allAssetKeys]) {
+            NSData *key = rawKey(s, k);
             const uint16_t *v = key.bytes;
             if (v[ni] == to && v[ai] == 0)
                 [gone addObject:key];
