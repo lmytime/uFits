@@ -122,8 +122,9 @@ jobs:
           # A launchd job (set up by the installer) looks for updates now and then.
           plutil -p ~/Library/LaunchAgents/io.github.lmytime.uFits.update.plist
           launchctl print "gui/$(id -u)/io.github.lmytime.uFits.update" | grep -E "^\s*(state|program|path) =" || true
-          pluginkit -m -v -i io.github.lmytime.uFits.Preview
-          pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail
+          # Both extensions are registered (the tests below need them).
+          pluginkit -m -v -i io.github.lmytime.uFits.Preview | grep io.github.lmytime.uFits.Preview
+          pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail | grep io.github.lmytime.uFits.Thumbnail
           /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
             | grep -B2 -A8 "gov.nasa.gsfc.fits" | head -40 || true
       - name: Quick Look thumbnails (QLThumbnailGenerator)

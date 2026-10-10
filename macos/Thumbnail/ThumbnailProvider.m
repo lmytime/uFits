@@ -9,6 +9,18 @@
 @interface ThumbnailProvider : QLThumbnailProvider
 @end
 
+/// The whole bitmap that Quick Look gives to draw in, in the context's user
+/// space. It is request.scale times the size asked for, whether or not the
+/// context's transform says so: drawn at the size asked for, a thumbnail
+/// filled only the lower left quarter of a Retina icon.
+static CGRect FQWholeContext(CGContextRef ctx, CGSize size)
+{
+    size_t w = CGBitmapContextGetWidth(ctx), h = CGBitmapContextGetHeight(ctx);
+    if (!w || !h)
+        return CGRectMake(0, 0, size.width, size.height);
+    return CGContextConvertRectToUserSpace(ctx, CGRectMake(0, 0, w, h));
+}
+
 @implementation ThumbnailProvider
 
 - (void)provideThumbnailForFileRequest:(QLFileThumbnailRequest *)request
@@ -45,20 +57,19 @@
         reply = [QLThumbnailReply replyWithContextSize:size
                                           drawingBlock:^BOOL(CGContextRef ctx) {
                                               CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
-                                              CGContextDrawImage(ctx, CGRectMake(0, 0, size.width, size.height),
-                                                                 r.image);
+                                              CGContextDrawImage(ctx, FQWholeContext(ctx, size), r.image);
                                               return YES;
                                           }];
     } else {
         reply = [QLThumbnailReply replyWithContextSize:size
                                           drawingBlock:^BOOL(CGContextRef ctx) {
-                                              CGRect all = CGRectMake(0, 0, size.width, size.height);
+                                              CGRect all = FQWholeContext(ctx, size);
                                               CGContextSetRGBFillColor(ctx, 1, 1, 1, 1);
                                               CGContextFillRect(ctx, all);
-                                              CGFloat m = MAX(2, size.width * 0.06);
+                                              CGFloat m = MAX(2, all.size.width * 0.06);
                                               CGColorRef ink = CGColorCreateGenericRGB(0.1, 0.1, 0.12, 1);
                                               FQDrawSpectrum(ctx, CGRectInset(all, m, m), r.raw,
-                                                             MAX(0.75, size.width / 300), ink);
+                                                             MAX(0.75, all.size.width / 300), ink);
                                               CGColorRelease(ink);
                                               return YES;
                                           }];

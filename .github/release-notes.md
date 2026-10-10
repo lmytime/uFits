@@ -2,19 +2,17 @@ uFits shows FITS files in Finder: Quick Look previews (select a file, press Spac
 thumbnails for images, cubes, tile-compressed `.fz` files, spectra, light curves, catalogs
 and tables, with every header.
 
-**New in 0.0.3**
+**New in 0.0.4**
 
-- Zoom into images and cubes: pinch, ⌥-click (⇧⌥-click zooms out), or scroll with ⌘ or
-  ⌥ held. Zoomed in, the part on view is shown at full resolution.
-- A shorter bar: the image's size and type, or the table's rows and columns. The HDU menu
-  says which HDU is shown ("HDU 1 SCI") and what each holds when opened.
-- In Quick Look, the HDU menu and the Image/Table/Header switch answer clicks at once
-  (they waited half a second).
-- The FITS files of X-ray missions open by their own names: `.pha`, `.pi`, `.arf`,
-  `.rmf`, `.rsp`, `.rsp2`, `.evt`, `.lc`, `.img`, `.hk`, `.mkf` and `.dph`.
-- uFits now tells you when a newer version is out (**Update available** in the bar) and
-  updates itself in a few seconds when you open it. It looks on GitHub at most once a
-  day; turn this off in the uFits app. (From 0.0.2, update once with the command below.)
+- Thumbnails fill their icon on Retina screens (they were drawn in its lower left
+  quarter).
+- Updating keeps both Quick Look extensions on: the installer checks that macOS has
+  registered them, and tries again if not.
+
+From 0.0.3 on, uFits says when a newer version is out (**Update available** in the
+preview's bar) and updates itself when you open it. From 0.0.2 or earlier, update once
+with the command below. See [0.0.3](https://github.com/lmytime/uFits/releases/tag/v0.0.3)
+for zoom, the shorter bar and the FITS files of X-ray missions.
 
 **Install** with one command in Terminal:
 
