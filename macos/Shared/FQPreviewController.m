@@ -13,6 +13,22 @@
 static NSString *const kStretchDefaultsKey = @"stretch";
 static const CGFloat kBarHeight = 30;
 
+#pragma mark - First-click button
+
+/// A button that answers the first click: in Quick Look the preview's
+/// window is never the key window.
+@interface FQFirstClickButton : NSButton
+@end
+
+@implementation FQFirstClickButton
+
+- (BOOL)acceptsFirstMouse:(NSEvent *)event
+{
+    return YES;
+}
+
+@end
+
 #pragma mark - Image view
 
 /// Zoom limits, in points per pixel of the image.
@@ -682,7 +698,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     // When a newer uFits is out (FQUpdate): "Update available", left, in
     // the link colour (a preview's window is never key: a bezel would be
     // grey).
-    _update = [NSButton buttonWithTitle:@"Update available" target:self action:@selector(updateClicked:)];
+    _update = [FQFirstClickButton buttonWithTitle:@"Update available" target:self action:@selector(updateClicked:)];
     _update.bordered = NO;
     NSFont *updateFont = [NSFont systemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightSemibold];
     _update.attributedTitle = [[NSAttributedString alloc]
@@ -949,8 +965,8 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 /// menu; the info text takes what is left, after "Update available" on the
 /// left when a newer uFits is out. When the bar is too narrow, the HDU menu
 /// shrinks (down to 120 points) and the least important controls are
-/// hidden ("Update available" first), keeping at least 80 points of info
-/// text.
+/// hidden, keeping at least 80 points of info text, which "Update
+/// available" may take.
 - (void)layoutBar
 {
     NSRect b = self.view.bounds;
@@ -966,7 +982,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
             used += w + 8;
     }
     CGFloat left = 10;
-    _update.hidden = !_updateVersion || used + NSWidth(_update.frame) + 8 > room;
+    _update.hidden = !_updateVersion || used + NSWidth(_update.frame) + 8 > room + 80;
     if (!_update.hidden) {
         NSSize us = _update.frame.size;
         _update.frame = NSMakeRect(left, floor((kBarHeight - us.height) / 2), us.width, us.height);
@@ -1031,7 +1047,9 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     }
     // In Quick Look: the uFits app updates itself.
     NSURL *app = [NSURL URLWithString:[@"ufits://update?version=" stringByAppendingString:v]];
-    if (!app || ![NSWorkspace.sharedWorkspace openURL:app])
+    BOOL opened = app && [NSWorkspace.sharedWorkspace openURL:app];
+    NSLog(@"uFits: \"Update available\" clicked: %@ %@", app, opened ? @"opened" : @"could not be opened");
+    if (!opened)
         [NSWorkspace.sharedWorkspace openURL:[FQUpdate releasePage:v]];
 }
 

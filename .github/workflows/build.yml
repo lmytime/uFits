@@ -185,9 +185,11 @@ jobs:
       - name: Quick Look logs
         if: always()
         run: |
-          # Looks for a newer release (the app, the launchd job)
-          log show --last 15m --style compact --predicate 'eventMessage CONTAINS "the latest release is"' \
-            | tail -5 || true
+          # Looks for a newer release (the app, the launchd job), the preview's
+          # "Update available", and what the sandbox kept the preview from
+          log show --last 15m --style compact --predicate 'eventMessage CONTAINS "the latest release is" OR
+            eventMessage CONTAINS "Update available" OR (eventMessage CONTAINS "uFitsPreview" AND
+            eventMessage CONTAINS "deny")' | tail -25 || true
           log show --last 5m --style compact \
             --predicate 'process BEGINSWITH "uFits" OR (subsystem CONTAINS "quicklook" AND messageType >= 16)' \
             | tail -60 || true
