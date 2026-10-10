@@ -214,6 +214,11 @@ canvas.fill { width: 100%; height: 100%; display: block; }
   font: 11.5px/1.3 var(--font-ui); text-overflow: ellipsis; cursor: pointer;
 }
 .pop-up::after { content: "⌄"; position: absolute; right: 8px; top: 1px; font-size: 11px; color: var(--win-dim); pointer-events: none; }
+/* The HDU menu says which HDU is shown; opened, what each holds (as uFits). */
+.pop-up.hdu { display: inline-block; }
+.pop-label { display: block; overflow: hidden; padding: 3px 22px 3px 8px; border-radius: 6px; background: var(--seg); color: var(--win-text); font: 11.5px/1.3 var(--font-ui); white-space: nowrap; text-overflow: ellipsis; }
+.pop-up.hdu select { position: absolute; inset: 0; height: 100%; opacity: 0; }
+.pop-up.hdu:has(select:focus-visible) .pop-label { outline: 2px solid var(--gold); outline-offset: 2px; }
 .seg { flex: none; display: inline-flex; padding: 2px; gap: 2px; border-radius: 7px; background: var(--seg); }
 .seg button { border: 0; border-radius: 5px; padding: 3px 9px; background: transparent; color: var(--win-text); font: 11.5px/1.3 var(--font-ui); cursor: pointer; }
 .seg button[aria-pressed="true"] { background: var(--seg-on); box-shadow: 0 1px 2px var(--shadow); }
@@ -249,7 +254,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
         <span>macOS 11 or later</span>
         <span>Apple silicon and Intel</span>
         <span>1 MB</span>
-        <a id="dmg" href="https://github.com/lmytime/uFits/releases/latest">uFits-0.0.3.dmg</a>
+        <a href="https://github.com/lmytime/uFits/releases/latest">uFits.dmg</a>
       </p>
     </div>
 
@@ -264,7 +269,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
         </div>
         <div class="win-bar">
           <span class="win-info" id="winInfo"></span>
-          <span class="pop-up"><select id="hduMenu" aria-label="HDU"></select></span>
+          <span class="pop-up hdu"><span class="pop-label" id="hduLabel" aria-hidden="true"></span><select id="hduMenu" aria-label="HDU"></select></span>
           <span class="pop-up" id="stretchBox"><select id="stretchMenu" aria-label="Stretch">
             <option value="auto">Auto stretch</option>
             <option value="linear">Linear 0.5–99.5%</option>
@@ -313,20 +318,6 @@ canvas.fill { width: 100%; height: 100%; display: block; }
         select();
       }
     });
-  }
-
-  // ---- The latest release's disk image, on the project site ------------------
-  if (location.hostname.endsWith("github.io")) {
-    fetch("https://api.github.com/repos/lmytime/uFits/releases/latest")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((release) => {
-        const dmg = release && (release.assets || []).find((a) => a.name.endsWith(".dmg"));
-        if (dmg) {
-          $("dmg").textContent = dmg.name;
-          $("dmg").href = release.html_url;
-        }
-      })
-      .catch(() => {});
   }
 
   // ---- Seeded random numbers, so the example looks the same every time ----
@@ -519,12 +510,13 @@ canvas.fill { width: 100%; height: 100%; display: block; }
      ["TTYPE5", "'CLASS'", ""], ["TFORM5", "'J'", ""], ["EXTNAME", "'CATALOG'", "extension name"], ["END"]],
   ];
   const HDUS = [
-    { title: "HDU 0 — no data", picture: null, table: false, info: "" },
-    { title: "HDU 1  SCI — 2048 × 2048 float32", picture: "image", table: false, info: "HDU 1 SCI  ·  2048 × 2048  ·  float32" },
-    { title: "HDU 2  LIGHTCURVE — PDCSAP_FLUX vs TIME", picture: "lc", table: true,
-      info: "HDU 2 LIGHTCURVE  ·  3600 rows  ·  PDCSAP_FLUX vs TIME", rows: "HDU 2 LIGHTCURVE  ·  3600 rows × 4 columns" },
-    { title: "HDU 3  CATALOG — DEC vs RA", picture: "sky", table: true,
-      info: "HDU 3 CATALOG  ·  2500 rows  ·  DEC vs RA", rows: "HDU 3 CATALOG  ·  2500 rows × 5 columns" },
+    { title: "HDU 0 — no data", name: "HDU 0", picture: null, table: false, info: "" },
+    { title: "HDU 1  SCI — 2048 × 2048 float32", name: "HDU 1 SCI", picture: "image", table: false,
+      info: "2048 × 2048  ·  float32" },
+    { title: "HDU 2  LIGHTCURVE — PDCSAP_FLUX vs TIME", name: "HDU 2 LIGHTCURVE", picture: "lc", table: true,
+      info: "3600 rows", rows: "3600 rows × 4 columns" },
+    { title: "HDU 3  CATALOG — DEC vs RA", name: "HDU 3 CATALOG", picture: "sky", table: true,
+      info: "2500 rows", rows: "2500 rows × 5 columns" },
   ];
 
   // ---- Views -----------------------------------------------------------------
@@ -673,6 +665,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     const has = { picture: !!h.picture, table: h.table, header: true };
     mode = has[nextMode] ? nextMode : has.picture ? "picture" : has.table ? "table" : "header";
     menu.value = String(hdu);
+    $("hduLabel").textContent = h.name;
     segPicture.textContent = h.picture === "image" || !h.picture ? "Image" : "Plot";
     segPicture.disabled = !has.picture;
     segTable.disabled = !has.table;
@@ -680,7 +673,9 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     segTable.setAttribute("aria-pressed", String(mode === "table"));
     segHeader.setAttribute("aria-pressed", String(mode === "header"));
     $("stretchBox").hidden = !(mode === "picture" && h.picture === "image");
-    $("winInfo").textContent = mode === "table" ? h.rows : h.info;
+    // The bar says only what nothing else does: the size and type of the
+    // image, how many rows (and columns) a table has.
+    $("winInfo").textContent = mode === "table" ? h.rows : mode === "picture" ? h.info : "";
     $("imageView").hidden = !(mode === "picture" && h.picture === "image");
     $("plotView").hidden = !(mode === "picture" && h.picture && h.picture !== "image");
     $("tableView").hidden = mode !== "table";
