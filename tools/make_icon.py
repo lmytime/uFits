@@ -6,6 +6,8 @@ light versions, and write
   macos/App/AppIconLight.icns     the light one, for the app's icon setting
   macos/App/AppIcon.icon          both, for macOS 26 to follow light and dark
                                   mode (Icon Composer's format)
+  macos/App/Assets.xcassets       Dusk, which macOS 15 and earlier show of the
+                                  two compiled together
   docs/icon.png, docs/icon-light.png, docs/favicon.png, docs/favicon-light.png
 
 The galaxy is drawn cell by cell from the maps below: 32 cells across the
@@ -203,12 +205,33 @@ def icon_composer(path):
         f.write("\n")
 
 
+def catalog(path):
+    """An asset catalog with Dusk as the app's icon, for the versions of macOS
+    before 26 (actool puts it beside AppIcon.icon, of the same name)."""
+    iconset = os.path.join(path, "AppIcon.appiconset")
+    os.makedirs(iconset, exist_ok=True)
+    with open(os.path.join(path, "Contents.json"), "w") as f:
+        json.dump({"info": {"author": "xcode", "version": 1}}, f, indent=2)
+        f.write("\n")
+    images = []
+    for pt in (16, 32, 128, 256, 512):
+        for scale in (1, 2):
+            px = pt * scale
+            name = f"dusk-{px}.png"
+            render("dusk", px).save(os.path.join(iconset, name), optimize=True)
+            images.append({"filename": name, "idiom": "mac", "scale": f"{scale}x", "size": f"{pt}x{pt}"})
+    with open(os.path.join(iconset, "Contents.json"), "w") as f:
+        json.dump({"images": images, "info": {"author": "xcode", "version": 1}}, f, indent=2)
+        f.write("\n")
+
+
 def main(root):
     app = os.path.join(root, "macos", "App")
     docs = os.path.join(root, "docs")
     icns("dusk", os.path.join(app, "AppIcon.icns"))
     icns("light", os.path.join(app, "AppIconLight.icns"))
     icon_composer(os.path.join(app, "AppIcon.icon"))
+    catalog(os.path.join(app, "Assets.xcassets"))
     for palette, suffix in (("dusk", ""), ("light", "-light")):
         render(palette, 256).save(os.path.join(docs, f"icon{suffix}.png"), optimize=True)
         render(palette, 64).save(os.path.join(docs, f"favicon{suffix}.png"), optimize=True)

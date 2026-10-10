@@ -162,21 +162,22 @@ $(APPDIR)/Contents/Resources/%.icns: macos/App/%.icns
 	@mkdir -p $(dir $@)
 	cp $< $@
 
-# The icon for macOS 26 (AppIcon.icon, by tools/make_icon.py): the light one,
-# and Dusk when icons are dark (System Settings > Appearance > Icon & widget
-# style). Compiled for macOS 26 only, so that earlier versions, which find
-# nothing they can use in it, show AppIcon.icns (Dusk); by the actool of
-# Xcode 26 or later: the newest Xcode 26 in /Applications, else the one
-# selected. Without one, the app has the Dusk icon everywhere.
+# The app's icon (by tools/make_icon.py), two of the same name compiled
+# together: AppIcon.icon for macOS 26, the light one and Dusk when icons are
+# dark (System Settings > Appearance > Icon & widget style), and Dusk from
+# Assets.xcassets for earlier versions. By the actool of Xcode 26 or later:
+# the newest Xcode 26 in /Applications, else the one selected. Without one,
+# the app has the Dusk icon everywhere (AppIcon.icns).
 XCODE26 := $(lastword $(sort $(wildcard /Applications/Xcode_26*.app /Applications/Xcode-26*.app)))
 ACTOOL := $(if $(XCODE26),DEVELOPER_DIR=$(XCODE26)/Contents/Developer) xcrun actool
 ACTOOL_MAJOR := $(shell $(ACTOOL) --version 2>/dev/null | sed -n 's|.*<string>\([0-9]*\)\..*</string>.*|\1|p' | tail -1)
 ICON26 := $(if $(filter 2% 3% 4% 5% 6% 7% 8% 9%,$(ACTOOL_MAJOR)),$(APPDIR)/Contents/Resources/Assets.car)
 
-$(APPDIR)/Contents/Resources/Assets.car: macos/App/AppIcon.icon/icon.json $(wildcard macos/App/AppIcon.icon/Assets/*)
+$(APPDIR)/Contents/Resources/Assets.car: macos/App/AppIcon.icon/icon.json $(wildcard macos/App/AppIcon.icon/Assets/*) \
+		$(wildcard macos/App/Assets.xcassets/*.json macos/App/Assets.xcassets/*/*)
 	@mkdir -p $(dir $@) $(B)/icon
-	$(ACTOOL) macos/App/AppIcon.icon --compile $(B)/icon --platform macosx \
-	    --minimum-deployment-target 26.0 --app-icon AppIcon \
+	$(ACTOOL) macos/App/AppIcon.icon macos/App/Assets.xcassets --compile $(B)/icon --platform macosx \
+	    --minimum-deployment-target $(MINOS) --app-icon AppIcon \
 	    --output-partial-info-plist $(B)/icon/partial.plist --warnings --notices --errors
 	cp $(B)/icon/Assets.car $@
 

@@ -162,9 +162,17 @@ jobs:
           macos=$(sw_vers -productVersion)
           check "the icon for macOS 26 has a light and a dark look" \
             'xcrun assetutil --info $app/Contents/Resources/Assets.car 2>/dev/null | grep -q NSAppearanceNameDarkAqua'
+          # What the asset catalog holds: its icons, of which look and size.
+          xcrun assetutil --info $app/Contents/Resources/Assets.car | python3 -c '
+          import collections, json, sys
+          icons = collections.defaultdict(list)
+          for r in json.load(sys.stdin)[1:]:
+              icons[r.get("Name"), r.get("AssetType"), r.get("Appearance", "any")].append(str(r.get("PixelWidth", "-")))
+          for (name, kind, look), px in icons.items():
+              print("    ", name, "|", kind, "|", look, "|", " ".join(px))' || true
           echo "     the icon drawn: $(light) of 255"
           case $macos in
-          1[0-9].*) check "macOS $macos shows Dusk (AppIcon.icns)" '[ "$(light)" -lt 128 ]' ;;
+          1[0-9].*) check "macOS $macos shows Dusk" '[ "$(light)" -lt 128 ]' ;;
           *)
             # macOS 26: the light icon, and Dusk when icons are dark.
             check "macOS $macos shows the light icon" '[ "$(light)" -gt 128 ]'
@@ -194,6 +202,7 @@ jobs:
           tests/macos/print_images.sh $shots
           exit $fail
       - name: Quick Look thumbnails (QLThumbnailGenerator)
+        if: ${{ !cancelled() }}
         timeout-minutes: 4
         run: |
           make qltools
