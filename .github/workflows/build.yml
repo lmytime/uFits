@@ -104,8 +104,6 @@ jobs:
           # The one-command installer over that: the latest release, downloaded,
           # then the disk image built above, which the tests below use.
           sh install.sh
-          # (diagnostic, for one run) the released thumbnails at scale 2
-          make -s build/qlthumb && (cd build/testdata && ../qlthumb ../ql-release f32.fits lc_tess.fits || true)
           UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh
           # The app looks for a newer release, as it does once a day.
           /Applications/uFits.app/Contents/MacOS/uFits --check-for-updates
