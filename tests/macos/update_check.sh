@@ -47,14 +47,23 @@ for i in $(seq 1 10); do
     if button Update; then offered=1; break; fi
     sleep 1
 done
-if [ -z "$offered" ]; then
+# Asked, it may still say it is up to date for a while (what GitHub says
+# is the latest release takes a minute to change): OK, and ask again.
+for try in 1 2 3; do
+    [ -z "$offered" ] || break
     echo "     (no offer yet: uFits › Check for Updates…)"
     osascript -e 'tell application "System Events" to tell process "uFits" to click menu item 2 of menu 1 of menu bar item 2 of menu bar 1' > /dev/null || true
     for i in $(seq 1 30); do
         if button Update; then offered=1; break; fi
+        if button OK; then
+            echo "     (uFits says it is up to date)"
+            button OK --click || true
+            sleep 20
+            break
+        fi
         sleep 1
     done
-fi
+done
 if [ -z "$offered" ]; then
     picture app-update-none.png
     echo "FAIL uFits did not offer $want"

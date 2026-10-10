@@ -14,7 +14,8 @@ on:
         default: ""
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A release run (workflow_dispatch) leaves the push run of its commit be.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -404,6 +405,14 @@ jobs:
           TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release }}
         run: |
           prev=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=10" --jq '.[].tag_name' | grep -vxF "$TAG" | head -1)
+          # What uFits asks, .../releases/latest, leads to the new release only
+          # a minute or two after it is published.
+          for i in $(seq 1 40); do
+            latest=$(curl -fsLI -o /dev/null -w '%{url_effective}' "https://github.com/$GITHUB_REPOSITORY/releases/latest" || true)
+            [ "${latest##*/}" = "$TAG" ] && break
+            sleep 15
+          done
+          echo "latest release: ${latest##*/}"
           echo "uFits ${prev#v}, as released, updating itself to ${TAG#v}"
           UFITS_VERSION=${prev#v} sh install.sh
           mkdir -p pics
