@@ -93,9 +93,10 @@ $(B)/obj/core/%.o: core/%.c $(CORE_H)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_) -c $< -o $@
 
-$(B)/obj/zstddeclib.o: $(ZSTD_SRC)
+$(B)/obj/zstddeclib.o: $(ZSTD_SRC) Makefile
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS_) -c $< -o $@
+	$(CC) $(CFLAGS_) -Os -DZSTD_NO_INLINE -DHUF_FORCE_DECOMPRESS_X1 \
+	    -DZSTD_FORCE_DECOMPRESS_SEQUENCES_SHORT -c $< -o $@
 
 $(B)/obj/app/%.o: macos/App/%.m $(SHARED_H) $(CORE_H)
 	@mkdir -p $(dir $@)
@@ -160,11 +161,20 @@ $(APPDIR)/Contents/Resources/AppIcon.icns: macos/App/AppIcon.icns
 	@mkdir -p $(dir $@)
 	cp $< $@
 
+$(APPDIR)/Contents/Resources/LICENSE: LICENSE
+	@mkdir -p $(dir $@)
+	cp $< $@
+
+$(APPDIR)/Contents/Resources/zstd-LICENSE: third_party/zstd/LICENSE
+	@mkdir -p $(dir $@)
+	cp $< $@
+
 # --- signing ---------------------------------------------------------------
 # Extensions must be signed (sandboxed) before the app that contains them.
 
 BUNDLE_PARTS := $(APPDIR)/Contents/MacOS/$(APP) $(APPDIR)/Contents/Info.plist \
-	$(APPDIR)/Contents/Resources/AppIcon.icns \
+	$(APPDIR)/Contents/Resources/AppIcon.icns $(APPDIR)/Contents/Resources/LICENSE \
+	$(APPDIR)/Contents/Resources/zstd-LICENSE \
 	$(PREVIEW)/Contents/MacOS/uFitsPreview $(PREVIEW)/Contents/Info.plist \
 	$(THUMB)/Contents/MacOS/uFitsThumbnail $(THUMB)/Contents/Info.plist
 

@@ -79,7 +79,7 @@ def image(values, sample="Float32", byte_order="little", storage="Planar",
     return element, b""
 
 
-def write_xisf(path, *images):
+def write_xisf(path, *images, xml_encoding="utf-8"):
     root = ET.Element("xisf", version="1.0", xmlns="http://www.pixinsight.com/xisf")
     offset, attachments = 32768, []
     for element, data in images:
@@ -88,7 +88,7 @@ def write_xisf(path, *images):
             element.set("location", f"attachment:{offset}:{len(data)}")
             offset += len(data)
             attachments.append(data)
-    header = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    header = ET.tostring(root, encoding=xml_encoding, xml_declaration=True)
     assert len(header) + 16 <= 32768
     path.write_bytes(struct.pack("<8sII", b"XISF0100", len(header), 0) + header
                      + bytes(32768 - 16 - len(header)) + b"".join(attachments))
@@ -208,6 +208,25 @@ class XisfTests(unittest.TestCase):
                                   image(self.mono[:, :8, :10], sample, byte_order=byte_order, codec=codec,
                                         shuffle=bool(codec), location=f"embedded:{encoding}"))
                 self.check_values(path, self.mono[:, :8, :10])
+
+    def test_utf8_xml_declaration(self):
+        item = image(self.mono)
+        ET.SubElement(item[0], "Property", id="Object:Name", type="String").text = "M42 星云"
+        path = write_xisf(self.data / "xisf_utf8_declaration.xisf", item, xml_encoding="utf8")
+        self.check_values(path, self.mono)
+        header = self.success("header", path)
+        self.assertIn("Object:Name", header)
+        self.assertIn("M42", header)
+
+    def test_uppercase_embedded_hex(self):
+        values = np.resize(np.array([0xabcd, 0xef01, 0x2345, 0x6789], np.uint16), (1, 8, 10))
+        for codec in (None, "zstd"):
+            with self.subTest(codec=codec):
+                item = image(values, "UInt16", codec=codec, shuffle=bool(codec), location="embedded:hex")
+                data = item[0].find("Data")
+                data.text = data.text.upper()
+                path = write_xisf(self.data / f"xisf_uppercase_hex_{codec}.xisf", item)
+                self.check_values(path, values)
 
     def test_default_attributes(self):
         item = image(self.mono, "UInt16")

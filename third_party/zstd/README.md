@@ -14,3 +14,8 @@ python3 combine.py -r ../../lib -x legacy/zstd_legacy.h -o zstddeclib.c zstddecl
 Copy the output, `lib/zstd.h`, `lib/zstd_errors.h`, and the root `LICENSE` into this directory.
 The generated source disables assembly, legacy formats and tracing, so the
 same file builds for both macOS architectures and the portable test tool.
+
+The macOS decoder object is built with `-Os`, `ZSTD_NO_INLINE`,
+`HUF_FORCE_DECOMPRESS_X1` and `ZSTD_FORCE_DECOMPRESS_SEQUENCES_SHORT` to reduce
+the size of each bundled binary. The app includes the complete BSD notice in
+`Contents/Resources/zstd-LICENSE`.

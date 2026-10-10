@@ -71,6 +71,8 @@ jobs:
           PATH=/tmp/badbin:$PATH make app
       - name: Bundle contents
         run: |
+          cmp LICENSE build/uFits.app/Contents/Resources/LICENSE
+          cmp third_party/zstd/LICENSE build/uFits.app/Contents/Resources/zstd-LICENSE
           find build/uFits.app -type f | sort
           lipo -info build/uFits.app/Contents/MacOS/uFits build/uFits.app/Contents/PlugIns/*.appex/Contents/MacOS/*
           codesign -d --entitlements - build/uFits.app/Contents/PlugIns/uFitsPreview.appex
@@ -140,7 +142,8 @@ jobs:
           ../qlthumb ../ql image.img || true
           ../qlthumb ../ql f32.fits u16.fits rgb.fits bayer_rggb.fits rice_f32_sd1.fits \
             footprint_f32.fits mef.fits spec1d.fits cube5.fits lc_tess.fits lc_mag.fits spec_sdss.fits pha.fits \
-            catalog_wrap.fits catalog_gaia.fits xisf_mono.xisf xisf_rgb.xisf xisf_zstd.xisf
+            catalog_wrap.fits catalog_gaia.fits xisf_mono.xisf xisf_rgb.xisf xisf_zstd.xisf \
+            xisf_utf8_declaration.xisf xisf_uppercase_hex_zstd.xisf
       - name: Quick Look preview (QLPreviewView)
         if: always()
         timeout-minutes: 4
@@ -149,7 +152,8 @@ jobs:
           # image.img is FITS; disk.img a disk image (Quick Look shows it as usual).
           cp ../uFits-*.dmg disk.img
           ../qlpreview ../ql f32.fits spec1d.fits mef.fits lc_tess.fits catalog_gaia.fits tables_mixed.fits \
-            spectrum.pha events.evt image.img disk.img xisf_mono.xisf xisf_multi.xisf xisf_zstd.xisf
+            spectrum.pha events.evt image.img disk.img xisf_mono.xisf xisf_multi.xisf xisf_zstd.xisf \
+            xisf_utf8_declaration.xisf xisf_uppercase_hex_zstd.xisf
       - name: Preview UI (HDU menu, plane slider, plots, tables, find bar, timings)
         if: always()
         timeout-minutes: 6

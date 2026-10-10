@@ -392,7 +392,8 @@ int fqi_xisf_open(fq_file *f, char *err, size_t errlen)
     if (!len || len > X_HEADER_LIMIT || (int64_t)len > f->size - 16) {
         fqi_seterr(err, errlen, "XISF: invalid or oversized XML header"); return -1;
     }
-    XML_Parser xml = XML_ParserCreateNS(NULL, '|');
+    /* XISF headers are UTF-8, including writers that declare the alias utf8. */
+    XML_Parser xml = XML_ParserCreateNS("UTF-8", '|');
     if (!xml) { fqi_seterr(err, errlen, "XISF: out of memory"); return -1; }
     xparser p = { .f = f, .parser = xml, .err = err, .errlen = errlen, .header_end = 16u + len };
     XML_SetUserData(xml, &p);
@@ -536,7 +537,8 @@ static uint8_t *embedded(fqi_xisf_image *x, size_t *len)
         if (isspace(c)) continue;
         if (x->encoding == 2) {
             int d = c >= '0' && c <= '9' ? (int)c - '0' :
-                    c >= 'a' && c <= 'f' ? (int)c - 'a' + 10 : -1;
+                    c >= 'a' && c <= 'f' ? (int)c - 'a' + 10 :
+                    c >= 'A' && c <= 'F' ? (int)c - 'A' + 10 : -1;
             if (d < 0) goto bad;
             acc = (acc << 4) | (unsigned)d;
             if (++count == 2) { out[o++] = (uint8_t)acc; count = 0; }

@@ -85,25 +85,6 @@
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>io.github.lmytime.ufits.xisf</string>
-			<key>UTTypeDescription</key>
-			<string>Extensible Image Serialization Format</string>
-			<key>UTTypeConformsTo</key>
-			<array>
-				<string>public.image</string>
-			</array>
-			<key>UTTypeReferenceURL</key>
-			<string>https://pixinsight.com/doc/docs/XISF-1.0-spec/XISF-1.0-spec.html</string>
-			<key>UTTypeTagSpecification</key>
-			<dict>
-				<key>public.filename-extension</key>
-				<array>
-					<string>xisf</string>
-				</array>
-			</dict>
-		</dict>
-		<dict>
-			<key>UTTypeIdentifier</key>
 			<string>gov.nasa.gsfc.fits</string>
 			<key>UTTypeDescription</key>
 			<string>FITS File</string>
@@ -135,6 +116,26 @@
 	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>io.github.lmytime.ufits.xisf</string>
+			<key>UTTypeDescription</key>
+			<string>Extensible Image Serialization Format</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.content</string>
+			</array>
+			<key>UTTypeReferenceURL</key>
+			<string>https://pixinsight.com/doc/docs/XISF-1.0-spec/XISF-1.0-spec.html</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>xisf</string>
+				</array>
+			</dict>
+		</dict>
 		<dict>
 			<key>UTTypeIdentifier</key>
 			<string>io.github.lmytime.ufits.fz</string>

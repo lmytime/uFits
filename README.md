@@ -35,16 +35,14 @@ by Apple), then open uFits once.
   RGB cubes and colour camera frames (Bayer) are shown in colour; tile-compressed `.fz`
   files work too.
 - **XISF images**: 2D grayscale, RGB and Bayer images, with automatic stretch, zoom
-  and an image menu for files containing multiple images. Unsigned 8/16/32/64-bit
-  and floating-point 32/64-bit samples, planar or interleaved storage, and zlib,
-  LZ4/LZ4HC and Zstandard compression (including byte shuffling) are supported.
+  and an image menu for files containing multiple images. Compressed images work too.
 - **Plots** of spectra and light curves (TESS, Kepler, SDSS, HST and JWST spectra, X-ray
   light curves and spectra, ...) and **sky maps** of catalogs with RA and Dec.
 - **Table**: the rows of any table, even millions of them. ⌘C copies the selected rows.
 - **Header**: every keyword, with values and comments lined up. ⌘F searches it.
 
-Uncompressed images are sampled directly from the mapped file. Compressed XISF images
-must be decompressed in full before sampling; large compressed files can take longer.
+FITS and uncompressed XISF previews are fast even for huge files: uFits reads only
+the part of the file it shows.
 
 ## Using the preview
 
@@ -78,12 +76,7 @@ You can also open FITS and XISF files in the uFits app (File › Open, or drop t
 - **`.fits.gz` files are not previewed.** macOS treats them as gzip archives.
 - **Not supported:** `HCOMPRESS_1` compressed images (their header is still shown) and
   random-groups files.
-- **XISF limits:** monolithic `.xisf` files only; complex samples, alpha channels,
-  non-Gray/RGB color spaces, higher-dimensional images and explicit non-default
-  orientation transforms are not rendered. Other CFA patterns are shown as raw
-  grayscale. XML headers are limited to 16 MiB and decoded compressed/embedded
-  images to 512 MiB. Stored display functions and ICC profiles are not applied;
-  the preview uses uFits' stretch controls. Checksums are not verified.
+- **Some XISF variants are not supported.** See [XISF support and limits](DEVELOPMENT.md#xisf).
 
 Building from source and how uFits works: [DEVELOPMENT.md](DEVELOPMENT.md).
 

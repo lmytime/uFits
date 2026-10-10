@@ -84,6 +84,32 @@ Time spent in the core alone, measured on a 4-core Linux VM:
   (`fq_render_detail`: a region, mapped with the stretch of the whole image) and laid
   over it.
 
+## XISF
+
+The reader supports monolithic XISF 1.0 files containing 2D Gray/RGB images or
+2×2 Bayer mosaics. UInt8/16/32/64 and Float32/64 samples, little/big endian and
+planar/interleaved storage feed the same renderer as FITS. Pixels may be attached
+or embedded as base64/hex; zlib, LZ4/LZ4HC and Zstandard compression, byte shuffling
+and mixed compressed/raw subblocks are supported. Each image's attributes, FITS
+keywords and scalar properties are available in Header.
+
+Raw attachments are sampled directly from the mapped file. Compressed XISF images
+must be decompressed in full before sampling, so large compressed files take longer.
+Only the selected decoded image is cached. Byte unshuffling temporarily needs a
+second image-sized buffer. XML headers are limited to 16 MiB and decoded
+compressed/embedded images to 512 MiB.
+
+Complex samples, alpha channels, other color spaces, higher-dimensional images and
+explicit non-default orientation transforms are not rendered. Other CFA patterns
+are shown as raw grayscale. Stored display functions and ICC profiles are not
+applied; the preview uses uFits' stretch controls. Checksums are not verified.
+See the [XISF specification](https://pixinsight.com/doc/docs/XISF-1.0-spec/XISF-1.0-spec.html)
+for the file format.
+
+The app bundles uFits' BSD 3-Clause license as `Contents/Resources/LICENSE` and
+the Zstandard notice as `Contents/Resources/zstd-LICENSE`. The macOS Zstandard
+decoder is compiled with upstream size options to keep the three binaries small.
+
 ## Updates
 
 `FQUpdate` (shared by the app and the preview extension) keeps what it learns in the
