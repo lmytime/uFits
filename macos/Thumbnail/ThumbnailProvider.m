@@ -80,6 +80,14 @@ static NSURL *FQWritePNG(CGImageRef image)
 {
     CGSize box = request.maximumSize;
     CGFloat scale = request.scale > 0 ? request.scale : 1;
+    // Icons under 40 points (list and column views) keep the file's own
+    // icon: a picture that small says little.
+    if (MAX(box.width, box.height) < 40) {
+        handler(nil, [NSError errorWithDomain:@"uFits"
+                                         code:2
+                                     userInfo:@{NSLocalizedDescriptionKey : @"no thumbnail for icons this small"}]);
+        return;
+    }
     int maxPixels = (int)ceil(MAX(box.width, box.height) * scale);
     maxPixels = MIN(MAX(maxPixels, 16), 2048);
 
