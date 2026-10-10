@@ -53,8 +53,8 @@ held; in the uFits app ⌘+, ⌘− and ⌘0 work too. Zoomed in, the part on vi
 full resolution.
 
 When a new version of uFits is out, **Update available** appears in the bar: click it to
-update in a few seconds. uFits looks for new versions on GitHub at most once a day; turn
-this off in the uFits app.
+update in a few seconds. uFits looks for new versions on GitHub at most once a day, in
+the background; turn this off in the uFits app.
 
 You can also open FITS files in the uFits app (File › Open, or drop them on its icon).
 

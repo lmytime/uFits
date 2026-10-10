@@ -13,6 +13,11 @@
 // Exit status 1 when the median time to open the menu or to switch is over
 // 400 ms, or when the image did not zoom; 0 without checking when this
 // process may not post events.
+//
+//        clicklag OUTDIR FILE --update
+// With uFits 99.0.0 noted as out in the app's settings (the caller writes
+// it there), checks that the preview shows "Update available" in Quick
+// Look and that a click on it opens the uFits app (which it then quits).
 
 #import <Cocoa/Cocoa.h>
 #import <Quartz/Quartz.h>
@@ -149,6 +154,33 @@ static uint64_t pixels(NSWindow *w)
     CFRelease(data);
     CGImageRelease(img);
     return h;
+}
+
+/// The uFits apps running.
+static NSArray<NSRunningApplication *> *uFitsApps(void)
+{
+    return [NSRunningApplication runningApplicationsWithBundleIdentifier:@"io.github.lmytime.uFits"];
+}
+
+/// Clicks "Update available" at p: ms until the uFits app runs (-1: not in
+/// 8 s). Quits it again.
+static double timeUpdateClick(NSWindow *w, NSPoint p)
+{
+    for (NSRunningApplication *a in uFitsApps())
+        [a forceTerminate];
+    spin(0.5);
+    double t0 = click(w, p), ms = -1;
+    while (uptime() - t0 < 8) {
+        spin(0.05);
+        if (uFitsApps().count) {
+            ms = (uptime() - t0) * 1000;
+            break;
+        }
+    }
+    spin(1);   // its update offer comes up
+    for (NSRunningApplication *a in uFitsApps())
+        [a forceTerminate];
+    return ms;
 }
 
 /// Clicks the HDU menu: ms until it is open (-1: not in 3 s). Closes it.
@@ -317,11 +349,17 @@ int main(int argc, const char *argv[])
 {
     @autoreleasepool {
         if (argc < 3) {
-            fprintf(stderr, "usage: clicklag OUTDIR FILE\n");
+            fprintf(stderr, "usage: clicklag OUTDIR FILE [--update]\n");
             return 2;
         }
         NSString *out = @(argv[1]), *path = @(argv[2]);
-        [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"FQCheckForUpdates"];   // no "Update available"
+        BOOL update = argc > 3 && !strcmp(argv[3], "--update");
+        // The layout here has "Update available" where the preview has it:
+        // nowhere, or (--update) as if uFits 99.0.0 had just been seen.
+        NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+        [d setBool:update forKey:@"FQCheckForUpdates"];
+        [d setObject:@"99.0.0" forKey:@"FQUpdateLatest"];
+        [d setObject:[NSDate date] forKey:@"FQUpdateChecked"];
         NSApplication *app = NSApplication.sharedApplication;
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];
         [app finishLaunching];
@@ -357,6 +395,14 @@ int main(int argc, const char *argv[])
             printf("FAIL no HDU menu or mode switch in the preview of %s\n", path.lastPathComponent.UTF8String);
             return 1;
         }
+        NSButton *notice = findView(root, NSButton.class, ^BOOL(id v) {
+            return [[v title] isEqualToString:@"Update available"];
+        });
+        if (update && !notice) {
+            printf("FAIL no \"Update available\" in the layout of the preview\n");
+            return 1;
+        }
+        NSRect nf = notice ? [notice convertRect:notice.bounds toView:root] : NSZeroRect;
         NSRect hf = [hdu convertRect:hdu.bounds toView:root], sf = [seg convertRect:seg.bounds toView:root];
 
         // The extension's preview, in a QLPreviewView.
@@ -376,6 +422,17 @@ int main(int argc, const char *argv[])
         // The bar is laid out from its right edge: so are the clicks.
         CGFloat dx = NSMaxX(rf) - NSWidth(root.bounds), dy = NSMinY(rf);
         NSPoint menuAt = NSMakePoint(dx + NSMidX(hf), dy + NSMidY(hf));
+        if (update) {
+            // "Update available" is on the left of the bar.
+            screenshot(w, [out stringByAppendingPathComponent:@"ui-update-ql.png"]);
+            double ms = timeUpdateClick(w, NSMakePoint(NSMinX(rf) + NSMidX(nf), dy + NSMidY(nf)));
+            [pv close];
+            printf("%s update in Quick Look: %s\n", ms >= 0 ? "ok  " : "FAIL",
+                   ms >= 0 ? [NSString stringWithFormat:@"a click on \"Update available\" opened uFits after %.0f ms",
+                                                        ms].UTF8String
+                           : "a click on \"Update available\" did not open uFits");
+            return ms >= 0 ? 0 : 1;
+        }
         NSPoint imageAt = NSMakePoint(dx + NSMinX(sf) + NSWidth(sf) / 6, dy + NSMidY(sf));
         NSPoint headerAt = NSMakePoint(dx + NSMinX(sf) + NSWidth(sf) * 5 / 6, dy + NSMidY(sf));
 

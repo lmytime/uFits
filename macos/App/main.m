@@ -10,7 +10,11 @@
 #import "FQPreviewController.h"
 #import "FQUpdate.h"
 
+#include <unistd.h>
+
 static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
+
+static void FQScheduleChecks(BOOL on);
 
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate>
 @end
@@ -41,6 +45,7 @@ static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
     _launched = YES;
     if (!_openedFiles)
         [self showWelcome:nil];
+    FQScheduleChecks(FQUpdate.enabled);   // in case uFits moved
     if (_updateAsked) {
         [self offerUpdate:_updateAsked.length ? _updateAsked : nil];
         _updateAsked = nil;
@@ -349,6 +354,7 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args)
 - (void)autoCheckChanged:(NSButton *)sender
 {
     FQUpdate.enabled = sender.state == NSControlStateValueOn;
+    FQScheduleChecks(FQUpdate.enabled);
 }
 
 /// uFits › Check for Updates…: looks now, and says what it found.
@@ -528,11 +534,61 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args)
 
 @end
 
+#pragma mark - Looking for updates in the background
+
+/// A launchd job runs uFits --check-for-updates-if-due every four hours
+/// (it goes online once a day at most), so that a newer version shows in
+/// the preview, which may not go online itself:
+/// ~/Library/LaunchAgents/<bundle id>.update.plist.
+static NSString *FQAgentLabel(void)
+{
+    return [NSBundle.mainBundle.bundleIdentifier ?: @"io.github.lmytime.uFits" stringByAppendingString:@".update"];
+}
+
+/// Sets up (on) or removes (off) that job, for this copy of uFits.
+static void FQScheduleChecks(BOOL on)
+{
+    NSString *path = [NSString stringWithFormat:@"%@/Library/LaunchAgents/%@.plist", NSHomeDirectory(), FQAgentLabel()];
+    NSString *domain = [NSString stringWithFormat:@"gui/%u", getuid()];
+    NSString *service = [NSString stringWithFormat:@"%@/%@", domain, FQAgentLabel()];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    if (!on) {
+        if ([fm fileExistsAtPath:path]) {
+            RunTool(@"/bin/launchctl", @[ @"bootout", service ]);
+            [fm removeItemAtPath:path error:nil];
+        }
+        return;
+    }
+    // Only where uFits is installed: not from a disk image or a copy that
+    // macOS moved aside (App Translocation).
+    NSString *exe = NSBundle.mainBundle.executablePath;
+    if (!exe || [exe hasPrefix:@"/Volumes/"] || [exe rangeOfString:@"/AppTranslocation/"].location != NSNotFound)
+        return;
+    NSDictionary *job = @{
+        @"Label" : FQAgentLabel(),
+        @"ProgramArguments" : @[ exe, @"--check-for-updates-if-due" ],
+        @"StartInterval" : @(4 * 3600),
+        @"RunAtLoad" : @YES,
+        @"ProcessType" : @"Background",
+        @"LowPriorityIO" : @YES,
+    };
+    if ([[NSDictionary dictionaryWithContentsOfFile:path] isEqualToDictionary:job])
+        return;   // as it should be (launchd loads it at login)
+    [fm createDirectoryAtPath:path.stringByDeletingLastPathComponent
+        withIntermediateDirectories:YES
+                         attributes:nil
+                              error:nil];
+    if (![job writeToURL:[NSURL fileURLWithPath:path] error:nil])
+        return;
+    RunTool(@"/bin/launchctl", @[ @"bootout", service ]);
+    RunTool(@"/bin/launchctl", @[ @"bootstrap", domain, path ]);
+}
+
 /// uFits --check-for-updates: says whether a newer version is out.
-static int CheckForUpdates(void)
+static int CheckForUpdates(BOOL force)
 {
     __block int status = -1;
-    [FQUpdate check:YES
+    [FQUpdate check:force
                done:^(NSString *newer, NSError *error) {
                    if (error)
                        fprintf(stderr, "uFits: %s\n", error.localizedDescription.UTF8String);
@@ -551,8 +607,15 @@ static int CheckForUpdates(void)
 int main(int argc, const char *argv[])
 {
     @autoreleasepool {
+        // From the command line (and launchd, and install.sh).
         if (argc > 1 && !strcmp(argv[1], "--check-for-updates"))
-            return CheckForUpdates();
+            return CheckForUpdates(YES);
+        if (argc > 1 && !strcmp(argv[1], "--check-for-updates-if-due"))
+            return FQUpdate.due ? CheckForUpdates(NO) : 0;
+        if (argc > 1 && !strcmp(argv[1], "--schedule-update-checks")) {
+            FQScheduleChecks(FQUpdate.enabled);
+            return 0;
+        }
         NSApplication *app = NSApplication.sharedApplication;
         AppDelegate *delegate = [AppDelegate new];
         app.delegate = delegate;

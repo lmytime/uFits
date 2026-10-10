@@ -9,17 +9,22 @@ static NSString *const kTriedKey = @"FQUpdateTried";       // when a look last b
 static NSString *const kEnabledKey = @"FQCheckForUpdates";
 static NSString *const kSkippedKey = @"FQSkippedVersion";
 
-/// The app's settings: its own defaults in the app; in an extension (whose
-/// identifier is the app's and a last part, ".Preview"), the app's, which
-/// its sandbox lets it read (Preview.entitlements).
+static BOOL FQInExtension(void)
+{
+    return [NSBundle.mainBundle.bundlePath.pathExtension isEqualToString:@"appex"];
+}
+
+/// The app's settings, where what was seen is kept too: its own defaults in
+/// the app; in an extension (whose identifier is the app's and a last
+/// part, ".Preview"), the app's, which its sandbox lets it read
+/// (Preview.entitlements).
 static NSUserDefaults *FQSettings(void)
 {
     static NSUserDefaults *settings;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        NSBundle *b = NSBundle.mainBundle;
-        NSString *ident = b.bundleIdentifier;
-        if ([b.bundlePath.pathExtension isEqualToString:@"appex"] && ident.pathExtension.length)
+        NSString *ident = NSBundle.mainBundle.bundleIdentifier;
+        if (FQInExtension() && ident.pathExtension.length)
             settings = [[NSUserDefaults alloc] initWithSuiteName:ident.stringByDeletingPathExtension];
         if (!settings)
             settings = NSUserDefaults.standardUserDefaults;
@@ -70,7 +75,7 @@ static BOOL FQRecent(id date, NSTimeInterval seconds)
 
 + (NSString *)latestVersion
 {
-    NSString *latest = [NSUserDefaults.standardUserDefaults stringForKey:kLatestKey];
+    NSString *latest = [FQSettings() stringForKey:kLatestKey];
     return latest.length ? latest : nil;
 }
 
@@ -109,20 +114,34 @@ static BOOL FQRecent(id date, NSTimeInterval seconds)
                                                            kRepo, version]];
 }
 
++ (BOOL)due
+{
+    // Once a day; after a failed look, again after an hour.
+    NSUserDefaults *state = FQSettings();
+    return self.enabled && !FQRecent([state objectForKey:kCheckedKey], 24 * 3600) &&
+           !FQRecent([state objectForKey:kTriedKey], 3600);
+}
+
 + (void)check:(BOOL)force done:(void (^)(NSString *, NSError *))done
 {
-    static BOOL busy;   // one look at a time (main thread)
-    NSUserDefaults *state = NSUserDefaults.standardUserDefaults;
-    // Once a day; after a failed look, again after an hour.
-    BOOL due = !FQRecent([state objectForKey:kCheckedKey], 24 * 3600) &&
-               !FQRecent([state objectForKey:kTriedKey], 3600);
-    if (busy || (!force && (!self.enabled || !due))) {
+    // One look at a time (on the main thread); whoever asks meanwhile gets
+    // its answer.
+    static BOOL busy;
+    static NSMutableArray<void (^)(NSString *, NSError *)> *waiting;
+    NSUserDefaults *state = FQSettings();
+    if (FQInExtension() || (!busy && !force && !self.due)) {
         if (done)
             dispatch_async(dispatch_get_main_queue(), ^{
                 done([self newerSeen], nil);
             });
         return;
     }
+    if (!waiting)
+        waiting = [NSMutableArray array];
+    if (done)
+        [waiting addObject:[done copy]];
+    if (busy)
+        return;
     busy = YES;
     [state setObject:[NSDate date] forKey:kTriedKey];
     // .../releases/latest leads to .../releases/tag/vX.Y.Z: no API (and no
@@ -158,10 +177,13 @@ static BOOL FQRecent(id date, NSTimeInterval seconds)
                             [state setObject:version forKey:kLatestKey];
                             [state setObject:[NSDate date] forKey:kCheckedKey];
                         }
-                        NSLog(@"uFits: the latest release is %@; this is %@", version ?: @"unknown",
-                              self.currentVersion);
-                        if (done)
-                            done([self newerSeen], version ? nil : error);
+                        NSLog(@"uFits: the latest release is %@; this is %@%@", version ?: @"unknown",
+                              self.currentVersion,
+                              version ? @"" : [@" — " stringByAppendingString:error.localizedDescription ?: @"?"]);
+                        NSArray<void (^)(NSString *, NSError *)> *calls = [waiting copy];
+                        [waiting removeAllObjects];
+                        for (void (^call)(NSString *, NSError *) in calls)
+                            call([self newerSeen], version ? nil : error);
                     });
                 }] resume];
     [session finishTasksAndInvalidate];

@@ -186,6 +186,8 @@ install: app
 	@echo "Installed $(DEST)/$(APP).app - select a FITS file in Finder and press Space."
 
 uninstall:
+	-launchctl bootout gui/$$(id -u)/$(BUNDLE_ID).update 2>/dev/null
+	rm -f ~/Library/LaunchAgents/$(BUNDLE_ID).update.plist
 	-pluginkit -r "$(DEST)/$(APP).app/Contents/PlugIns/uFitsPreview.appex"
 	-pluginkit -r "$(DEST)/$(APP).app/Contents/PlugIns/uFitsThumbnail.appex"
 	-$(LSREGISTER) -u "$(DEST)/$(APP).app"

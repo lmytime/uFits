@@ -27,6 +27,7 @@ REPO=lmytime/uFits
 VERSION=${UFITS_VERSION:-@VERSION@}   # filled in when a release is published
 APP=uFits.app
 IDS="io.github.lmytime.uFits.Preview io.github.lmytime.uFits.Thumbnail"
+AGENT=io.github.lmytime.uFits.update   # looks for a newer uFits (see the app)
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 TMP=
 MNT=
@@ -105,6 +106,8 @@ fetch() {
 
 uninstall_ufits() {
     stop
+    launchctl bootout "gui/$(id -u)/$AGENT" 2>/dev/null || true
+    rm -f "$HOME/Library/LaunchAgents/$AGENT.plist"
     gone=0
     for dir in ${UFITS_DEST:+"$UFITS_DEST"} /Applications "$HOME/Applications"; do
         [ -d "$dir/$APP" ] || continue
@@ -169,6 +172,8 @@ install_ufits() {
         pluginkit -e use -i "$id" 2>/dev/null || true
     done
     reset_quicklook
+    # Looking for updates now and then, unless turned off in the app.
+    "$dest/$APP/Contents/MacOS/uFits" --schedule-update-checks >/dev/null 2>&1 || true
 
     for id in $IDS; do
         pluginkit -m -i "$id" 2>/dev/null | grep -q "$id" ||

@@ -83,18 +83,20 @@ Time spent in the core alone, measured on a 4-core Linux VM:
 
 ## Updates
 
-`FQUpdate` (shared by the app and the preview extension) looks at most once a day, in
-the background, at where `github.com/lmytime/uFits/releases/latest` redirects
+`FQUpdate` (shared by the app and the preview extension) keeps what it learns in the
+app's settings, and only the app goes online: Quick Look runs previews in a sandbox
+without network access, whatever their entitlements say. A launchd job,
+`~/Library/LaunchAgents/io.github.lmytime.uFits.update.plist` (set up by the app when it
+opens and by `install.sh`; removed when "Check for updates" is turned off, and by
+`install.sh --uninstall`), runs `uFits --check-for-updates-if-due` every four hours. At
+most once a day that looks where `github.com/lmytime/uFits/releases/latest` redirects
 (`.../releases/tag/vX.Y.Z`, read with a `HEAD` request: no API, no rate limit). The
-preview does this itself, since the app is seldom opened: its sandbox allows outgoing
-connections and reading the app's settings (`Preview.entitlements`: "Check for updates"
-and a skipped version, kept by the app). A newer version puts **Update available** in
-the preview's bar; its click opens `ufits://update`, and the app runs that release's
-`install.sh` with `UFITS_FROM_APP=1` (the installer then leaves it running) and
-`UFITS_DEST` set to the folder it is in, then opens the new copy and quits.
-`uFits --check-for-updates` looks at once and prints what it found.
-
-Not supported: `HCOMPRESS_1` tiles (such files still open on their header), random groups.
+preview may read the app's settings (`Preview.entitlements`) and, when a newer version
+is out, shows **Update available** in its bar. Its click opens `ufits://update`: the app
+offers the update and runs that release's `install.sh` with `UFITS_FROM_APP=1` (the
+installer then leaves it running) and `UFITS_DEST` set to the folder it is in, then
+opens the new copy and quits. `uFits --check-for-updates` looks at once and prints what
+it found.
 
 ## Building
 

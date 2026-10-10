@@ -114,6 +114,9 @@ jobs:
           UFITS_FROM_APP=1 UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh
           pgrep -x uFits
           osascript -e 'quit app "uFits"' || pkill -x uFits || true
+          # A launchd job (set up by the installer) looks for updates now and then.
+          plutil -p ~/Library/LaunchAgents/io.github.lmytime.uFits.update.plist
+          launchctl print "gui/$(id -u)/io.github.lmytime.uFits.update" | grep -E "^\s*(state|program|path) =" || true
           pluginkit -m -v -i io.github.lmytime.uFits.Preview
           pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail
           /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
@@ -142,6 +145,18 @@ jobs:
         if: always()
         timeout-minutes: 3
         run: build/clicklag build/ql build/testdata/mef.fits
+      - name: Update notice in Quick Look
+        if: always()
+        timeout-minutes: 2
+        run: |
+          # As if the app had seen uFits 99.0.0 out (a preview may not go online:
+          # the app looks): the preview, which reads the app's settings, says
+          # "Update available", and a click on it opens the app to update.
+          defaults write io.github.lmytime.uFits FQUpdateLatest -string 99.0.0
+          status=0
+          build/clicklag build/ql build/testdata/mef.fits --update || status=$?
+          defaults delete io.github.lmytime.uFits FQUpdateLatest
+          exit $status
       - name: App windows (best effort)
         if: always()
         timeout-minutes: 2
@@ -161,7 +176,7 @@ jobs:
       - name: Quick Look logs
         if: always()
         run: |
-          # The preview's own look for a newer release (sandboxed: network)
+          # Looks for a newer release (the app, the launchd job)
           log show --last 15m --style compact --predicate 'eventMessage CONTAINS "the latest release is"' \
             | tail -5 || true
           log show --last 5m --style compact \
@@ -171,6 +186,7 @@ jobs:
         run: |
           sh install.sh --uninstall
           test ! -e /Applications/uFits.app
+          test ! -e ~/Library/LaunchAgents/io.github.lmytime.uFits.update.plist
           pluginkit -m -i io.github.lmytime.uFits.Preview || true
       - name: Images for review (base64)
         if: always()
