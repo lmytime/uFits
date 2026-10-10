@@ -2,15 +2,17 @@
 // QLThumbnailGenerator, so the installed extension is used) and save them,
 // at scale 1 and at scale 2, as on a Retina screen.
 //
-// Usage: qlthumb [--icon] OUTDIR FILE...
+// Usage: qlthumb [--icon] [--size POINTS] [--none] OUTDIR FILE...
 //        qlthumb --corner IMAGE...
 // Exits non-zero if any file does not get a real thumbnail, or one that
-// does not fill its bitmap (as one drawn at scale 1 in a scale 2 bitmap),
-// or, for files named orient-ll-* or orient-ul-* (tests/macos/
-// make_orient_files.py), one whose bright block is not in the lower or
-// upper left corner. --icon asks for Finder's icons (iconMode: Quick Look
-// may frame them); --corner only says where the bright block of each image
-// file is.
+// does not fill its bitmap (as one drawn at scale 1 in a scale 2 bitmap)
+// or has fewer pixels than its size times the scale, or, for files named
+// orient-ll-* or orient-ul-* (tests/macos/make_orient_files.py), one whose
+// bright block is not in the lower or upper left corner. --icon asks for
+// Finder's icons (iconMode: Quick Look may frame them); --size for another
+// size than 256 points; --none checks that no thumbnail comes (icons too
+// small for one keep the file's icon). --corner only says where the bright
+// block of each image file is.
 
 #import <Foundation/Foundation.h>
 #import <ImageIO/ImageIO.h>
@@ -95,7 +97,8 @@ int main(int argc, const char *argv[])
 {
     @autoreleasepool {
         int first = 1;
-        BOOL icon = argc > 1 && !strcmp(argv[1], "--icon");
+        BOOL icon = NO, none = NO;
+        double points = 256;
         if (argc > 1 && !strcmp(argv[1], "--corner")) {
             int failures = 0;
             for (int i = 2; i < argc; i++) {
@@ -114,10 +117,19 @@ int main(int argc, const char *argv[])
             }
             return failures ? 1 : 0;
         }
-        if (icon)
-            first++;
-        if (argc < first + 2) {
-            fprintf(stderr, "usage: qlthumb [--icon] OUTDIR FILE...\n       qlthumb --corner IMAGE...\n");
+        for (; first < argc && !strncmp(argv[first], "--", 2); first++) {
+            if (!strcmp(argv[first], "--icon"))
+                icon = YES;
+            else if (!strcmp(argv[first], "--none"))
+                none = YES;
+            else if (!strcmp(argv[first], "--size") && first + 1 < argc)
+                points = atof(argv[++first]);
+            else
+                break;
+        }
+        if (argc < first + 2 || points < 1 || !strncmp(argv[first], "--", 2)) {
+            fprintf(stderr, "usage: qlthumb [--icon] [--size POINTS] [--none] OUTDIR FILE...\n"
+                            "       qlthumb --corner IMAGE...\n");
             return 2;
         }
         NSString *outdir = @(argv[first]);
@@ -137,7 +149,7 @@ int main(int argc, const char *argv[])
             [url getResourceValue:&type forKey:NSURLContentTypeKey error:nil];
             QLThumbnailGenerationRequest *req = [[QLThumbnailGenerationRequest alloc]
                   initWithFileAtURL:url
-                               size:CGSizeMake(256, 256)
+                               size:CGSizeMake(points, points)
                               scale:scale
                 representationTypes:QLThumbnailGenerationRequestRepresentationTypeThumbnail];
             req.iconMode = icon;
@@ -155,6 +167,13 @@ int main(int argc, const char *argv[])
             long timedOut = dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC));
             double ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000;
             const char *tname = type ? type.identifier.UTF8String : "?";
+            if (none) {
+                BOOL ok = !timedOut && (!rep || rep.type != QLThumbnailRepresentationTypeThumbnail);
+                printf("%s %s: %s at %g points (type %s)\n", ok ? "ok  " : "FAIL", name.UTF8String,
+                       ok ? "no thumbnail" : timedOut ? "timed out" : "a thumbnail", points, tname);
+                failures += !ok;
+                continue;
+            }
             if (timedOut || !rep) {
                 printf("FAIL %s: %s (type %s)\n", name.UTF8String,
                        timedOut ? "timed out" : error.description.UTF8String, tname);
@@ -172,7 +191,9 @@ int main(int argc, const char *argv[])
             }
             CGSize drawn = drawnPart(cg);
             NSString *corner = brightCorner(cg), *want = wantedCorner(name);
-            BOOL ok = rep.type == QLThumbnailRepresentationTypeThumbnail &&
+            // As sharp as the screen: not a scale 1 image in a scale 2 icon.
+            BOOL sharp = MAX(CGImageGetWidth(cg), CGImageGetHeight(cg)) >= 0.95 * points * scale;
+            BOOL ok = rep.type == QLThumbnailRepresentationTypeThumbnail && sharp &&
                       (icon || (drawn.width > 0.9 && drawn.height > 0.9)) &&
                       (!want || [corner isEqualToString:want]);
             printf("%s %s: %zux%zu in %.0f ms, drawn on %.0f%% x %.0f%% of it (type %s)%s%s%s%s\n",

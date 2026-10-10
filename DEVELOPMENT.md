@@ -225,7 +225,8 @@ thumbnails through `QLThumbnailGenerator` (also as Finder asks for its icons) an
 previews through `QLPreviewView` (the machinery behind Finder's Quick Look), checks
 that thumbnails are the right way up (`tests/macos/make_orient_files.py`: a bright
 block on the first pixels belongs in the lower left of a FITS image, the upper left
-of an XISF one), takes a picture of Finder's icons, drives the preview's controls (HDU menu, plane
+of an XISF one) and as sharp as the screen, and that icons under 40 points (list and
+column views) keep the file's icon, takes a picture of Finder's icons, drives the preview's controls (HDU menu, plane
 slider, find bar), times mode switches and table scrolling with big files
 (`tests/macos/make_big_files.py`: a catalog of a million rows, a table 300 columns
 wide, a file of 200 HDUs), clicks the HDU menu and the mode switch of a preview in

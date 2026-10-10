@@ -151,6 +151,11 @@ jobs:
           # Which way up: a bright block on the first pixels belongs in the
           # lower left of a FITS image, the upper left of an XISF one.
           python3 ../../tests/macos/make_orient_files.py .
+          # Icons too small for a thumbnail (list and column views) keep the
+          # file's icon, and bigger ones still get one (a file not seen yet).
+          cp orient-ll.fits small-icon.fits
+          ../qlthumb --size 32 --none ../ql small-icon.fits
+          ../qlthumb ../ql small-icon.fits
           ../qlthumb ../ql orient-ll.fits orient-ll-big.fits orient-ll-rice.fits orient-ul-topdown.fits orient-ul.xisf
           # The same as Finder asks for its icons (Quick Look may frame them).
           ../qlthumb --icon ../ql orient-ll.fits orient-ll-big.fits orient-ul-topdown.fits orient-ul.xisf

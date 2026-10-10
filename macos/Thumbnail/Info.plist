@@ -38,8 +38,9 @@
 				<string>io.github.lmytime.ufits.ogip</string>
 				<!--@EXTRA_TYPES@-->
 			</array>
+			<!-- Smaller icons (list and column views) keep the file's icon. -->
 			<key>QLThumbnailMinimumDimension</key>
-			<integer>0</integer>
+			<integer>40</integer>
 		</dict>
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.quicklook.thumbnail</string>

@@ -132,7 +132,8 @@ $(PREVIEW)/Contents/MacOS/uFitsPreview: $(PREVIEW_OBJ) $(CORE_OBJ)
 
 $(THUMB)/Contents/MacOS/uFitsThumbnail: $(THUMB_OBJ) $(CORE_OBJ)
 	@mkdir -p $(dir $@)
-	$(CC) $(LDF) $(EXT) -Wl,-e,_NSExtensionMain -o $@ $^ -framework Foundation -framework CoreGraphics -framework QuickLookThumbnailing -lz -lexpat
+	$(CC) $(LDF) $(EXT) -Wl,-e,_NSExtensionMain -o $@ $^ -framework Foundation -framework CoreGraphics -framework ImageIO \
+	    -framework QuickLookThumbnailing -lz -lexpat
 
 # --- bundle metadata -------------------------------------------------------
 
