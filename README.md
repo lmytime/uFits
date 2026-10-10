@@ -52,17 +52,27 @@ The bar at the bottom of the preview has:
 - A menu of the file's HDUs (extensions such as `SCI`, `ERR`, `DQ`, or tables), or XISF
   images, when it has more than one.
 - A slider for the planes of a cube.
-- The stretch: automatic, linear (0.5–99.5 %) or min–max. Your choice is remembered.
+- The stretch: automatic, linear (0.5–99.5 %) or min–max. Your choice is remembered
+  (it is the same setting as in the uFits app).
 
 To zoom into an image, pinch, ⌥-click (⇧⌥-click zooms out), or scroll with ⌘ or ⌥
 held; in the uFits app ⌘+, ⌘− and ⌘0 work too. Zoomed in, the part on view is shown at
 full resolution.
 
 When a new version of uFits is out, **Update available** appears in the bar; open the
-uFits app and it updates itself in a few seconds. uFits looks for new versions on GitHub
-at most once a day, in the background; turn this off in the uFits app.
+uFits app and it updates itself in a few seconds.
 
 You can also open FITS and XISF files in the uFits app (File › Open, or drop them on its icon).
+
+## The uFits app
+
+Open uFits (in Applications) to see whether its Quick Look extensions are on, and to set:
+
+- **Show thumbnails in Finder's icon and gallery views.** Small icons (list and column
+  views) always keep the file's own icon.
+- **Previews open with** the automatic, linear or min–max stretch.
+- **Check for updates automatically (once a day)**: uFits asks GitHub, in the background,
+  whether a new version is out, and offers it. **Check Now** asks at once.
 
 ## Troubleshooting
 
@@ -70,6 +80,12 @@ You can also open FITS and XISF files in the uFits app (File › Open, or drop t
   whether its Quick Look extensions are on. If not, turn uFits on under System Settings ›
   General › Login Items & Extensions › Quick Look, then click **Reset Quick Look** in the
   app.
+- **Thumbnails fill only a quarter of the icon or are upside down, or the uFits app says
+  "Version 1.0.0".** An old copy of uFits is still on your Mac (the first builds were
+  numbered 1.0.0, higher than today's versions), and Quick Look uses it. The uFits app in
+  Applications lists other copies and moves them to the Trash, and the installer
+  unregisters them. To find them yourself:
+  `pluginkit -m -A -D -v -i io.github.lmytime.uFits.Thumbnail`.
 - **Another app takes over `.fits` files.** The uFits app shows which file type `.fits`
   maps to on your Mac; quitting or removing the other FITS app's Quick Look plug-in
   usually fixes it.

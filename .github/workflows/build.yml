@@ -208,6 +208,18 @@ jobs:
           build/clicklag build/ql build/testdata/mef.fits --update || status=$?
           defaults delete io.github.lmytime.uFits FQUpdateLatest
           exit $status
+      - name: Stretch chosen in Quick Look
+        if: always()
+        timeout-minutes: 2
+        run: |
+          # The stretch menu of a preview in Quick Look sets the app's setting:
+          # one setting for Quick Look and the app (Preview.entitlements).
+          defaults delete io.github.lmytime.uFits stretch 2>/dev/null || true
+          status=0
+          build/clicklag build/ql build/testdata/mef.fits --stretch || status=$?
+          defaults read io.github.lmytime.uFits stretch || true
+          defaults delete io.github.lmytime.uFits stretch 2>/dev/null || true
+          exit $status
       - name: App windows (best effort)
         if: always()
         timeout-minutes: 2

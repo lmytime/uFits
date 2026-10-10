@@ -19,6 +19,11 @@
 // it there), checks that the preview shows "Update available" in Quick
 // Look and that a click on it opens the uFits app (which it then quits) or,
 // if Quick Look will not, says how to update.
+//
+//        clicklag OUTDIR FILE --stretch
+// Picks "Min – max" from the stretch menu of the preview in Quick Look and
+// checks that it is then the app's setting (the caller removes it before
+// and after): the stretch is one setting for Quick Look and the app.
 
 #import <Cocoa/Cocoa.h>
 #import <Quartz/Quartz.h>
@@ -381,11 +386,12 @@ int main(int argc, const char *argv[])
 {
     @autoreleasepool {
         if (argc < 3) {
-            fprintf(stderr, "usage: clicklag OUTDIR FILE [--update]\n");
+            fprintf(stderr, "usage: clicklag OUTDIR FILE [--update | --stretch]\n");
             return 2;
         }
         NSString *out = @(argv[1]), *path = @(argv[2]);
         BOOL update = argc > 3 && !strcmp(argv[3], "--update");
+        BOOL stretch = argc > 3 && !strcmp(argv[3], "--stretch");
         // The layout here has "Update available" where the preview has it:
         // nowhere, or (--update) as if uFits 99.0.0 had just been seen.
         NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
@@ -477,6 +483,45 @@ int main(int argc, const char *argv[])
                                                             ms].UTF8String
                                : "neither opened uFits nor explained how to update");
             return what ? 0 : 1;
+        }
+        if (stretch) {
+            NSPopUpButton *menu = findView(root, NSPopUpButton.class, ^BOOL(id v) {
+                return [((NSPopUpButton *)v).itemArray.firstObject.title isEqualToString:@"Auto stretch"];
+            });
+            int got = -1;
+            if (menu) {
+                // Open the menu (on "Auto stretch"), go down two items to
+                // "Min – max" and take it.
+                NSRect f = [menu convertRect:menu.bounds toView:root];
+                NSSet *before = windowNumbers();
+                double t0 = click(w, NSMakePoint(dx + NSMidX(f), dy + NSMidY(f)));
+                while (!newMenu(before) && uptime() - t0 < 3)
+                    spin(0.01);
+                spin(0.3);
+                CGKeyCode keys[] = {125, 125, 36};   // Down, Down, Return
+                for (int k = 0; k < 3; k++) {
+                    post(CGEventCreateKeyboardEvent(NULL, keys[k], true));
+                    post(CGEventCreateKeyboardEvent(NULL, keys[k], false));
+                    spin(0.2);
+                }
+                spin(1);
+                CFStringRef app = CFSTR("io.github.lmytime.uFits");
+                CFPreferencesAppSynchronize(app);
+                CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("stretch"), app);
+                if (v && CFGetTypeID(v) == CFNumberGetTypeID())
+                    CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &got);
+                if (v)
+                    CFRelease(v);
+            }
+            screenshot(w, [out stringByAppendingPathComponent:@"ui-stretch-ql.png"]);
+            [pv close];
+            NSString *what = !menu      ? @"no stretch menu in the preview"
+                             : got == 2 ? @"Min – max, picked in the preview, is the app's setting"
+                                        : [NSString stringWithFormat:@"the app's setting is %d after picking Min – max "
+                                                                     @"(-1: none)",
+                                                                     got];
+            printf("%s stretch in Quick Look: %s\n", got == 2 ? "ok  " : "FAIL", what.UTF8String);
+            return got == 2 ? 0 : 1;
         }
         NSPoint imageAt = NSMakePoint(dx + NSMinX(sf) + NSWidth(sf) / 6, dy + NSMidY(sf));
         NSPoint headerAt = NSMakePoint(dx + NSMinX(sf) + NSWidth(sf) * 5 / 6, dy + NSMidY(sf));

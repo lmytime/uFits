@@ -124,7 +124,8 @@ opens and by `install.sh`; removed when "Check for updates" is turned off, and b
 `install.sh --uninstall`), runs `uFits --check-for-updates-if-due` every four hours. At
 most once a day that looks where `github.com/lmytime/uFits/releases/latest` redirects
 (`.../releases/tag/vX.Y.Z`, read with a `HEAD` request: no API, no rate limit). The
-preview may read the app's settings (`Preview.entitlements`) and, when a newer version
+preview may read and write the app's settings (`Preview.entitlements`; the stretch that
+previews open with is one setting for Quick Look and the app) and, when a newer version
 is out, shows **Update available** in its bar. A preview may not open other apps either
 (`deny(1) lsopen`): its click asks Quick Look to open `ufits://update` for it, and when
 Quick Look declines (it does), a popover says to open the uFits app. The app offers the
