@@ -75,7 +75,8 @@ static CGRect FQWholeContext(CGContextRef ctx, CGSize size)
                                           }];
     }
     if (@available(macOS 12.0, *))
-        reply.extensionBadge = @"FITS";
+        reply.extensionBadge =
+            [request.fileURL.pathExtension caseInsensitiveCompare:@"xisf"] == NSOrderedSame ? @"XISF" : @"FITS";
     handler(reply, nil);
 }
 

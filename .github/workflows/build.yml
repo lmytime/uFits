@@ -43,9 +43,13 @@ jobs:
           python3 tests/fuzz.py build/fqtool-asan build/testdata 500
 
   macos:
-    name: macOS app + Quick Look
-    runs-on: macos-15
-    timeout-minutes: 20
+    name: macOS app + Quick Look (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Version
@@ -144,6 +148,27 @@ jobs:
             footprint_f32.fits mef.fits spec1d.fits cube5.fits lc_tess.fits lc_mag.fits spec_sdss.fits pha.fits \
             catalog_wrap.fits catalog_gaia.fits xisf_mono.xisf xisf_rgb.xisf xisf_zstd.xisf \
             xisf_utf8_declaration.xisf xisf_uppercase_hex_zstd.xisf
+          # Which way up: a bright block on the first pixels belongs in the
+          # lower left of a FITS image, the upper left of an XISF one.
+          python3 ../../tests/macos/make_orient_files.py .
+          ../qlthumb ../ql orient-ll.fits orient-ll-big.fits orient-ll-rice.fits orient-ul-topdown.fits orient-ul.xisf
+          # The same as Finder asks for its icons (Quick Look may frame them).
+          ../qlthumb --icon ../ql orient-ll.fits orient-ll-big.fits orient-ul-topdown.fits orient-ul.xisf
+      - name: Finder icons (best effort)
+        if: always()
+        timeout-minutes: 3
+        run: |
+          # The orientation files in a Finder window, for review: blocks in
+          # the lower left (orient-ll-*) and upper left (orient-ul-*).
+          mkdir -p /tmp/orient
+          cp build/testdata/orient-* /tmp/orient/
+          osascript -e 'tell application "Finder"' -e 'activate' \
+            -e 'set w to make new Finder window to (POSIX file "/tmp/orient" as alias)' \
+            -e 'set current view of w to icon view' -e 'set bounds of w to {40, 60, 1240, 900}' \
+            -e 'end tell' || true
+          sleep 15
+          screencapture -x build/ql/app-finder.png || true
+          osascript -e 'tell application "Finder" to close every window' || true
       - name: Quick Look preview (QLPreviewView)
         if: always()
         timeout-minutes: 4
@@ -216,13 +241,14 @@ jobs:
         if: always()
         run: make zip
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && matrix.os == 'macos-15'
         with:
           name: uFits
           path: |
             build/uFits.zip
             build/ql/*.png
       - uses: actions/upload-artifact@v4
+        if: matrix.os == 'macos-15'
         with:
           name: uFits-dmg
           path: build/uFits-*.dmg
