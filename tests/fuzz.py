@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Throw damaged FITS files at fqtool and make sure it never crashes.
+"""Throw damaged FITS and XISF files at fqtool and make sure it never crashes.
 
 Usage: fuzz.py FQTOOL TESTDATA_DIR [ITERATIONS]
 
@@ -9,6 +9,7 @@ truncation, edited keyword values, swapped header blocks, odd header cards.
 """
 import os
 import random
+import re
 import subprocess
 import sys
 import tempfile
@@ -31,7 +32,40 @@ CARDS = [b"CONTINUE  'abc&'", b"CONTINUE  '&", b"CONTINUE  ", b"LONG    = 'abc&'
          b"COMMENT " + b"\t\x00\xff" * 24, b"KEY     =", b"KEY     = '", b"        = 'x' / y", b"END"]
 
 
+def mutate_xisf(data):
+    d = bytearray(data)
+    end = min(len(d), 16 + int.from_bytes(d[8:12], "little"))
+    kind = rnd.randrange(6)
+    if kind == 0:   # malformed XML, including non-UTF-8 bytes
+        for _ in range(rnd.randrange(1, 30)):
+            d[rnd.randrange(16, end)] = rnd.randrange(256)
+    elif kind == 1:  # inconsistent or oversized XML header length
+        d[8:12] = rnd.choice([0, 1, 15, len(d), 0x7fffffff, 0xffffffff]).to_bytes(4, "little")
+    elif kind == 2:  # corrupt attached compressed/pixel data
+        match = re.search(br'location="attachment:(\d+):', d[16:end])
+        start = min(len(d) - 1, int(match[1]) if match else end)
+        for _ in range(rnd.randrange(1, 100)):
+            d[rnd.randrange(start, len(d))] = rnd.randrange(256)
+    elif kind == 3:
+        d = d[:rnd.randrange(1, len(d))]
+    elif kind == 4:  # mutate attribute values without shifting attachment offsets
+        attrs = list(re.finditer(br'(?:geometry|sampleFormat|location|compression|subblocks|byteOrder)="([^"]*)"',
+                                 d[16:end]))
+        if attrs:
+            attr = rnd.choice(attrs)
+            a, b = (16 + v for v in attr.span(1))
+            value = rnd.choice([b"0", b"-1", b"9223372036854775807", b"unknown", b"0:0:0", b"1,0:0,1"])
+            d[a:b] = value.ljust(b - a)[:b - a]
+    else:
+        a = rnd.randrange(16, len(d))
+        b = min(len(d), a + rnd.randrange(1, 1000))
+        d[a:b] = bytes(b - a)
+    return bytes(d)
+
+
 def mutate(data):
+    if data.startswith(b"XISF0100"):
+        return mutate_xisf(data)
     d = bytearray(data)
     kind = rnd.randrange(7)
     if kind == 0:   # flip bytes anywhere
@@ -68,15 +102,17 @@ def mutate(data):
 
 def main():
     files = [os.path.join(DATA, f) for f in sorted(os.listdir(DATA))
-             if f.endswith(".fits") and os.path.getsize(os.path.join(DATA, f)) < 2_000_000]
-    bad = 0
-    env = dict(os.environ, ASAN_OPTIONS="detect_leaks=1:abort_on_error=0",
+             if f.endswith((".fits", ".xisf")) and os.path.getsize(os.path.join(DATA, f)) < 2_000_000]
+    bad, xisf_count = 0, 0
+    env = dict(os.environ, ASAN_OPTIONS=f"detect_leaks={int(sys.platform != 'darwin')}:abort_on_error=0",
                UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1")
     with tempfile.TemporaryDirectory() as tmp:
-        target = os.path.join(tmp, "m.fits")
         png = os.path.join(tmp, "o.png")
         for it in range(N):
             src = rnd.choice(files)
+            suffix = os.path.splitext(src)[1]
+            xisf_count += suffix == ".xisf"
+            target = os.path.join(tmp, "m" + suffix)
             data = mutate(open(src, "rb").read())
             open(target, "wb").write(data)
             region = ",".join(str(rnd.choice([-50, 0, 3, 17, 200, 5000])) for _ in range(4))
@@ -92,19 +128,19 @@ def main():
                                        env=env, timeout=30)
                 except subprocess.TimeoutExpired:
                     bad += 1
-                    keep = os.path.join(os.path.dirname(FQ), f"hang_{it}.fits")
+                    keep = os.path.join(os.path.dirname(FQ), f"hang_{it}{suffix}")
                     open(keep, "wb").write(data)
                     print(f"HANG {os.path.basename(src)} {' '.join(args[:1] + args[3:])} -> {keep}")
                     break
                 if r.returncode not in (0, 1) or "ERROR: AddressSanitizer" in r.stderr \
                         or "runtime error" in r.stderr or "LeakSanitizer" in r.stderr:
                     bad += 1
-                    keep = os.path.join(os.path.dirname(FQ), f"crash_{it}.fits")
+                    keep = os.path.join(os.path.dirname(FQ), f"crash_{it}{suffix}")
                     open(keep, "wb").write(data)
                     print(f"CRASH {os.path.basename(src)} {args[0]} rc={r.returncode} -> {keep}")
                     print(r.stderr[-3000:])
                     break
-    print(f"{N} mutated files, {bad} problems")
+    print(f"{N} mutated files ({xisf_count} XISF), {bad} problems")
     sys.exit(1 if bad else 0)
 
 

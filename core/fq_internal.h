@@ -28,6 +28,8 @@ static inline uint64_t fq_be64(const uint8_t *p) { uint64_t v; memcpy(&v, p, 8);
 
 static inline int fqi_finite(float v) { return (v - v) == 0.0f; }
 
+typedef struct fqi_xisf_image fqi_xisf_image;
+
 /* One HDU, as far as the core needs to know it. */
 typedef struct {
     int64_t hdr_off, hdr_len, data_off, data_len, next_off;
@@ -40,6 +42,7 @@ typedef struct {
     int groups, zimage;
     char xtension[20];
     char extname[72];
+    fqi_xisf_image *xisf;     /* XISF metadata; NULL for a FITS HDU */
 } hdu_t;
 
 struct fq_file {
@@ -57,6 +60,7 @@ struct fq_file {
     int nhdu, hcap;
     int64_t scan_off;
     int scan_done;
+    int xisf;
 };
 
 /* An HDU holding an image (plain or tile compressed). */
@@ -106,6 +110,17 @@ const char *fqi_type_name(int bitpix, double bscale, double bzero);
    anything but printable ASCII as '?'. 1 = string, 0 = other, -1 = none. */
 int fqi_card_value(const char *card, char *out, size_t outlen);
 void fqi_dims_text(char *b, size_t n, int naxis, const int64_t *ax);
+
+/* fq_xisf.c: native XISF samples feed the same image renderer as FITS. */
+int fqi_xisf_open(fq_file *f, char *err, size_t errlen);
+void fqi_xisf_free(fqi_xisf_image *x);
+int fqi_xisf_describe(const hdu_t *h, imgdesc *d);
+int fqi_xisf_keyword(const hdu_t *h, const char *key, char *out, size_t n);
+char *fqi_xisf_cards(const hdu_t *h, size_t *len);
+const char *fqi_xisf_type(const hdu_t *h);
+const char *fqi_xisf_error(const hdu_t *h);
+int fqi_xisf_load(fq_file *f, hdu_t *h, const uint8_t **data,
+                  int *big_endian, int *stride, char *err, size_t errlen);
 
 /* fq_image.c */
 int fqi_describe_image(fq_file *f, int idx, imgdesc *d);

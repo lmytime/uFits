@@ -35,6 +35,7 @@
 			<key>QLSupportedContentTypes</key>
 			<array>
 				<string>gov.nasa.gsfc.fits</string>
+				<string>io.github.lmytime.ufits.xisf</string>
 				<string>io.github.lmytime.ufits.fz</string>
 				<string>io.github.lmytime.ufits.ogip</string>
 				<!-- .img: as often a FITS image from an X-ray mission as a disk

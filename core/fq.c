@@ -180,9 +180,15 @@ static fq_file *finish_open(fq_file *f, const uint8_t *bytes, size_t len,
         f->data = bytes;
         f->size = (int64_t)len;
     }
+    if (f->size >= 8 && !memcmp(f->data, "XISF0100", 8)) {
+        if (fqi_xisf_open(f, err, errlen) == 0)
+            return f;
+        fq_close(f);
+        return NULL;
+    }
     if (f->size < CARD || memcmp(f->data, "SIMPLE  =", 9) != 0) {
         fq_close(f);
-        fqi_seterr(err, errlen, "not a FITS file");
+        fqi_seterr(err, errlen, "not a FITS or XISF file");
         return NULL;
     }
     return f;
@@ -201,9 +207,9 @@ fq_file *fq_open(const char *path, char *err, size_t errlen)
         fqi_seterr(err, errlen, "not a regular file");
         return NULL;
     }
-    if (st.st_size < CARD) {
+    if (st.st_size < 16) {
         close(fd);
-        fqi_seterr(err, errlen, "file too small to be FITS");
+        fqi_seterr(err, errlen, "file too small to be FITS or XISF");
         return NULL;
     }
     size_t len = (size_t)st.st_size;
@@ -226,8 +232,8 @@ fq_file *fq_open(const char *path, char *err, size_t errlen)
 
 fq_file *fq_open_memory(const void *data, size_t size, int copy, char *err, size_t errlen)
 {
-    if (!data || size < CARD) {
-        fqi_seterr(err, errlen, "buffer too small to be FITS");
+    if (!data || size < 16 || size > INT64_MAX) {
+        fqi_seterr(err, errlen, "invalid FITS or XISF buffer size");
         return NULL;
     }
     fq_file *f = calloc(1, sizeof *f);
@@ -271,6 +277,8 @@ void fq_close(fq_file *f)
             free(f->map);
     }
     free(f->owned);
+    for (int i = 0; i < f->nhdu; i++)
+        fqi_xisf_free(f->hdu[i].xisf);
     free(f->hdu);
     free(f);
 }
@@ -557,6 +565,8 @@ static const char *hdu_card(const fq_file *f, const hdu_t *h, const char *key)
 
 int fqi_kw_str(const fq_file *f, const hdu_t *h, const char *key, char *out, size_t n)
 {
+    if (h->xisf)
+        return fqi_xisf_keyword(h, key, out, n);
     const char *c = hdu_card(f, h, key);
     return c && fqi_card_value(c, out, n) >= 0;
 }
@@ -717,6 +727,8 @@ char *fq_header_cards(fq_file *f, int idx, size_t *len)
     hdu_t *h = fqi_get_hdu(f, idx);
     if (!h)
         return NULL;
+    if (h->xisf)
+        return fqi_xisf_cards(h, len);
     const char *p = (const char *)f->data + h->hdr_off;
     const int64_t n = h->hdr_len / CARD;
     fqi_sbuf out = { 0 };
@@ -909,6 +921,8 @@ char *fq_header_text(fq_file *f, int idx, size_t *len)
     hdu_t *h = fqi_get_hdu(f, idx);
     if (!h)
         return NULL;
+    if (h->xisf)
+        return fq_header_layout(f, idx, len, NULL, NULL);
     int64_t n = h->hdr_len / CARD;
     char *out = malloc((size_t)n * (CARD + 1) + 1);
     if (!out)
@@ -985,7 +999,10 @@ char *fq_summary_text(fq_file *f)
             snprintf(desc, sizeof desc, "no data");
         } else {
             fqi_dims_text(dims, sizeof dims, h.naxis, h.naxes);
-            snprintf(desc, sizeof desc, "%s  %s", dims, fqi_type_name(h.bitpix, h.bscale, h.bzero));
+            snprintf(desc, sizeof desc, "%s  %s", dims, h.xisf ? fqi_xisf_type(&h) :
+                     fqi_type_name(h.bitpix, h.bscale, h.bzero));
+            if (h.xisf)
+                type = "XISF";
         }
         int k = snprintf(out + o, cap - o, "%3d  %-12s %-10s %s\n", i, name, type, desc);
         if (k < 0 || (size_t)k >= cap - o)

@@ -1,7 +1,7 @@
 /*
- * fq.h - uFits core: a small, fast FITS reader and preview renderer.
+ * fq.h - uFits core: a small, fast FITS/XISF reader and preview renderer.
  *
- * Portable C99. The only dependency is zlib. Nothing here knows about
+ * Portable C99, using zlib, Expat and a bundled Zstandard decoder. Nothing knows about
  * macOS; the Quick Look extensions and the command line tool are thin
  * wrappers around these calls.
  *
@@ -60,7 +60,8 @@ typedef struct {
     int kind;                 /* FQ_KIND_* */
     int hdu;                  /* HDU that was rendered (0 = primary) */
     char extname[72];
-    int bitpix;               /* BITPIX, or ZBITPIX for compressed images */
+    int bitpix;               /* FITS BITPIX/ZBITPIX; XISF: positive unsigned
+                                 integer precision, negative float precision */
     int naxis;
     int64_t naxes[FQ_MAXAXES];
     int compressed;
@@ -127,7 +128,8 @@ typedef struct {
     fq_kept *kept;             /* binned values (opts.keep), private */
 } fq_image;
 
-/* Open a FITS file (plain or gzip compressed). Returns NULL on failure and
+/* Open a FITS file (plain or gzip compressed) or monolithic XISF 1.0 file.
+   Returns NULL on failure and
    writes a message to err. */
 fq_file *fq_open(const char *path, char *err, size_t errlen);
 /* Same for a buffer in memory. With copy == 0 the buffer must outlive the
@@ -150,12 +152,12 @@ fq_image *fq_render_detail(fq_file *f, const fq_opts *opts, const fq_stretch *st
                            char *err, size_t errlen);
 void fq_image_free(fq_image *img);
 
-/* Binned values before stretching, nch planes of w*h floats, FITS row
-   order (first row = bottom row). For tests and tools. Free with free(). */
+/* Binned values before stretching, nch planes of w*h floats, in source row
+   order (FITS usually bottom-up, XISF top-down). Free with free(). */
 float *fq_decode_float(fq_file *f, const fq_opts *opts, int *w, int *h,
                        int *nch, fq_info *info, char *err, size_t errlen);
 
-/* Number of HDUs (reads every header in the file). */
+/* Number of HDUs, or images in XISF (reads every header in the file). */
 int fq_hdu_count(fq_file *f);
 
 typedef struct {

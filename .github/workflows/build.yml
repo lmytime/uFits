@@ -29,14 +29,17 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: .github/workflows/build.yml
-      - run: pip install numpy astropy
+      - run: pip install numpy astropy lz4 zstandard
+      - run: sudo apt-get update && sudo apt-get install -y libexpat1-dev
       - name: Decode and binning vs astropy
         run: make test
       - name: AddressSanitizer + UBSan, damaged files
         run: |
           gcc -std=c99 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined \
-              -Icore -o build/fqtool-asan tools/fqtool.c core/*.c -lz -lm -lpthread
+              -Icore -Ithird_party/zstd -o build/fqtool-asan tools/fqtool.c core/*.c \
+              third_party/zstd/zstddeclib.c -lz -lexpat -lm -lpthread
           python3 tests/test_core.py build/fqtool-asan build/testdata > /dev/null
+          python3 tests/test_xisf.py build/fqtool-asan build/testdata
           python3 tests/fuzz.py build/fqtool-asan build/testdata 500
 
   macos:
@@ -93,7 +96,7 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: .github/workflows/build.yml
-      - run: pip install numpy astropy
+      - run: pip install numpy astropy lz4 zstandard
       - name: Core tests (Apple clang, GCD)
         run: make test
       - name: Install and register the extensions
@@ -136,7 +139,7 @@ jobs:
           ../qlthumb ../ql image.img || true
           ../qlthumb ../ql f32.fits u16.fits rgb.fits bayer_rggb.fits rice_f32_sd1.fits \
             footprint_f32.fits mef.fits spec1d.fits cube5.fits lc_tess.fits lc_mag.fits spec_sdss.fits pha.fits \
-            catalog_wrap.fits catalog_gaia.fits
+            catalog_wrap.fits catalog_gaia.fits xisf_mono.xisf xisf_rgb.xisf xisf_zstd.xisf
       - name: Quick Look preview (QLPreviewView)
         if: always()
         timeout-minutes: 4
@@ -145,7 +148,7 @@ jobs:
           # image.img is FITS; disk.img a disk image (Quick Look shows it as usual).
           cp ../uFits-*.dmg disk.img
           ../qlpreview ../ql f32.fits spec1d.fits mef.fits lc_tess.fits catalog_gaia.fits tables_mixed.fits \
-            spectrum.pha events.evt image.img disk.img
+            spectrum.pha events.evt image.img disk.img xisf_mono.xisf xisf_multi.xisf xisf_zstd.xisf
       - name: Preview UI (HDU menu, plane slider, plots, tables, find bar, timings)
         if: always()
         timeout-minutes: 6

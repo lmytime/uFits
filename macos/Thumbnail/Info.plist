@@ -33,6 +33,7 @@
 			<key>QLSupportedContentTypes</key>
 			<array>
 				<string>gov.nasa.gsfc.fits</string>
+				<string>io.github.lmytime.ufits.xisf</string>
 				<string>io.github.lmytime.ufits.fz</string>
 				<string>io.github.lmytime.ufits.ogip</string>
 				<!--@EXTRA_TYPES@-->

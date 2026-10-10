@@ -539,6 +539,8 @@ int fqi_describe_image(fq_file *f, int idx, imgdesc *d)
         return 0;
     memset(d, 0, sizeof *d);
     d->hdu = idx;
+    if (h->xisf)
+        return fqi_xisf_describe(h, d);
     int is_img = idx == 0 || !strcmp(h->xtension, "IMAGE") || !strcmp(h->xtension, "IUEIMAGE");
     if (is_img && !h->groups) {
         if (h->naxis < 1)
@@ -588,7 +590,11 @@ static int select_target(fq_file *f, const fq_opts *o, imgdesc *d, int *table, c
         }
         if (fqi_describe_image(f, o->hdu, d)) {
             if (!d->supported) {
-                fqi_seterr(err, errlen, "%s compression is not supported", d->cmptype);
+                hdu_t *h = fqi_get_hdu(f, o->hdu);
+                if (h->xisf)
+                    fqi_seterr(err, errlen, "%s", fqi_xisf_error(h));
+                else
+                    fqi_seterr(err, errlen, "%s compression is not supported", d->cmptype);
                 return -1;
             }
             return 0;
@@ -630,7 +636,7 @@ static int select_target(fq_file *f, const fq_opts *o, imgdesc *d, int *table, c
             continue;
         }
         int64_t W = t.naxes[0], H = t.naxis > 1 ? t.naxes[1] : 1;
-        if (W >= 2 && H >= 2) {
+        if ((W >= 2 && H >= 2) || h->xisf) {
             *d = t;
             return 0;
         }
@@ -644,7 +650,11 @@ static int select_target(fq_file *f, const fq_opts *o, imgdesc *d, int *table, c
         return 0;
     }
     if (haveunsup) {
-        fqi_seterr(err, errlen, "%s compression is not supported", unsup.cmptype);
+        hdu_t *h = fqi_get_hdu(f, unsup.hdu);
+        if (h->xisf)
+            fqi_seterr(err, errlen, "%s", fqi_xisf_error(h));
+        else
+            fqi_seterr(err, errlen, "%s compression is not supported", unsup.cmptype);
         return -1;
     }
     if (tables)
@@ -656,10 +666,11 @@ static int select_target(fq_file *f, const fq_opts *o, imgdesc *d, int *table, c
 
 /* ------------------------------------------------------- pixel access */
 
-enum { F_U8, F_I16, F_I32, F_I64, F_F32, F_F64, F_F32N };
+enum { F_U8, F_I16, F_I32, F_I64, F_F32, F_F64, F_F32N, F_XISF };
 
 typedef struct {
     int fmt, bpp;
+    int bitpix, big_endian, stride; /* XISF scalar format and sample stride */
     double scale, zero, ref;
     int has_blank;
     int64_t blank;
@@ -676,11 +687,37 @@ static inline const uint8_t *src_row(const src_t *s, int slot, int64_t y)
         return NULL;
     if (s->rows)
         return (const uint8_t *)s->rows[(int64_t)slot * s->H + y];
-    int64_t rb = s->W * s->bpp;
-    int64_t off = (s->plane[slot] * s->H + y) * rb;
-    if (off + rb > s->avail)
+    int stride = s->stride;
+    int64_t rb = s->W * s->bpp * stride;
+    int64_t off = stride > 1 ? y * rb + s->plane[slot] * s->bpp :
+                  (s->plane[slot] * s->H + y) * rb;
+    int64_t used = (s->W - 1) * s->bpp * stride + s->bpp;
+    if (off > s->avail || used > s->avail - off)
         return NULL;
     return s->base + off;
+}
+
+static double xisf_sample(const src_t *s, const uint8_t *p)
+{
+    uint64_t u = 0;
+    if (s->big_endian) {
+        for (int i = 0; i < s->bpp; i++)
+            u = (u << 8) | p[i];
+    } else {
+        memcpy(&u, p, (size_t)s->bpp);
+    }
+    if (s->bitpix == -32) {
+        uint32_t bits = (uint32_t)u;
+        float v;
+        memcpy(&v, &bits, 4);
+        return v;
+    }
+    if (s->bitpix == -64) {
+        double v;
+        memcpy(&v, &u, 8);
+        return v;
+    }
+    return (double)u;
 }
 
 /* Convert n pixels at indices IDX (an expression of x0, i, step) to floats. */
@@ -695,6 +732,10 @@ static void NAME(const src_t *s, const uint8_t *row, int64_t x0, int64_t step,  
     const int hb = s->has_blank;                                                 \
     const int64_t bl = s->blank;                                                 \
     switch (s->fmt) {                                                            \
+    case F_XISF:                                                                \
+        for (int64_t i = 0; i < n; i++)                                          \
+            out[i] = (float)(xisf_sample(s, p + (IDX) * s->bpp * s->stride) - s->ref); \
+        break;                                                                   \
     case F_U8:                                                                   \
         for (int64_t i = 0; i < n; i++) {                                        \
             uint8_t v = p[IDX];                                                  \
@@ -968,7 +1009,7 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
     for (int a = 2; a < d->naxis; a++)
         P->nplanes = fqi_mul_sat(P->nplanes, d->naxes[a]);
     P->kind = (P->H == 1 || (P->H <= 8 && P->W >= 64 * P->H)) ? FQ_KIND_PLOT : FQ_KIND_IMAGE;
-    if (force_image)
+    if (force_image || h->xisf)
         P->kind = FQ_KIND_IMAGE;
 
     /* Colour: three plane cubes and Bayer mosaics. */
@@ -1077,10 +1118,28 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
     src_t *s = &P->src;
     s->W = P->W;
     s->H = P->H;
+    s->stride = 1;
     s->scale = h->bscale;
     s->zero = h->bzero;
     s->has_blank = h->has_blank && h->bitpix > 0;
     s->blank = h->blank;
+    if (h->xisf) {
+        s->fmt = F_XISF;
+        s->bitpix = h->bitpix;
+        s->bpp = abs(h->bitpix) / 8;
+        s->avail = h->data_len;
+        if (fqi_xisf_load(f, h, &s->base, &s->big_endian, &s->stride, err, errlen))
+            return -1;
+        if (!o->exact && (s->bpp >= 4)) {
+            const uint8_t *r = src_row(s, 0, P->H / 2);
+            if (r) {
+                double v = xisf_sample(s, r + (P->W / 2) * s->bpp * s->stride);
+                if (isfinite(v) && fabs(v) > 1e5)
+                    s->ref = v;
+            }
+        }
+        return 0;
+    }
     if (d->compressed) {
         s->fmt = F_F32N;
         s->bpp = 4;
@@ -2025,16 +2084,19 @@ int fq_list_hdus(fq_file *f, fq_hdu_entry *out, int max)
         imgdesc d;
         fqi_plotspec ps;
         if (fqi_describe_image(f, i, &d)) {
-            if (!d.supported)
+            if (!d.supported && !h->xisf)
                 continue;
             int64_t W = d.naxes[0], H = d.naxis > 1 ? d.naxes[1] : 1;
             e.kind = (H == 1 || (H <= 8 && W >= 64 * H)) ? FQ_KIND_PLOT : FQ_KIND_IMAGE;
+            if (h->xisf)
+                e.kind = FQ_KIND_IMAGE;
             for (int a = 2; a < d.naxis; a++)
                 e.nplanes = fqi_mul_sat(e.nplanes, d.naxes[a]);
             char dims[64];
             fqi_dims_text(dims, sizeof dims, d.naxis, d.naxes);
             h = fqi_get_hdu(f, i);
-            snprintf(e.desc, sizeof e.desc, "%s %s", dims, fqi_type_name(d.bitpix, h->bscale, h->bzero));
+            snprintf(e.desc, sizeof e.desc, "%s %s", dims, h->xisf ? fqi_xisf_type(h) :
+                     fqi_type_name(d.bitpix, h->bscale, h->bzero));
         } else if (fqi_table_plot_spec(f, i, &ps)) {
             e.kind = FQ_KIND_PLOT;
             e.table = 1;

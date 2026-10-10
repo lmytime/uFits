@@ -601,6 +601,18 @@ int main(int argc, const char *argv[])
         [app activateIgnoringOtherApps:YES];
         NSView *root = vc.view;
 
+        // XISF uses the same image, header and selection controls as FITS.
+        load(vc, [data stringByAppendingPathComponent:@"xisf_multi.xisf"]);
+        capture(@"xisf-multi", @"luminance");
+        pickHDU(root, 1);
+        capture(@"xisf-color", @"color");
+        pickMode(root, 2);
+        expectListing(@"xisf-header", @"sampleFormat");
+        pickMode(root, 0);
+        capture(@"xisf-image", @"mode=0 [Image|Table(off)|Header]");
+        load(vc, [data stringByAppendingPathComponent:@"xisf_zstd.xisf"]);
+        capture(@"xisf-zstd", @"mode=0 [Image|Table(off)|Header]");
+
         // Multi-extension file: the HDU menu switches between SCI, ERR and DQ.
         load(vc, [data stringByAppendingPathComponent:@"mef.fits"]);
         capture(@"mef", @"menu=\"HDU 1  SCI — 256 × 256 float32\" (4 items) shows \"HDU 1 SCI\"");
