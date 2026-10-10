@@ -293,13 +293,17 @@ static int checkZoom(NSWindow *w, NSRect area)
         clickWith(w, mid, kCGEventFlagMaskAlternate | kCGEventFlagMaskShift);
         spin(0.7);
     }
-    if (waitPart(w, margin, whole, YES, uptime()) < 0)
+    if (waitPart(w, margin, whole, YES, uptime()) < 0) {
         printf("     (the whole image did not come back)\n");
+        return failed;
+    }
 
-    // Keys reach the preview once it has been clicked, as in Quick Look.
+    // Keys reach the preview only if Quick Look passes them on (it does
+    // not have to: not checked).
     double plus = waitPart(w, margin, whole, NO, commandKey(24));    // =
-    double zero = waitPart(w, margin, whole, YES, commandKey(29));   // 0
-    printf("     Command + zoomed in after %6.1f ms, Command 0 showed it whole after %6.1f ms\n", plus, zero);
+    double zero = plus < 0 ? -1 : waitPart(w, margin, whole, YES, commandKey(29));   // 0
+    printf("     Command + zoomed in after %6.1f ms, Command 0 showed it whole after %6.1f ms%s\n", plus, zero,
+           plus < 0 ? " (keys not passed on)" : "");
     return failed;
 }
 

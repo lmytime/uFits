@@ -146,6 +146,13 @@ static const CGFloat kMaxZoom = 32;
     [self zoomBy:pow(1.01, dy) at:[self convertPoint:event.locationInWindow fromView:nil]];
 }
 
+/// In Quick Look the preview's window is never the key window: without
+/// this, it would ignore clicks.
+- (BOOL)acceptsFirstMouse:(NSEvent *)event
+{
+    return YES;
+}
+
 /// Option-click zooms in, Shift-Option-click out, as in Quick Look.
 - (void)mouseDown:(NSEvent *)event
 {
