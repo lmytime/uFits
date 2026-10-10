@@ -571,13 +571,21 @@ static void timeJump(NSString *name, NSInteger row)
            name.UTF8String, ms, (unsigned long)rows.location + 1, (unsigned long)NSMaxRange(rows), draw, ink * 100);
 }
 
-/// Opens path and reports how long until it is on screen.
+/// Opens path and reports how long until what it opens on is on screen (a
+/// file with only tables opens on one, read in the background).
 static void timeLoad(FQPreviewController *vc, NSString *name, NSString *path)
 {
     CFTimeInterval t0 = CACurrentMediaTime();
     load(vc, path);
+    NSSegmentedControl *seg = modeSwitch(gWindow.contentView);
+    NSInteger mode = seg ? seg.selectedSegment : 0;
+    while (!contentReady(mode) && msSince(t0) < 20000)
+        spin(0.005);
     [gWindow displayIfNeeded];
-    printf("ok   time %-31s %7.1f ms\n", name.UTF8String, msSince(t0));
+    BOOL ok = contentReady(mode);
+    if (!ok)
+        gFailures++;
+    printf("%s time %-31s %7.1f ms\n", ok ? "ok  " : "FAIL", name.UTF8String, msSince(t0));
 }
 
 int main(int argc, const char *argv[])
