@@ -1019,9 +1019,6 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     if (v == _updateVersion || [v isEqualToString:_updateVersion])
         return;
     _updateVersion = v;
-    _update.toolTip = v ? [NSString stringWithFormat:@"uFits %@ is out (this is %@). Click to update.", v,
-                                                     FQUpdate.currentVersion]
-                        : nil;
     [self layoutBar];
 }
 

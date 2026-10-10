@@ -164,20 +164,22 @@ static NSArray<NSRunningApplication *> *uFitsApps(void)
     return [NSRunningApplication runningApplicationsWithBundleIdentifier:@"io.github.lmytime.uFits"];
 }
 
-/// A window on screen that was not in before, of the preview (or of Quick
-/// Look, showing it).
-static NSDictionary *newWindow(NSSet<NSNumber *> *before)
+/// A window on screen that was not in before, near point at (screen
+/// coordinates, top left origin): a popover there, whichever process holds
+/// it (the preview, Quick Look or this one, hosting the preview).
+static NSDictionary *newWindowNear(NSSet<NSNumber *> *before, CGPoint at)
 {
     NSDictionary *found = nil;
     CFArrayRef list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
     for (NSDictionary *w in (__bridge NSArray *)list) {
-        NSString *owner = w[(__bridge id)kCGWindowOwnerName] ?: @"";
-        if (!found && ![before containsObject:w[(__bridge id)kCGWindowNumber]] &&
-            [w[(__bridge id)kCGWindowOwnerPID] intValue] != getpid() &&
-            ([owner hasPrefix:@"uFits"] || [owner rangeOfString:@"QuickLook"].location != NSNotFound)) {
-            found = w;
-            printf("     (a window of %s came up)\n", owner.UTF8String);
-        }
+        CGRect r;
+        if (found || [before containsObject:w[(__bridge id)kCGWindowNumber]] ||
+            !CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)w[(__bridge id)kCGWindowBounds], &r) ||
+            !CGRectContainsPoint(CGRectInset(r, -40, -40), at))
+            continue;
+        found = w;
+        printf("     (a window of %s came up, %.0f x %.0f)\n", [w[(__bridge id)kCGWindowOwnerName] UTF8String],
+               r.size.width, r.size.height);
     }
     if (list)
         CFRelease(list);
@@ -193,11 +195,13 @@ static int clickUpdate(NSWindow *w, NSPoint p, NSString *png, double *ms)
         [a forceTerminate];
     spin(0.5);
     NSSet *before = windowNumbers();
+    NSPoint s = [w convertPointToScreen:p];
+    CGPoint at = CGPointMake(s.x, NSMaxY(NSScreen.screens.firstObject.frame) - s.y);
     double t0 = click(w, p);
     int what = 0;
     while (!what && uptime() - t0 < 8) {
         spin(0.05);
-        what = uFitsApps().count ? 1 : newWindow(before) ? 2 : 0;
+        what = uFitsApps().count ? 1 : newWindowNear(before, at) ? 2 : 0;
     }
     *ms = (uptime() - t0) * 1000;
     spin(1);   // the app's update offer, or the popover, comes up
