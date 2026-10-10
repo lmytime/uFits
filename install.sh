@@ -163,13 +163,23 @@ install_ufits() {
     hdiutil detach -quiet "$MNT" 2>/dev/null && mounted=0
     xattr -dr com.apple.quarantine "$dest/$APP" 2>/dev/null || true
 
-    # Register the app and turn its Quick Look extensions on.
-    "$LSREGISTER" -f -R -trusted "$dest/$APP" 2>/dev/null || true
-    for ext in "$dest/$APP"/Contents/PlugIns/*.appex; do
-        pluginkit -a "$ext" 2>/dev/null || true
-    done
-    for id in $IDS; do
-        pluginkit -e use -i "$id" 2>/dev/null || true
+    # Register the app and turn its Quick Look extensions on. pluginkit now
+    # and then misses one when a copy of uFits was just replaced: look, and
+    # try again for a few seconds.
+    for try in 1 2 3 4 5 6; do
+        "$LSREGISTER" -f -R -trusted "$dest/$APP" 2>/dev/null || true
+        for ext in "$dest/$APP"/Contents/PlugIns/*.appex; do
+            pluginkit -a "$ext" 2>/dev/null || true
+        done
+        for id in $IDS; do
+            pluginkit -e use -i "$id" 2>/dev/null || true
+        done
+        missing=
+        for id in $IDS; do
+            pluginkit -m -i "$id" 2>/dev/null | grep -q "$id" || missing="$missing $id"
+        done
+        [ -z "$missing" ] && break
+        sleep 1
     done
     reset_quicklook
     # Looking for updates now and then, unless turned off in the app (by
@@ -182,9 +192,8 @@ install_ufits() {
         rm -f "$HOME/Library/LaunchAgents/$AGENT.plist"
     fi
 
-    for id in $IDS; do
-        pluginkit -m -i "$id" 2>/dev/null | grep -q "$id" ||
-            say "Note: Quick Look has not picked up $id yet; opening uFits from $dest once registers it."
+    for id in $missing; do
+        say "Note: Quick Look has not picked up $id yet; opening uFits from $dest once registers it."
     done
     version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$dest/$APP/Contents/Info.plist" 2>/dev/null || true)
     say "uFits $version is installed in $dest. Select a FITS file in Finder and press Space."
