@@ -147,13 +147,36 @@ static NSDictionary<NSNumber *, NSDictionary *> *windows(void)
     return out;
 }
 
-static NSDictionary *newWindow(NSDictionary *before)
+static NSDictionary *newMenu(NSDictionary *before)
 {
     NSDictionary *all = windows();
+    int level = CGWindowLevelForKey(kCGPopUpMenuWindowLevelKey);
     for (NSNumber *n in all)
-        if (!before[n] && [all[n][(__bridge id)kCGWindowLayer] intValue] > 0)
+        if (!before[n] && [all[n][(__bridge id)kCGWindowLayer] intValue] == level)
             return all[n];
     return nil;
+}
+
+/// Makes this app the active one: a click on the window's title bar (macOS
+/// no longer lets an app activate itself).
+static BOOL activate(NSWindow *w, BOOL canPost)
+{
+    [w makeKeyAndOrderFront:nil];
+    [NSApp activateIgnoringOtherApps:YES];
+    spin(0.3);
+    if (!NSApp.isActive && canPost) {
+        NSRect f = w.frame;
+        CGFloat top = NSMaxY(NSScreen.screens.firstObject.frame);
+        CGPoint p = CGPointMake(NSMidX(f), top - (NSMaxY(f) - 12));
+        const CGEventType types[] = {kCGEventMouseMoved, kCGEventLeftMouseDown, kCGEventLeftMouseUp};
+        for (int i = 0; i < 3; i++) {
+            CGEventRef e = CGEventCreateMouseEvent(NULL, types[i], p, kCGMouseButtonLeft);
+            CGEventPost(kCGHIDEventTap, e);
+            CFRelease(e);
+        }
+        spin(0.6);
+    }
+    return NSApp.isActive && w.isKeyWindow;
 }
 
 /// A fingerprint of what the window shows.
@@ -247,12 +270,20 @@ int main(int argc, const char *argv[])
         printf("double-click interval %.2f s; may post events: %s; accessibility: %s\n", NSEvent.doubleClickInterval,
                canPost ? "yes" : "no", AXIsProcessTrusted() ? "yes" : "no");
 
+        NSRect vis = NSScreen.mainScreen.visibleFrame;
+        NSSize size = NSMakeSize(MIN(720, NSWidth(vis) - 40), MIN(500, NSHeight(vis) - 60));
+        NSRect place = NSMakeRect(floor(NSMidX(vis) - size.width / 2), floor(NSMidY(vis) - size.height / 2 - 14),
+                                  size.width, size.height);
+        printf("screen %s, visible %s, windows' content at %s\n",
+               NSStringFromRect(NSScreen.mainScreen.frame).UTF8String, NSStringFromRect(vis).UTF8String,
+               NSStringFromRect(place).UTF8String);
+
         // B's window first, to learn where the extension's view sits.
-        NSWindow *qw = [[NSWindow alloc] initWithContentRect:NSMakeRect(80, 80, 900, 690)
+        NSWindow *qw = [[NSWindow alloc] initWithContentRect:place
                                                    styleMask:NSWindowStyleMaskTitled
                                                      backing:NSBackingStoreBuffered
                                                        defer:NO];
-        QLPreviewView *pv = [[QLPreviewView alloc] initWithFrame:NSMakeRect(0, 0, 900, 690)
+        QLPreviewView *pv = [[QLPreviewView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)
                                                            style:QLPreviewViewStyleNormal];
         qw.contentView = pv;
         [qw makeKeyAndOrderFront:nil];
@@ -268,9 +299,11 @@ int main(int argc, const char *argv[])
 
         // A: the same preview in this process, at the same size.
         FQPreviewController *vc = [FQPreviewController new];
-        NSWindow *aw = [NSWindow windowWithContentViewController:vc];
-        [aw setFrameOrigin:NSMakePoint(80, 80)];
-        [aw setContentSize:rframe.size];
+        NSWindow *aw = [[NSWindow alloc] initWithContentRect:place
+                                                   styleMask:NSWindowStyleMaskTitled
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:NO];
+        aw.contentView = vc.view;
         [aw makeKeyAndOrderFront:nil];
         __block BOOL loaded = NO;
         [vc loadFile:path completion:^{
@@ -281,6 +314,7 @@ int main(int argc, const char *argv[])
         spin(1.5);
         [aw setContentSize:rframe.size];
         spin(0.3);
+        printf("A: active %s\n", activate(aw, canPost) ? "yes" : "NO");
         NSView *root = aw.contentView;
         NSPopUpButton *hdu = findView(root, NSPopUpButton.class, ^BOOL(id v) {
             return [((NSPopUpButton *)v).itemArray.firstObject.title hasPrefix:@"HDU"];
@@ -323,8 +357,7 @@ int main(int argc, const char *argv[])
         [aw orderOut:nil];
 
         // B: clicks on the extension's controls, at the same places.
-        [qw makeKeyAndOrderFront:nil];
-        [app activateIgnoringOtherApps:YES];
+        printf("B: active %s\n", activate(qw, canPost) ? "yes" : "NO");
         spin(1);
         NSPoint off = rframe.origin;
         NSPoint hduB = NSMakePoint(off.x + hduAt.x, off.y + hduAt.y);
@@ -344,7 +377,7 @@ int main(int argc, const char *argv[])
                 NSDictionary *menu = nil;
                 while (!menu && !gMenuOpened && now() - t0 < 3) {
                     spin(0.002);
-                    menu = newWindow(before);
+                    menu = newMenu(before);
                 }
                 double ms = menu ? (now() - t0) * 1000 : gMenuOpened ? (gMenuOpened - t0) * 1000 : -1;
                 printf("B %s: HDU menu open after %7.1f ms (%s, layer %d)\n", how, ms,
@@ -359,7 +392,7 @@ int main(int argc, const char *argv[])
                     if (canPost)
                         cgKey(53);
                     spin(0.3);
-                    if (newWindow(before)) {
+                    if (newMenu(before)) {
                         pid_t pid = [menu[(__bridge id)kCGWindowOwnerPID] intValue];
                         if (pid != getpid()) {
                             printf("   (menu still open: ending process %d to close it)\n", pid);
