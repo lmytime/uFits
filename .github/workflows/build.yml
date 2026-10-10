@@ -159,9 +159,47 @@ jobs:
           # the name of that setting, from the system's own strings.
           for cache in /System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_arm64e*; do
             [ -f "$cache" ] || continue
-            strings -n 10 "$cache" | grep -E "IconAppearance|IconStyle|AppleIcon[A-Z]|IconTheme|WidgetStyle" | sort -u
-          done | sort -u | head -80 || true
+            strings -n 8 "$cache" | grep -E "IconAppearanceThem|AppleIconAppearance|IconAppearanceTint|^(Regular|Clear|Tinted)(Light|Dark|Automatic)" | grep -v "^_" | sort -u
+          done | sort -u | head -60 || true
+          cat > /tmp/probe.m <<'OBJC'
+          #import <Cocoa/Cocoa.h>
+          #import <objc/runtime.h>
+          int main(void) {
+              @autoreleasepool {
+                  Class c = NSClassFromString(@"SLSIconAppearanceConfiguration");
+                  printf("class: %s\n", c ? "found" : "missing");
+                  unsigned n = 0;
+                  objc_property_t *props = c ? class_copyPropertyList(c, &n) : NULL;
+                  for (unsigned i = 0; i < n; i++) printf("  property %s %s\n", property_getName(props[i]), property_getAttributes(props[i]));
+                  Method *ms = c ? class_copyMethodList(object_getClass(c), &n) : NULL;
+                  for (unsigned i = 0; ms && i < n; i++) printf("  class method %s\n", sel_getName(method_getName(ms[i])));
+                  ms = c ? class_copyMethodList(c, &n) : NULL;
+                  for (unsigned i = 0; ms && i < n; i++) printf("  method %s\n", sel_getName(method_getName(ms[i])));
+                  SEL cur = NSSelectorFromString(@"currentIconAppearanceConfiguration");
+                  if ([NSWorkspace.sharedWorkspace respondsToSelector:cur])
+                      printf("current: %s\n", [[[NSWorkspace.sharedWorkspace performSelector:cur] description] UTF8String]);
+              }
+              return 0;
+          }
+          OBJC
+          clang -fobjc-arc -framework Cocoa -o /tmp/probe /tmp/probe.m && /tmp/probe || true
           defaults read -g | grep -i -E "icon|appearance|interface" || true
+          # uFits in the Dock, with macOS in dark mode, then with dark icons.
+          open $app
+          sleep 3
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true' || true
+          sleep 4
+          screencapture -x $shots/app-icons-default-style.png || true
+          defaults write -g AppleIconAppearanceTheme -string RegularDark
+          killall Dock || true
+          sleep 6
+          /tmp/probe | grep current || true
+          screencapture -x $shots/app-icons-dark-style.png || true
+          defaults delete -g AppleIconAppearanceTheme || true
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true
+          killall Dock || true
+          pkill -x uFits || true
+          tests/macos/print_images.sh $shots
       - name: Quick Look thumbnails (QLThumbnailGenerator)
         timeout-minutes: 4
         run: |
