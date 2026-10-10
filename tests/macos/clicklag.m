@@ -1,14 +1,18 @@
-// clicklag - checks that the preview answers clicks at once in Quick Look.
-// Shows FILE in a QLPreviewView, where the installed extension draws the
-// preview from its own process as in Finder's Quick Look panel, clicks its
-// HDU menu and its Image/Table/Header switch through the window server, and
-// measures how long until the menu is on screen or the window changes.
-// Quick Look holds clicks back for the double-click time (half a second)
-// unless the preview lets them through (FQLetClicksThrough).
+// clicklag - checks that the preview answers clicks at once in Quick Look,
+// and that its image zooms there. Shows FILE in a QLPreviewView, where the
+// installed extension draws the preview from its own process as in Finder's
+// Quick Look panel, clicks its HDU menu and its Image/Table/Header switch
+// through the window server, and measures how long until the menu is on
+// screen or the window changes. Quick Look holds clicks back for the
+// double-click time (half a second) unless the preview lets them through
+// (FQLetClicksThrough). Then zooms the image with Option-clicks and
+// Option-scrolling (and Command + and 0, which reach the preview only when
+// Quick Look passes keys on).
 //
 // Usage: clicklag OUTDIR FILE   (FILE: several HDUs, its first an image)
 // Exit status 1 when the median time to open the menu or to switch is over
-// 400 ms; 0 without checking when this process may not post events.
+// 400 ms, or when the image did not zoom; 0 without checking when this
+// process may not post events.
 
 #import <Cocoa/Cocoa.h>
 #import <Quartz/Quartz.h>
@@ -77,17 +81,28 @@ static void post(CGEventRef e)
 }
 
 /// A click at p (window coordinates), held for 30 ms; the uptime of the press.
-static double click(NSWindow *w, NSPoint p)
+static double clickWith(NSWindow *w, NSPoint p, CGEventFlags flags)
 {
     NSPoint s = [w convertPointToScreen:p];
     CGPoint at = CGPointMake(s.x, NSMaxY(NSScreen.screens.firstObject.frame) - s.y);
     post(CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, at, kCGMouseButtonLeft));
     spin(0.05);
     double pressed = uptime();
-    post(CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, at, kCGMouseButtonLeft));
+    CGEventRef down = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, at, kCGMouseButtonLeft);
+    CGEventRef up = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, at, kCGMouseButtonLeft);
+    if (flags) {
+        CGEventSetFlags(down, flags);
+        CGEventSetFlags(up, flags);
+    }
+    post(down);
     usleep(30000);
-    post(CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, at, kCGMouseButtonLeft));
+    post(up);
     return pressed;
+}
+
+static double click(NSWindow *w, NSPoint p)
+{
+    return clickWith(w, p, 0);
 }
 
 static NSSet<NSNumber *> *windowNumbers(void)
@@ -161,17 +176,24 @@ static double timeMenu(NSWindow *w, NSPoint p)
     return ms;
 }
 
-/// Clicks p: ms until the window changes (-1: not in 3 s).
-static double timeSwitch(NSWindow *w, NSPoint p)
+/// A fingerprint of what the window shows once it stops changing.
+static uint64_t stillPixels(NSWindow *w)
 {
     uint64_t base = pixels(w);
-    for (int i = 0; i < 40; i++) {   // until it is still
+    for (int i = 0; i < 40; i++) {
         spin(0.15);
         uint64_t now = pixels(w);
         if (now == base)
             break;
         base = now;
     }
+    return base;
+}
+
+/// Clicks p: ms until the window changes (-1: not in 3 s).
+static double timeSwitch(NSWindow *w, NSPoint p)
+{
+    uint64_t base = stillPixels(w);
     double t0 = click(w, p);
     while (uptime() - t0 < 3) {
         spin(0.002);
@@ -179,6 +201,106 @@ static double timeSwitch(NSWindow *w, NSPoint p)
             return (uptime() - t0) * 1000;
     }
     return -1;
+}
+
+/// A fingerprint of the part r (window coordinates) of what the window shows.
+static uint64_t partPixels(NSWindow *w, NSRect r)
+{
+    NSRect s = [w convertRectToScreen:r];
+    CGRect at = CGRectMake(NSMinX(s), NSMaxY(NSScreen.screens.firstObject.frame) - NSMaxY(s), NSWidth(s), NSHeight(s));
+    CGImageRef img = CGWindowListCreateImage(at, kCGWindowListOptionIncludingWindow, (CGWindowID)w.windowNumber,
+                                             kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution);
+    if (!img)
+        return 0;
+    CFDataRef data = CGDataProviderCopyData(CGImageGetDataProvider(img));
+    const uint8_t *p = CFDataGetBytePtr(data);
+    CFIndex n = CFDataGetLength(data);
+    uint64_t h = 1469598103934665603ULL;
+    for (CFIndex i = 0; i + 2 < n; i += 4) {
+        h ^= (uint64_t)p[i] | (uint64_t)p[i + 1] << 8 | (uint64_t)p[i + 2] << 16;
+        h *= 1099511628211ULL;
+    }
+    CFRelease(data);
+    CGImageRelease(img);
+    return h;
+}
+
+/// Waits up to 3 s for the part r of the window to differ from base (or,
+/// with same, to be base again): ms since t0, -1 if it did not.
+static double waitPart(NSWindow *w, NSRect r, uint64_t base, BOOL same, double t0)
+{
+    while (uptime() - t0 < 3) {
+        spin(0.005);
+        if ((partPixels(w, r) == base) == same)
+            return (uptime() - t0) * 1000;
+    }
+    return -1;
+}
+
+/// Scrolls up at p with Option held.
+static double optionScroll(NSWindow *w, NSPoint p)
+{
+    NSPoint s = [w convertPointToScreen:p];
+    CGPoint at = CGPointMake(s.x, NSMaxY(NSScreen.screens.firstObject.frame) - s.y);
+    post(CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, at, kCGMouseButtonLeft));
+    spin(0.1);
+    double t0 = uptime();
+    for (int i = 0; i < 8; i++) {
+        CGEventRef e = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 1, 16);
+        CGEventSetLocation(e, at);
+        CGEventSetFlags(e, kCGEventFlagMaskAlternate);
+        post(e);
+        usleep(8000);
+    }
+    return t0;
+}
+
+/// A key pressed with Command held.
+static double commandKey(CGKeyCode key)
+{
+    double t0 = uptime();
+    CGEventRef down = CGEventCreateKeyboardEvent(NULL, key, true), up = CGEventCreateKeyboardEvent(NULL, key, false);
+    CGEventSetFlags(down, kCGEventFlagMaskCommand);
+    CGEventSetFlags(up, kCGEventFlagMaskCommand);
+    post(down);
+    post(up);
+    return t0;
+}
+
+/// Zooming the image in Quick Look: Option-click in, Shift-Option-click
+/// out, Option-scrolling, Command + and Command 0. area: where the picture
+/// is; the margin beside the image, shown whole, is covered when zoomed in.
+/// The number of ways that did not zoom.
+static int checkZoom(NSWindow *w, NSRect area)
+{
+    NSRect margin = NSMakeRect(NSMinX(area) + 8, NSMidY(area) - 40, 40, 80);
+    NSPoint mid = NSMakePoint(NSMidX(area), NSMidY(area));
+    stillPixels(w);
+    uint64_t whole = partPixels(w, margin);
+    int failed = 0;
+
+    double in = waitPart(w, margin, whole, NO, clickWith(w, mid, kCGEventFlagMaskAlternate));
+    spin(0.7);   // not a double click
+    double out = waitPart(w, margin, whole, YES, clickWith(w, mid, kCGEventFlagMaskAlternate | kCGEventFlagMaskShift));
+    printf("     Option-click zoomed in after %6.1f ms, Shift-Option-click out after %6.1f ms\n", in, out);
+    failed += in < 0 || out < 0;
+    spin(0.7);
+
+    double scrolled = waitPart(w, margin, whole, NO, optionScroll(w, mid));
+    printf("     Option-scrolling zoomed in after %6.1f ms\n", scrolled);
+    failed += scrolled < 0;
+    for (int i = 0; i < 4; i++) {   // back to the whole image
+        clickWith(w, mid, kCGEventFlagMaskAlternate | kCGEventFlagMaskShift);
+        spin(0.7);
+    }
+    if (waitPart(w, margin, whole, YES, uptime()) < 0)
+        printf("     (the whole image did not come back)\n");
+
+    // Keys reach the preview once it has been clicked, as in Quick Look.
+    double plus = waitPart(w, margin, whole, NO, commandKey(24));    // =
+    double zero = waitPart(w, margin, whole, YES, commandKey(29));   // 0
+    printf("     Command + zoomed in after %6.1f ms, Command 0 showed it whole after %6.1f ms\n", plus, zero);
+    return failed;
 }
 
 static double median(NSMutableArray<NSNumber *> *ms)
@@ -264,6 +386,9 @@ int main(int argc, const char *argv[])
             [switches addObject:@(header < 0 ? 1e9 : header)];
             [switches addObject:@(image < 0 ? 1e9 : image)];
         }
+        // The image (Image was clicked last) zooms.
+        int zoomFailed = checkZoom(w, NSMakeRect(NSMinX(rf), NSMinY(rf) + 30, NSWidth(rf), NSHeight(rf) - 30));
+        screenshot(w, [out stringByAppendingPathComponent:@"ui-clicks-zoom.png"]);
         [pv close];
 
         double m = median(menus), s = median(switches);
@@ -271,6 +396,8 @@ int main(int argc, const char *argv[])
         printf("%s clicks in Quick Look: HDU menu open after %.0f ms, mode switched after %.0f ms (medians; "
                "limit %.0f ms)\n",
                ok ? "ok  " : "FAIL", m, s, kLimitMs);
-        return ok ? 0 : 1;
+        printf("%s zoom in Quick Look: %s\n", zoomFailed ? "FAIL" : "ok  ",
+               zoomFailed ? "Option-click or Option-scrolling did not zoom" : "Option-click and Option-scrolling zoom");
+        return ok && !zoomFailed ? 0 : 1;
     }
 }

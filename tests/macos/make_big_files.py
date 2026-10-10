@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Big files for the preview UI timings: a catalog of a million rows (a sky
-plot, its rows, its header), also gzipped, a table 300 columns wide and a
-file of 200 HDUs.
+plot, its rows, its header), also gzipped, a table 300 columns wide, a
+file of 200 HDUs, and an image bigger than the screen for the zoom.
 
 Usage: make_big_files.py OUTDIR
 """
@@ -50,4 +50,11 @@ for i in range(200):
         h.header[f"KEY{k:03d}"] = (k * 1.5, f"comment number {k}")
     hdus.append(h)
 fits.HDUList(hdus).writeto(os.path.join(out, "many_hdus.fits"), overwrite=True)
-print("wrote big_catalog.fits(.gz), wide_table.fits, many_hdus.fits")
+
+# Waves that differ from row to row and column to column, so that a part of
+# it drawn in the wrong place shows.
+yy, xx = np.mgrid[0:3000, 0:4000].astype(np.float32)
+img = 1000 + 600 * np.sin(2 * np.pi * xx / 350) * np.cos(2 * np.pi * (yy + 40) / 270) + 0.1 * yy
+img += rng.normal(0, 20, img.shape).astype(np.float32)
+fits.PrimaryHDU(img.astype(np.int16)).writeto(os.path.join(out, "zoom_image.fits"), overwrite=True)
+print("wrote big_catalog.fits(.gz), wide_table.fits, many_hdus.fits, zoom_image.fits")

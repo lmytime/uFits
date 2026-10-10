@@ -122,18 +122,41 @@ static const CGFloat kMaxZoom = 32;
     [CATransaction commit];
 }
 
-- (void)scrollWheel:(NSEvent *)event
+/// Zooms by factor, keeping the point at (this view's coordinates) still.
+- (void)zoomBy:(CGFloat)factor at:(NSPoint)at
 {
     NSScrollView *sv = self.enclosingScrollView;
-    if (!sv || !(event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagOption))) {
+    [sv setMagnification:sv.magnification * factor centeredAtPoint:at];
+    if (self.zoomed)
+        self.zoomed();
+}
+
+/// Scrolling up (away from you, whichever way the system scrolls) with
+/// Command or Option held zooms in.
+- (void)scrollWheel:(NSEvent *)event
+{
+    if (!self.enclosingScrollView ||
+        !(event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagOption))) {
         [super scrollWheel:event];
         return;
     }
     CGFloat dy = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : 8 * event.scrollingDeltaY;
-    NSPoint at = [self convertPoint:event.locationInWindow fromView:nil];
-    [sv setMagnification:sv.magnification * pow(1.01, dy) centeredAtPoint:at];
-    if (self.zoomed)
-        self.zoomed();
+    if (event.directionInvertedFromDevice)
+        dy = -dy;
+    [self zoomBy:pow(1.01, dy) at:[self convertPoint:event.locationInWindow fromView:nil]];
+}
+
+/// Option-click zooms in, Shift-Option-click out, as in Quick Look.
+- (void)mouseDown:(NSEvent *)event
+{
+    NSEventModifierFlags mods = event.modifierFlags & (NSEventModifierFlagOption | NSEventModifierFlagShift |
+                                                       NSEventModifierFlagCommand | NSEventModifierFlagControl);
+    if (!self.enclosingScrollView || !(mods & NSEventModifierFlagOption) ||
+        (mods & (NSEventModifierFlagCommand | NSEventModifierFlagControl))) {
+        [super mouseDown:event];
+        return;
+    }
+    [self zoomBy:(mods & NSEventModifierFlagShift) ? 0.5 : 2 at:[self convertPoint:event.locationInWindow fromView:nil]];
 }
 
 @end
@@ -1059,7 +1082,8 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 /// points per pixel. Shows the whole image again if it was (or if whole).
 - (void)fitImage:(BOOL)whole
 {
-    NSSize doc = _imageView.frame.size, view = _imageScroll.contentSize;
+    // The whole image needs no scroll bars: the scroll view's full size.
+    NSSize doc = _imageView.frame.size, view = _imageScroll.bounds.size;
     if (!_imageView.image || doc.width < 1 || doc.height < 1 || view.width < 1 || view.height < 1)
         return;
     CGFloat old = _fitZoom, zoom = _imageScroll.magnification;
@@ -1067,8 +1091,10 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
         whole = YES;
     CGFloat fit = MIN(view.width / doc.width, view.height / doc.height);
     _fitZoom = fit;
-    _imageScroll.minMagnification = fit;
+    // In this order, the minimum never exceeds the maximum (an exception).
+    _imageScroll.minMagnification = MIN(fit, _imageScroll.minMagnification);
     _imageScroll.maxMagnification = MAX(kMaxZoom, 4 * fit);
+    _imageScroll.minMagnification = fit;
     if (whole || zoom < fit)
         _imageScroll.magnification = fit;
 }

@@ -75,6 +75,10 @@ Time spent in the core alone, measured on a 4-core Linux VM:
   with "Loading…" shown if that takes more than a moment.
 - Changing the stretch only remaps the image already binned, so it is instant even for
   big or compressed files.
+- Zoom (pinch, ⌘+ ⌘− ⌘0, ⌘- or ⌥-scroll) goes up to 32 points per image pixel. Once
+  an image shown binned is zoomed in past its binned pixels, the part on view is read
+  again at full resolution in the background (`fq_render_detail`: a region, mapped with
+  the stretch of the whole image) and laid over it.
 
 Not supported: `HCOMPRESS_1` tiles (such files still open on their header), random groups.
 

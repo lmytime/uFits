@@ -184,8 +184,10 @@ static void pickHDU(NSView *root, NSInteger i)
     act(menu);
 }
 
-/// What FQImageView (FQPreviewController.m) says about its detail.
-@interface NSView (FQImageViewDetail)
+/// What FQImageView (FQPreviewController.m) shows: the image, and over it
+/// the part on view in detail.
+@protocol FQImageViewParts
+@property(nonatomic, readonly) CGImageRef image;
 @property(nonatomic, readonly) CGImageRef detail;
 @property(nonatomic, readonly) NSRect detailFrame;
 @end
@@ -215,50 +217,106 @@ static void report(NSString *step, BOOL ok, NSString *what)
     printf("%s %s: %s\n", ok ? "ok  " : "FAIL", step.UTF8String, what.UTF8String);
 }
 
+/// Grey levels of img, top row first.
+static NSData *greys(CGImageRef img)
+{
+    size_t w = CGImageGetWidth(img), h = CGImageGetHeight(img);
+    NSMutableData *px = [NSMutableData dataWithLength:w * h];
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceGray();
+    CGContextRef ctx = CGBitmapContextCreate(px.mutableBytes, w, h, 8, w, cs, (CGBitmapInfo)kCGImageAlphaNone);
+    CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), img);
+    CGContextRelease(ctx);
+    CGColorSpaceRelease(cs);
+    return px;
+}
+
+/// How well the detail, where it is laid (frame, in image pixels from the
+/// bottom left), matches the image under it (of size size): the correlation
+/// of their grey levels on a 24 x 24 grid of points.
+static double placement(CGImageRef image, CGImageRef detail, NSRect frame, NSSize size)
+{
+    NSData *a = greys(image), *b = greys(detail);
+    size_t aw = CGImageGetWidth(image), ah = CGImageGetHeight(image);
+    size_t bw = CGImageGetWidth(detail), bh = CGImageGetHeight(detail);
+    const uint8_t *pa = a.bytes, *pb = b.bytes;
+    double sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+    int n = 0;
+    for (int i = 0; i < 24; i++)
+        for (int j = 0; j < 24; j++) {
+            double x = NSMinX(frame) + (i + 0.5) / 24 * NSWidth(frame);
+            double y = NSMinY(frame) + (j + 0.5) / 24 * NSHeight(frame);
+            size_t ax = MIN(aw - 1, (size_t)(x / size.width * aw));
+            size_t ay = MIN(ah - 1, (size_t)((size.height - y) / size.height * ah));
+            size_t bx = MIN(bw - 1, (size_t)((x - NSMinX(frame)) / NSWidth(frame) * bw));
+            size_t by = MIN(bh - 1, (size_t)((NSMaxY(frame) - y) / NSHeight(frame) * bh));
+            double va = pa[ay * aw + ax], vb = pb[by * bw + bx];
+            sa += va;
+            sb += vb;
+            saa += va * va;
+            sbb += vb * vb;
+            sab += va * vb;
+            n++;
+        }
+    double cov = sab / n - sa / n * sb / n;
+    double da = saa / n - sa / n * sa / n, db = sbb / n - sb / n * sb / n;
+    return da > 0 && db > 0 ? cov / sqrt(da * db) : 0;
+}
+
 /// Zoom: Command + and - zoom in and out, Command 0 shows the whole image;
 /// zoomed in on an image shown binned, the part on view is drawn pixel for
-/// pixel over it; another cube plane keeps the zoom.
+/// pixel over it, in its place; another cube plane keeps the zoom.
 static void checkZoom(FQPreviewController *vc, NSString *data)
 {
+    NSString *big = [data stringByAppendingPathComponent:@"zoom_image.fits"];
+    if (![NSFileManager.defaultManager fileExistsAtPath:big]) {
+        printf("skip zoom: no zoom_image.fits (tests/macos/make_big_files.py makes it)\n");
+        return;
+    }
     NSView *root = vc.view;
-    int maxPixels = vc.maxPixels;
-    vc.maxPixels = 100;   // f32.fits, 400 x 300, is then shown binned 4 x 4
-    load(vc, [data stringByAppendingPathComponent:@"f32.fits"]);
+    load(vc, big);   // 4000 x 3000, shown binned 2 x 2
     spin(0.5);
     NSScrollView *sv = findView(root, NSScrollView.class, ^BOOL(id v) {
         return [[v documentView] isKindOfClass:NSClassFromString(@"FQImageView")];
     });
-    NSView *iv = sv.documentView;
+    NSView<FQImageViewParts> *iv = (NSView<FQImageViewParts> *)sv.documentView;
     if (!iv) {
         report(@"zoom", NO, @"no image view");
-        vc.maxPixels = maxPixels;
         return;
     }
-    NSSize content = sv.contentSize;
-    CGFloat fit = MIN(content.width / 400, content.height / 300);
-    report(@"zoom-fit", NSEqualSizes(iv.frame.size, NSMakeSize(400, 300)) && fabs(sv.magnification - fit) < 1e-3,
-           [NSString stringWithFormat:@"image %@ shown at %.3f points per pixel (whole: %.3f)",
-                                      NSStringFromSize(iv.frame.size), sv.magnification, fit]);
+    NSSize view = sv.frame.size;
+    CGFloat fit = MIN(view.width / 4000, view.height / 3000);
+    report(@"zoom-fit",
+           NSEqualSizes(iv.frame.size, NSMakeSize(4000, 3000)) && fabs(sv.magnification / fit - 1) < 1e-3 && !iv.detail,
+           [NSString stringWithFormat:@"image %@ shown at %.4f points per pixel (whole: %.4f), %@",
+                                      NSStringFromSize(iv.frame.size), sv.magnification, fit,
+                                      iv.detail ? @"with a detail" : @"no detail"]);
+
     BOOL took = commandKey(root, @"=") && commandKey(root, @"=") && commandKey(root, @"=");
     CGImageRef detail = iv.detail;
-    NSRect df = iv.detailFrame, vis = sv.documentVisibleRect;
+    NSRect df = iv.detailFrame, vis = NSIntersectionRect(sv.documentVisibleRect, iv.bounds);
     BOOL fine = detail && CGImageGetWidth(detail) == (size_t)NSWidth(df) &&
-                NSContainsRect(NSInsetRect(df, -1, -1), NSIntersectionRect(vis, iv.bounds));
-    report(@"zoom-in", took && fabs(sv.magnification - 8 * fit) < 1e-2 && fine,
-           [NSString stringWithFormat:@"Command + three times: %.3f points per pixel; detail %zux%zu over %@, "
-                                      @"on view %@", sv.magnification, detail ? CGImageGetWidth(detail) : 0,
+                CGImageGetHeight(detail) == (size_t)NSHeight(df) &&
+                NSContainsRect(NSInsetRect(df, 1, 1), NSInsetRect(vis, 2, 2)) &&
+                NSWidth(df) <= NSWidth(vis) + 4 && NSHeight(df) <= NSHeight(vis) + 4;
+    double match = detail ? placement(iv.image, detail, df, iv.bounds.size) : 0;
+    report(@"zoom-in", took && fabs(sv.magnification / (8 * fit) - 1) < 1e-3 && fine && match > 0.8,
+           [NSString stringWithFormat:@"Command + three times: %.4f points per pixel; detail %zux%zu over %@, "
+                                      @"on view %@, matching the image under it by %.3f",
+                                      sv.magnification, detail ? CGImageGetWidth(detail) : 0,
                                       detail ? CGImageGetHeight(detail) : 0, NSStringFromRect(df),
-                                      NSStringFromRect(vis)]);
+                                      NSStringFromRect(vis), match]);
     screenshot(@"zoom-detail");
     commandKey(root, @"-");
-    report(@"zoom-out", fabs(sv.magnification - 4 * fit) < 1e-2,
-           [NSString stringWithFormat:@"Command -: %.3f points per pixel", sv.magnification]);
+    report(@"zoom-out", fabs(sv.magnification / (4 * fit) - 1) < 1e-3,
+           [NSString stringWithFormat:@"Command -: %.4f points per pixel", sv.magnification]);
     commandKey(root, @"0");
-    report(@"zoom-whole", fabs(sv.magnification - fit) < 1e-3,
-           [NSString stringWithFormat:@"Command 0: %.3f points per pixel", sv.magnification]);
+    report(@"zoom-whole", fabs(sv.magnification / fit - 1) < 1e-3 && !iv.detail,
+           [NSString stringWithFormat:@"Command 0: %.4f points per pixel, %@", sv.magnification,
+                                      iv.detail ? @"with a detail" : @"no detail"]);
 
     // A cube keeps its zoom from plane to plane.
-    vc.maxPixels = 40;
+    int maxPixels = vc.maxPixels;
+    vc.maxPixels = 40;   // 160 x 120, shown binned 4 x 4
     load(vc, [data stringByAppendingPathComponent:@"cube5.fits"]);
     spin(0.5);
     commandKey(root, @"=");
@@ -268,7 +326,7 @@ static void checkZoom(FQPreviewController *vc, NSString *data)
         slider.doubleValue = 4;
         act(slider);
     }
-    report(@"zoom-cube", slider && fabs(sv.magnification - zoom) < 1e-3 && iv.detail != NULL,
+    report(@"zoom-cube", slider && fabs(sv.magnification / zoom - 1) < 1e-3 && iv.detail != NULL,
            [NSString stringWithFormat:@"plane 5 at %.3f points per pixel (was %.3f), detail %@",
                                       sv.magnification, zoom, iv.detail ? @"drawn" : @"missing"]);
     vc.maxPixels = maxPixels;
@@ -618,9 +676,11 @@ int main(int argc, const char *argv[])
                         screenshot(@"loading");
                     }
                 }
-                printf("%s time %-31s %7.1f ms%s\n", done && spinner ? "ok  " : "FAIL", "open gzipped catalog",
+                // Quick enough, it need not show (it waits 0.12 s).
+                BOOL ok = done && (spinner || msSince(t0) < 300);
+                printf("%s time %-31s %7.1f ms%s\n", ok ? "ok  " : "FAIL", "open gzipped catalog",
                        msSince(t0), spinner ? "   (showed Loading…)" : "   (no Loading…)");
-                if (!(done && spinner))
+                if (!ok)
                     gFailures++;
                 timeSwitch(@"gz catalog: Plot -> Table", 1);
                 timeSwitch(@"gz catalog: Table -> Header", 2);
