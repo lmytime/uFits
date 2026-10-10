@@ -172,8 +172,15 @@ install_ufits() {
         pluginkit -e use -i "$id" 2>/dev/null || true
     done
     reset_quicklook
-    # Looking for updates now and then, unless turned off in the app.
-    "$dest/$APP/Contents/MacOS/uFits" --schedule-update-checks >/dev/null 2>&1 || true
+    # Looking for updates now and then, unless turned off in the app (by
+    # versions that can: an older one would just start).
+    bin="$dest/$APP/Contents/MacOS/uFits"
+    if grep -q -- --schedule-update-checks "$bin" 2>/dev/null; then
+        "$bin" --schedule-update-checks >/dev/null 2>&1 || true
+    else
+        launchctl bootout "gui/$(id -u)/$AGENT" 2>/dev/null || true
+        rm -f "$HOME/Library/LaunchAgents/$AGENT.plist"
+    fi
 
     for id in $IDS; do
         pluginkit -m -i "$id" 2>/dev/null | grep -q "$id" ||
