@@ -16,6 +16,9 @@
  * Options: --max N  --samples K  --stretch auto|linear|minmax  --hdu N
  *          --plane P  --mono  --threads T  --repeat R
  *          --then auto|linear|minmax   restretch after rendering (tests)
+ *          --region X,Y,W,H  render: only these pixels (from the first of
+ *                            the first row), with the whole image's stretch
+ *                            as the preview's zoom does
  */
 #define _POSIX_C_SOURCE 200809L
 #include "fq.h"
@@ -158,6 +161,7 @@ static void usage(void)
             "       fqtool table FILE HDU [ROWS]\n"
             "       fqtool render FILE OUT.png [--max N] [--samples K] [--stretch auto|linear|minmax]\n"
             "                                 [--hdu N] [--plane P] [--mono] [--threads T] [--repeat R]\n"
+            "                                 [--region X,Y,W,H]\n"
             "       fqtool dump FILE OUT.f32 [same options]\n"
             "       fqtool plot FILE OUT.f32 [same options]\n"
             "       fqtool rows FILE HDU FIRST COUNT\n");
@@ -200,7 +204,15 @@ static int parse_opts(int argc, char **argv, int start, fq_opts *o, int *repeat)
             o->stretch = stretch_named(v);
         else if (!strcmp(a, "--then"))
             then_stretch = stretch_named(v);
-        else {
+        else if (!strcmp(a, "--region")) {
+            long long r[4];
+            if (sscanf(v, "%lld,%lld,%lld,%lld", &r[0], &r[1], &r[2], &r[3]) != 4) {
+                fprintf(stderr, "--region wants X,Y,W,H\n");
+                return -1;
+            }
+            for (int k = 0; k < 4; k++)
+                o->region[k] = r[k];
+        } else {
             fprintf(stderr, "unknown option %s\n", a);
             return -1;
         }
@@ -215,11 +227,13 @@ static void print_info(const fq_info *in)
     for (int i = 0; i < in->naxis; i++)
         printf(i ? "x%lld" : "%lld", (long long)in->naxes[i]);
     printf(" compressed=%d%s%s plane=%lld/%lld color=%d bayer=%s bin=%d samples=%d out=%dx%d"
-           " flipped=%d truncated=%d empty=%d table=%d median=%.6g sigma=%.6g black=%.6g white=%.6g\n",
+           " flipped=%d truncated=%d empty=%d table=%d median=%.6g sigma=%.6g black=%.6g white=%.6g"
+           " region=%lld,%lld,%lld,%lld\n",
            in->compressed, in->compressed ? ":" : "", in->cmptype, (long long)in->plane,
            (long long)in->nplanes, in->color, in->bayer, in->bin, in->samples, in->width,
            in->height, in->flipped, in->truncated, in->empty, in->table, in->median, in->sigma,
-           in->black, in->white);
+           in->black, in->white, (long long)in->region[0], (long long)in->region[1],
+           (long long)in->region[2], (long long)in->region[3]);
 }
 
 /* Everything about a plot, one key=value per line (values may hold spaces). */
@@ -383,11 +397,25 @@ int main(int argc, char **argv)
             double best = 1e30, t_open = now_ms() - t0;
             fq_image *img = NULL;
             o.keep = then_stretch >= 0;
+            int64_t region[4];
+            memcpy(region, o.region, sizeof region);
+            int detail = region[2] > 0 && region[3] > 0;
+            memset(o.region, 0, sizeof o.region);
             for (int r = 0; r < (repeat < 1 ? 1 : repeat); r++) {
                 if (img)
                     fq_image_free(img);
                 double t1 = now_ms();
                 img = fq_render(f, &o, err, sizeof err);
+                if (img && detail && img->info.kind == FQ_KIND_IMAGE) {
+                    fq_opts d = o;
+                    memcpy(d.region, region, sizeof region);
+                    /* The plane shown (the middle one of a cube, say); an
+                       RGB cube is asked for as a whole. */
+                    d.plane = img->info.color == FQ_COLOR_RGB ? -1 : (int)img->info.plane;
+                    fq_image *part = fq_render_detail(f, &d, &img->stretch, err, sizeof err);
+                    fq_image_free(img);
+                    img = part;
+                }
                 double dt = now_ms() - t1;
                 if (dt < best)
                     best = dt;

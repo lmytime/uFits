@@ -46,15 +46,24 @@ static NSString *barState(NSView *root)
         [stack removeLastObject];
         if (v.hidden)
             continue;
-        [stack addObjectsFromArray:v.subviews];
         NSRect r = [v convertRect:v.bounds toView:root];
+        if ([v isKindOfClass:NSPopUpButton.class]) {
+            // Not its subviews: a label of its own repeats its title.
+            NSPopUpButton *p = (NSPopUpButton *)v;
+            NSPopUpButtonCell *cell = p.cell;
+            NSString *item = p.titleOfSelectedItem ?: @"";
+            NSString *shows = cell.usesItemFromMenu ? item : cell.menuItem.title ?: @"";
+            if (NSMinY(r) <= 30)
+                [parts addObject:[NSString stringWithFormat:@"menu=\"%@\" (%ld items)%@", item, (long)p.numberOfItems,
+                                                            [shows isEqualToString:item]
+                                                                ? @""
+                                                                : [NSString stringWithFormat:@" shows \"%@\"", shows]]];
+            continue;
+        }
+        [stack addObjectsFromArray:v.subviews];
         if (NSMinY(r) > 30 || v == root)
             continue;
-        if ([v isKindOfClass:NSPopUpButton.class])
-            [parts addObject:[NSString stringWithFormat:@"menu=\"%@\" (%ld items)",
-                                                        ((NSPopUpButton *)v).titleOfSelectedItem,
-                                                        (long)((NSPopUpButton *)v).numberOfItems]];
-        else if ([v isKindOfClass:NSSlider.class])
+        if ([v isKindOfClass:NSSlider.class])
             [parts addObject:[NSString stringWithFormat:@"slider=%g of %g", ((NSSlider *)v).doubleValue,
                                                         ((NSSlider *)v).maxValue]];
         else if ([v isKindOfClass:NSSegmentedControl.class]) {
@@ -173,6 +182,96 @@ static void pickHDU(NSView *root, NSInteger i)
     }
     [menu selectItemAtIndex:i];
     act(menu);
+}
+
+/// What FQImageView (FQPreviewController.m) says about its detail.
+@interface NSView (FQImageViewDetail)
+@property(nonatomic, readonly) CGImageRef detail;
+@property(nonatomic, readonly) NSRect detailFrame;
+@end
+
+/// A key with Command, as the keyboard sends it; whether the view took it.
+static BOOL commandKey(NSView *root, NSString *key)
+{
+    NSEvent *e = [NSEvent keyEventWithType:NSEventTypeKeyDown
+                                  location:NSZeroPoint
+                             modifierFlags:NSEventModifierFlagCommand
+                                 timestamp:0
+                              windowNumber:gWindow.windowNumber
+                                   context:nil
+                                characters:key
+               charactersIgnoringModifiers:key
+                                 isARepeat:NO
+                                   keyCode:0];
+    BOOL took = [root performKeyEquivalent:e];
+    spin(0.8);   // the detail comes after a pause
+    return took;
+}
+
+static void report(NSString *step, BOOL ok, NSString *what)
+{
+    if (!ok)
+        gFailures++;
+    printf("%s %s: %s\n", ok ? "ok  " : "FAIL", step.UTF8String, what.UTF8String);
+}
+
+/// Zoom: Command + and - zoom in and out, Command 0 shows the whole image;
+/// zoomed in on an image shown binned, the part on view is drawn pixel for
+/// pixel over it; another cube plane keeps the zoom.
+static void checkZoom(FQPreviewController *vc, NSString *data)
+{
+    NSView *root = vc.view;
+    int maxPixels = vc.maxPixels;
+    vc.maxPixels = 100;   // f32.fits, 400 x 300, is then shown binned 4 x 4
+    load(vc, [data stringByAppendingPathComponent:@"f32.fits"]);
+    spin(0.5);
+    NSScrollView *sv = findView(root, NSScrollView.class, ^BOOL(id v) {
+        return [[v documentView] isKindOfClass:NSClassFromString(@"FQImageView")];
+    });
+    NSView *iv = sv.documentView;
+    if (!iv) {
+        report(@"zoom", NO, @"no image view");
+        vc.maxPixels = maxPixels;
+        return;
+    }
+    NSSize content = sv.contentSize;
+    CGFloat fit = MIN(content.width / 400, content.height / 300);
+    report(@"zoom-fit", NSEqualSizes(iv.frame.size, NSMakeSize(400, 300)) && fabs(sv.magnification - fit) < 1e-3,
+           [NSString stringWithFormat:@"image %@ shown at %.3f points per pixel (whole: %.3f)",
+                                      NSStringFromSize(iv.frame.size), sv.magnification, fit]);
+    BOOL took = commandKey(root, @"=") && commandKey(root, @"=") && commandKey(root, @"=");
+    CGImageRef detail = iv.detail;
+    NSRect df = iv.detailFrame, vis = sv.documentVisibleRect;
+    BOOL fine = detail && CGImageGetWidth(detail) == (size_t)NSWidth(df) &&
+                NSContainsRect(NSInsetRect(df, -1, -1), NSIntersectionRect(vis, iv.bounds));
+    report(@"zoom-in", took && fabs(sv.magnification - 8 * fit) < 1e-2 && fine,
+           [NSString stringWithFormat:@"Command + three times: %.3f points per pixel; detail %zux%zu over %@, "
+                                      @"on view %@", sv.magnification, detail ? CGImageGetWidth(detail) : 0,
+                                      detail ? CGImageGetHeight(detail) : 0, NSStringFromRect(df),
+                                      NSStringFromRect(vis)]);
+    screenshot(@"zoom-detail");
+    commandKey(root, @"-");
+    report(@"zoom-out", fabs(sv.magnification - 4 * fit) < 1e-2,
+           [NSString stringWithFormat:@"Command -: %.3f points per pixel", sv.magnification]);
+    commandKey(root, @"0");
+    report(@"zoom-whole", fabs(sv.magnification - fit) < 1e-3,
+           [NSString stringWithFormat:@"Command 0: %.3f points per pixel", sv.magnification]);
+
+    // A cube keeps its zoom from plane to plane.
+    vc.maxPixels = 40;
+    load(vc, [data stringByAppendingPathComponent:@"cube5.fits"]);
+    spin(0.5);
+    commandKey(root, @"=");
+    CGFloat zoom = sv.magnification;
+    NSSlider *slider = findView(root, NSSlider.class, nil);
+    if (slider) {
+        slider.doubleValue = 4;
+        act(slider);
+    }
+    report(@"zoom-cube", slider && fabs(sv.magnification - zoom) < 1e-3 && iv.detail != NULL,
+           [NSString stringWithFormat:@"plane 5 at %.3f points per pixel (was %.3f), detail %@",
+                                      sv.magnification, zoom, iv.detail ? @"drawn" : @"missing"]);
+    vc.maxPixels = maxPixels;
 }
 
 /// Checks that the part of the header listing in view shows text.
@@ -396,18 +495,18 @@ int main(int argc, const char *argv[])
 
         // Multi-extension file: the HDU menu switches between SCI, ERR and DQ.
         load(vc, [data stringByAppendingPathComponent:@"mef.fits"]);
-        capture(@"mef", @"menu=\"HDU 1  SCI — 256 × 256 float32\" (4 items)");
+        capture(@"mef", @"menu=\"HDU 1  SCI — 256 × 256 float32\" (4 items) shows \"HDU 1 SCI\"");
         pickHDU(root, 3);
-        capture(@"mef-dq", @"HDU 3 DQ");
+        capture(@"mef-dq", @"shows \"HDU 3 DQ\"");
         // Its empty primary HDU is listed too, and shows its header.
         pickHDU(root, 0);
         expectListing(@"mef-primary", @"SIMPLE   = T");
-        capture(@"mef-primary", @"menu=\"HDU 0 — no data\" (4 items)  \"HDU 0 — no data\"  mode=2 [Image(off)|Table(off)|Header]");
+        capture(@"mef-primary", @"menu=\"HDU 0 — no data\" (4 items) shows \"HDU 0\"  mode=2 [Image(off)|Table(off)|Header]");
         // In the Header view the menu switches headers; Image shows SCI again.
         pickHDU(root, 1);
         expectListing(@"mef-sci-header", @"——— HDU 1  SCI ———");
         pickMode(root, 0);
-        capture(@"mef-sci", @"\"HDU 1 SCI  ·  256 × 256  ·  float32\"");
+        capture(@"mef-sci", @"\"256 × 256  ·  float32\"");
 
         // Cube: the slider picks the plane.
         load(vc, [data stringByAppendingPathComponent:@"cube5.fits"]);
@@ -417,7 +516,9 @@ int main(int argc, const char *argv[])
             slider.doubleValue = 0;
             act(slider);
         }
-        capture(@"cube-plane1", @"plane 1 of 5");
+        capture(@"cube-plane1", @"\"1 / 5\"");
+
+        checkZoom(vc, data);
 
         // Tables: light curves (points; magnitudes upside down) and spectra,
         // each with its rows in the Table view.
@@ -461,8 +562,7 @@ int main(int argc, const char *argv[])
         expectListing(@"tables-header-cards", @"XTENSION = 'TABLE' / ASCII table extension");
         expectColumns(@"tables-header-columns", @"XTENSION = 'TABLE'", @"TFORM2   = 'F10.5'",
                       @"ASCII table extension");
-        capture(@"tables-header", @"\"HDU 2 ASCII  ·  4 rows × 3 columns\"  menu=\"HDU 2  ASCII — 4 rows × 3 "
-                                  @"columns\" (3 items)  \"HDU 2  ASCII — 4 rows × 3 columns\"  mode=2");
+        capture(@"tables-header", @"menu=\"HDU 2  ASCII — 4 rows × 3 columns\" (3 items) shows \"HDU 2 ASCII\"  mode=2");
         NSEvent *cmdF = [NSEvent keyEventWithType:NSEventTypeKeyDown
                                          location:NSZeroPoint
                                     modifierFlags:NSEventModifierFlagCommand

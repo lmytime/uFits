@@ -17,6 +17,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly) long long nplanes;
 @property(nonatomic, readonly, copy) NSString *extname;
 @property(nonatomic, readonly, copy) NSString *title; // "HDU 1  SCI — 4096 × 4096 float32"
+@property(nonatomic, readonly, copy) NSString *shortTitle; // "HDU 1 SCI"
 @end
 
 /// Wraps an image rendered by the core. Owns the fq_image.
@@ -26,7 +27,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly, nullable) CGImageRef image;
 @property(nonatomic, readonly) CGSize pixelSize;      // image size, or a 4:3 plot box
 @property(nonatomic, readonly) const fq_image *raw;   // spectrum data
-/// One line describing what is shown, e.g. "SCI · 4096 × 4096 · float32".
+/// How values became grey levels, for FQDetailSource (a copy).
+@property(nonatomic, readonly) fq_stretch stretch;
+/// What is shown, briefly: "4096 × 4096 · float32", "3600 rows".
 @property(nonatomic, readonly) NSString *summary;
 
 /// Opens and renders path. maxPixels bounds both output dimensions.
@@ -52,6 +55,23 @@ NS_ASSUME_NONNULL_BEGIN
 /// Stretches an image rendered with keep again, without reading the file
 /// (a few milliseconds). NO if that is not possible.
 - (BOOL)restretch:(int)stretch;
+@end
+
+/// Renders parts of an image in more detail than the whole-image rendering,
+/// for the zoom, with its stretch so that they can be laid over it. Keeps
+/// the file open from one part to the next. Use it from one thread at a time.
+@interface FQDetailSource : NSObject
+- (instancetype)initWithPath:(NSString *)path;
+/// The pixels region (x and y from the first pixel of the first row) of
+/// HDU hdu and cube plane plane (-1 for an RGB cube), fitted to maxWidth x
+/// maxHeight. *covered: the pixels it shows. NULL if it cannot be read.
+- (nullable CGImageRef)copyDetailOfHDU:(int)hdu
+                                 plane:(long long)plane
+                               stretch:(fq_stretch)stretch
+                                region:(CGRect)region
+                              maxWidth:(int)maxWidth
+                             maxHeight:(int)maxHeight
+                               covered:(CGRect *)covered CF_RETURNS_RETAINED;
 @end
 
 /// Draws a plot envelope inside rect (Core Graphics coordinates): a line,

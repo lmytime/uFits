@@ -14,36 +14,73 @@ static const CGFloat kBarHeight = 30;
 
 #pragma mark - Image view
 
-/// Shows a CGImage scaled to fit, keeping pixels crisp when enlarged.
+/// Zoom limits, in points per pixel of the image.
+static const CGFloat kMaxZoom = 32;
+
+/// Keeps the image in the middle of the view while it is smaller than it.
+@interface FQCenteringClipView : NSClipView
+@end
+
+@implementation FQCenteringClipView
+
+- (NSRect)constrainBoundsRect:(NSRect)proposed
+{
+    NSRect r = [super constrainBoundsRect:proposed];
+    NSView *doc = self.documentView;
+    if (doc) {
+        NSRect f = doc.frame;
+        if (NSWidth(r) > NSWidth(f))
+            r.origin.x = NSMidX(f) - NSWidth(r) / 2;
+        if (NSHeight(r) > NSHeight(f))
+            r.origin.y = NSMidY(f) - NSHeight(r) / 2;
+    }
+    return r;
+}
+
+@end
+
+/// An image, one point per pixel (the scroll view around it zooms): the
+/// whole image as rendered, and over it, when zoomed in on an image shown
+/// binned, the part on view rendered pixel for pixel. Pixels stay crisp
+/// when enlarged. Command- or Option-scrolling zooms.
 @interface FQImageView : NSView
 @property(nonatomic, nullable) CGImageRef image;
+@property(nonatomic, readonly, nullable) CGImageRef detail;
+@property(nonatomic, readonly) NSRect detailFrame;
+@property(nonatomic, copy, nullable) void (^zoomed)(void);   // after a zoom by scrolling
+- (void)setDetail:(nullable CGImageRef)detail frame:(NSRect)frame;
 @end
 
 @implementation FQImageView {
-    CGImageRef _image;
+    CGImageRef _image, _detail;
+    CALayer *_detailLayer;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
 {
     if ((self = [super initWithFrame:frame])) {
+        CALayer *layer = [CALayer layer];   // hosted: this view manages it alone
+        layer.contentsGravity = kCAGravityResize;
+        layer.magnificationFilter = kCAFilterNearest;
+        layer.minificationFilter = kCAFilterTrilinear;
+        _detailLayer = [CALayer layer];
+        _detailLayer.contentsGravity = kCAGravityResize;
+        _detailLayer.magnificationFilter = kCAFilterNearest;
+        _detailLayer.minificationFilter = kCAFilterTrilinear;
+        _detailLayer.hidden = YES;
+        [layer addSublayer:_detailLayer];
+        self.layer = layer;
         self.wantsLayer = YES;
-        self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
     }
     return self;
 }
 
-- (BOOL)wantsUpdateLayer
+- (void)dealloc
 {
-    return YES;
-}
-
-- (void)updateLayer
-{
-    CALayer *layer = self.layer;
-    layer.contentsGravity = kCAGravityResizeAspect;
-    layer.magnificationFilter = kCAFilterNearest;
-    layer.minificationFilter = kCAFilterTrilinear;
-    layer.contents = (__bridge id)_image;
+    if (_image)
+        CGImageRelease(_image);
+    if (_detail)
+        CGImageRelease(_detail);
 }
 
 - (CGImageRef)image
@@ -58,13 +95,45 @@ static const CGFloat kBarHeight = 30;
     if (_image)
         CGImageRelease(_image);
     _image = image;
-    self.needsDisplay = YES;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    self.layer.contents = (__bridge id)image;
+    [CATransaction commit];
 }
 
-- (void)dealloc
+- (CGImageRef)detail
 {
-    if (_image)
-        CGImageRelease(_image);
+    return _detail;
+}
+
+- (void)setDetail:(CGImageRef)detail frame:(NSRect)frame
+{
+    if (detail)
+        CGImageRetain(detail);
+    if (_detail)
+        CGImageRelease(_detail);
+    _detail = detail;
+    _detailFrame = detail ? frame : NSZeroRect;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    _detailLayer.contents = (__bridge id)detail;
+    _detailLayer.frame = _detailFrame;
+    _detailLayer.hidden = detail == NULL;
+    [CATransaction commit];
+}
+
+- (void)scrollWheel:(NSEvent *)event
+{
+    NSScrollView *sv = self.enclosingScrollView;
+    if (!sv || !(event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagOption))) {
+        [super scrollWheel:event];
+        return;
+    }
+    CGFloat dy = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : 8 * event.scrollingDeltaY;
+    NSPoint at = [self convertPoint:event.locationInWindow fromView:nil];
+    [sv setMagnification:sv.magnification * pow(1.01, dy) centeredAtPoint:at];
+    if (self.zoomed)
+        self.zoomed();
 }
 
 @end
@@ -283,6 +352,8 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 
 @interface FQPreviewController () <NSTableViewDataSource, NSTableViewDelegate>
 - (void)layoutBar;
+- (void)fitImage:(BOOL)whole;
+- (void)scheduleDetail;
 - (BOOL)handleKeyEquivalent:(NSEvent *)event;
 @end
 
@@ -298,6 +369,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 {
     [super resizeSubviewsWithOldSize:oldSize];
     [self.controller layoutBar];
+    [self.controller fitImage:NO];
 }
 
 - (BOOL)performKeyEquivalent:(NSEvent *)event
@@ -310,7 +382,13 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 #pragma mark - Controller
 
 @implementation FQPreviewController {
+    NSScrollView *_imageScroll;   // zooms _imageView
     FQImageView *_imageView;
+    CGFloat _fitZoom;             // magnification that shows the whole image
+    int _pictureHDU;
+    FQDetailSource *_detailSource;
+    dispatch_queue_t _detailQueue;
+    NSInteger _detailGeneration, _detailToken;
     FQSpectrumView *_spectrumView;
     NSScrollView *_headerScroll;
     NSTextView *_headerText;
@@ -327,13 +405,14 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     NSTextField *_info;
     NSPopUpButton *_stretchMenu;
     NSPopUpButton *_hduMenu;
+    NSMenuItem *_hduTitle;   // what the HDU menu shows closed: "HDU 1 SCI"
     NSView *_planeBox;
     NSSlider *_planeSlider;
     NSTextField *_planeLabel;
     NSSegmentedControl *_mode;
     NSString *_path;
     FQRendering *_rendering;
-    NSString *_renderInfo, *_renderTip;   // the bar's text for the picture
+    NSString *_renderInfo;   // the bar's text for the picture
     NSArray<FQHDUItem *> *_hdus;
     int _hdu;             // HDU asked for, -1 = automatic
     long long _plane;     // cube plane asked for, -1 = automatic
@@ -350,7 +429,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     BOOL _busy, _again;   // a render is running; another one is wanted after it
     NSInteger _generation;
     NSSize _fitting;
-    CGFloat _hduWidth;    // natural width of the HDU menu
+    CGFloat _hduWidth;    // width of the HDU menu, closed
     id _clickMonitor;     // see FQLetClicksThrough
 }
 
@@ -373,6 +452,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 
 - (void)dealloc
 {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
     if (_clickMonitor)
         [NSEvent removeMonitor:_clickMonitor];
     _tableView.dataSource = nil;
@@ -408,9 +488,34 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     FQRootView *root = [[FQRootView alloc] initWithFrame:all];
     root.controller = self;
 
-    _imageView = [[FQImageView alloc] initWithFrame:content];
-    _imageView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    [root addSubview:_imageView];
+    // The image, zoomed by pinching, Command +/-/0, Command- or
+    // Option-scrolling; the part on view rendered in detail when zoomed in.
+    _imageScroll = [[NSScrollView alloc] initWithFrame:content];
+    _imageScroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    _imageScroll.contentView = [[FQCenteringClipView alloc] initWithFrame:_imageScroll.contentView.frame];
+    _imageScroll.hasVerticalScroller = YES;
+    _imageScroll.hasHorizontalScroller = YES;
+    _imageScroll.autohidesScrollers = YES;
+    _imageScroll.scrollerStyle = NSScrollerStyleOverlay;
+    _imageScroll.borderType = NSNoBorder;
+    _imageScroll.drawsBackground = NO;
+    _imageScroll.allowsMagnification = YES;
+    _imageView = [[FQImageView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
+    __weak FQPreviewController *weakSelf = self;
+    _imageView.zoomed = ^{
+        [weakSelf scheduleDetail];
+    };
+    _imageScroll.documentView = _imageView;
+    _imageScroll.contentView.postsBoundsChangedNotifications = YES;
+    [NSNotificationCenter.defaultCenter addObserver:self
+                                           selector:@selector(imageViewMoved:)
+                                               name:NSViewBoundsDidChangeNotification
+                                             object:_imageScroll.contentView];
+    _imageScroll.hidden = YES;
+    [root addSubview:_imageScroll];
+    _detailQueue = dispatch_queue_create("io.github.lmytime.uFits.detail",
+                                         dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,
+                                                                                 QOS_CLASS_USER_INITIATED, 0));
 
     _spectrumView = [[FQSpectrumView alloc] initWithFrame:content];
     _spectrumView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -508,7 +613,13 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     [_stretchMenu sizeToFit];
     [root addSubview:_stretchMenu];
 
+    // Closed, the HDU menu names the HDU ("HDU 1 SCI"); open, it says what
+    // each holds.
     _hduMenu = [self smallPopUpWithAction:@selector(hduChanged:)];
+    _hduTitle = [[NSMenuItem alloc] initWithTitle:@"" action:NULL keyEquivalent:@""];
+    NSPopUpButtonCell *hduCell = _hduMenu.cell;
+    hduCell.usesItemFromMenu = NO;
+    hduCell.menuItem = _hduTitle;
     _hduMenu.toolTip = @"HDU to show";
     _hduMenu.hidden = YES;
     [root addSubview:_hduMenu];
@@ -532,7 +643,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     _info = [NSTextField labelWithString:@""];
     _info.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
     _info.textColor = NSColor.secondaryLabelColor;
-    _info.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    _info.lineBreakMode = NSLineBreakByTruncatingTail;
     [root addSubview:_info];
 
     self.view = root;
@@ -583,12 +694,15 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     _selected = -1;
     [self closeTable];
     _rendering = nil;
-    _imageView.image = NULL;
+    _detailSource = [[FQDetailSource alloc] initWithPath:path];
+    [self setPicture:nil];
     _spectrumView.rendering = nil;
-    _imageView.hidden = _spectrumView.hidden = _tableScroll.hidden = _headerScroll.hidden = YES;
+    _imageScroll.hidden = _spectrumView.hidden = _tableScroll.hidden = _headerScroll.hidden = YES;
     _message.hidden = YES;
-    _renderInfo = _renderTip = nil;
+    _renderInfo = nil;
     _info.stringValue = @"";
+    _stretchMenu.toolTip = nil;
+    _hduTitle.title = @"";
     [_hduMenu removeAllItems];
     [self layoutBar];
     [self render:YES completion:completion];
@@ -660,28 +774,24 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
         [self render:NO completion:nil];
 }
 
-/// The bar's text for the picture: what it shows, display range as tooltip.
+/// The bar's text for the picture (its size and type); the statistics
+/// behind the stretch as the stretch menu's tooltip.
 - (void)updateRenderInfo:(NSString *)error
 {
     FQRendering *r = _rendering;
-    if (r) {
-        fq_info in = r.info;
-        _renderInfo = r.summary;
-        _renderTip = r.kind == FQ_KIND_IMAGE
-                         ? [NSString stringWithFormat:@"median %.6g   σ %.4g   display range %.6g … %.6g",
-                                                      in.median, in.sigma, in.black, in.white]
-                         : nil;
-    } else {
-        _renderInfo = error.length ? error : @"No image";
-        _renderTip = nil;
-    }
+    fq_info in = r.info;
+    _renderInfo = r ? r.summary : error.length ? error : @"No image";
+    _stretchMenu.toolTip = r.kind == FQ_KIND_IMAGE
+                               ? [NSString stringWithFormat:@"median %.6g   σ %.4g   display range %.6g … %.6g",
+                                                            in.median, in.sigma, in.black, in.white]
+                               : nil;
 }
 
 - (void)showRendering:(FQRendering *)r error:(NSString *)error first:(BOOL)first
 {
     _rendering = r;
     int kind = r ? r.kind : FQ_KIND_NONE;
-    _imageView.image = kind == FQ_KIND_IMAGE ? r.image : NULL;
+    [self setPicture:kind == FQ_KIND_IMAGE ? r : nil];
     _spectrumView.rendering = kind == FQ_KIND_PLOT ? r : nil;
     _spectrumView.needsDisplay = YES;
     [self updateRenderInfo:error];
@@ -696,8 +806,12 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
             [_hduMenu addItemWithTitle:item.title];
             _hduMenu.lastItem.representedObject = @(item.hdu);
         }
-        [_hduMenu sizeToFit];
-        _hduWidth = MIN(NSWidth(_hduMenu.frame), 260);
+        [_hduMenu sizeToFit];   // for its height
+        CGFloat longest = 0;
+        for (FQHDUItem *item in _hdus)
+            longest = MAX(longest, [item.shortTitle sizeWithAttributes:@{NSFontAttributeName : _hduMenu.font}].width);
+        _hduWidth = MIN(ceil(longest) + 34, 260);
+        [_hduMenu setFrameSize:NSMakeSize(_hduWidth, NSHeight(_hduMenu.frame))];
 
         // Files without a picture open on their first table, or the header.
         _selected = r ? r.info.hdu : -1;
@@ -865,7 +979,10 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     int kind = _rendering ? _rendering.kind : FQ_KIND_NONE;
     _headerScroll.hidden = !header;
     _tableScroll.hidden = !rows;
-    _imageView.hidden = !picture || kind != FQ_KIND_IMAGE;
+    BOOL wasHidden = _imageScroll.hidden;
+    _imageScroll.hidden = !picture || kind != FQ_KIND_IMAGE;
+    if (wasHidden && !_imageScroll.hidden)
+        [self fitImage:NO];   // the window may have changed size meanwhile
     _spectrumView.hidden = !picture || kind != FQ_KIND_PLOT;
     _message.hidden = !picture || _message.stringValue.length == 0 ||
                       (kind != FQ_KIND_NONE && !(kind == FQ_KIND_IMAGE && _rendering.info.empty));
@@ -881,16 +998,11 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     NSInteger i = [_hduMenu indexOfItemWithRepresentedObject:@(_selected)];
     if (i >= 0)
         [_hduMenu selectItemAtIndex:i];
-    // The bar describes what is on show: the picture, or the table whose
-    // rows or header are shown (nothing for an HDU with just a header).
-    BOOL drawn = _rendering && (picture || _rendering.info.hdu == hdu);
-    if (drawn && !rows) {
-        _info.stringValue = _renderInfo ?: @"";
-        _info.toolTip = _renderTip;
-    } else {
-        _info.stringValue = _table && _tableHDU == hdu ? [self tableSummary] : @"";
-        _info.toolTip = nil;
-    }
+    _hduTitle.title = [self selectedItem].shortTitle ?: @"";
+    _hduMenu.needsDisplay = YES;
+    // The bar says briefly what is on show, and only what nothing else
+    // says: the picture's size and type, or the table's rows and columns.
+    _info.stringValue = picture && _rendering ? _renderInfo ?: @"" : rows ? [self tableSummary] : @"";
     [self layoutBar];
 }
 
@@ -917,6 +1029,142 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
             return;
         self->_loading.hidden = NO;
         [self->_spinner startAnimation:nil];
+    });
+}
+
+#pragma mark Zoom
+
+/// Shows r's image, or none. Another image of the same HDU and size (a
+/// cube plane, another stretch) keeps the zoom; another HDU is shown whole.
+- (void)setPicture:(FQRendering *)r
+{
+    [self clearDetail];
+    if (!r || r.kind != FQ_KIND_IMAGE) {
+        _imageView.image = NULL;
+        return;
+    }
+    fq_info in = r.info;
+    NSSize size = NSMakeSize(MAX(1, in.region[2]), MAX(1, in.region[3]));
+    BOOL same = _imageView.image && in.hdu == _pictureHDU && NSEqualSizes(_imageView.frame.size, size);
+    _pictureHDU = in.hdu;
+    _imageView.image = r.image;
+    if (!same) {
+        [_imageView setFrameSize:size];
+        [self fitImage:YES];
+    }
+    [self scheduleDetail];
+}
+
+/// The zoom limits for the view's size: from the whole image to kMaxZoom
+/// points per pixel. Shows the whole image again if it was (or if whole).
+- (void)fitImage:(BOOL)whole
+{
+    NSSize doc = _imageView.frame.size, view = _imageScroll.contentSize;
+    if (!_imageView.image || doc.width < 1 || doc.height < 1 || view.width < 1 || view.height < 1)
+        return;
+    CGFloat old = _fitZoom, zoom = _imageScroll.magnification;
+    if (old <= 0 || fabs(zoom - old) <= old * 1e-3)
+        whole = YES;
+    CGFloat fit = MIN(view.width / doc.width, view.height / doc.height);
+    _fitZoom = fit;
+    _imageScroll.minMagnification = fit;
+    _imageScroll.maxMagnification = MAX(kMaxZoom, 4 * fit);
+    if (whole || zoom < fit)
+        _imageScroll.magnification = fit;
+}
+
+- (void)zoomBy:(CGFloat)factor
+{
+    NSRect vis = _imageScroll.documentVisibleRect;
+    CGFloat zoom = MIN(MAX(_imageScroll.magnification * factor, _imageScroll.minMagnification),
+                       _imageScroll.maxMagnification);
+    [_imageScroll setMagnification:zoom centeredAtPoint:NSMakePoint(NSMidX(vis), NSMidY(vis))];
+}
+
+- (void)imageViewMoved:(NSNotification *)note
+{
+    (void)note;
+    [self scheduleDetail];
+}
+
+/// Asks for the part on view in detail once zooming and scrolling pause.
+- (void)scheduleDetail
+{
+    NSInteger token = ++_detailToken;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (token == self->_detailToken)
+            [self updateDetail];
+    });
+}
+
+- (void)clearDetail
+{
+    _detailGeneration++;
+    [_imageView setDetail:NULL frame:NSZeroRect];
+}
+
+/// When the image was binned to be shown and is zoomed in so far that its
+/// pixels are enlarged, renders the part on view pixel for pixel, with the
+/// same stretch, in the background, and lays it over the image.
+- (void)updateDetail
+{
+    FQRendering *r = _rendering;
+    if (!r || r.kind != FQ_KIND_IMAGE || !_imageView.image || _imageScroll.hidden || !_detailSource) {
+        [self clearDetail];
+        return;
+    }
+    fq_info in = r.info;
+    CGFloat scale = self.view.window.backingScaleFactor;
+    if (scale <= 0)
+        scale = NSScreen.mainScreen.backingScaleFactor > 0 ? NSScreen.mainScreen.backingScaleFactor : 1;
+    CGFloat zoom = _imageScroll.magnification;   // points per pixel
+    NSRect vis = NSIntersectionRect(_imageScroll.documentVisibleRect, _imageView.bounds);
+    if (in.bin <= 1 || zoom * scale * in.bin < 1.5 || NSIsEmptyRect(vis)) {
+        [self clearDetail];
+        return;
+    }
+    // Nothing to do while the detail on show covers the view finely enough.
+    CGImageRef have = _imageView.detail;
+    NSRect haveRect = _imageView.detailFrame;
+    if (have && NSContainsRect(NSInsetRect(haveRect, -0.5, -0.5), vis)) {
+        CGFloat perPixel = NSWidth(haveRect) / (CGFloat)CGImageGetWidth(have);   // image pixels per detail pixel
+        if (perPixel <= 1.001 || zoom * scale * perPixel <= 1.25)
+            return;
+    }
+    // The view's y grows from the first row of the file when the image is
+    // flipped (the FITS way: first row at the bottom).
+    CGFloat height = NSHeight(_imageView.bounds), ox = in.region[0], oy = in.region[1];
+    BOOL flipped = in.flipped != 0;
+    NSRect part = vis;
+    if (!flipped)
+        part.origin.y = height - NSMaxY(vis);
+    part = NSOffsetRect(part, ox, oy);
+    int maxWidth = (int)MAX(1, MIN(4096, ceil(NSWidth(vis) * zoom * scale)));
+    int maxHeight = (int)MAX(1, MIN(4096, ceil(NSHeight(vis) * zoom * scale)));
+    NSInteger generation = ++_detailGeneration;
+    FQDetailSource *source = _detailSource;
+    fq_stretch stretch = r.stretch;
+    int hdu = in.hdu;
+    long long plane = in.color == FQ_COLOR_RGB ? -1 : in.plane;
+    dispatch_async(_detailQueue, ^{
+        CGRect covered = CGRectZero;
+        CGImageRef cg = [source copyDetailOfHDU:hdu
+                                          plane:plane
+                                        stretch:stretch
+                                         region:part
+                                       maxWidth:maxWidth
+                                      maxHeight:maxHeight
+                                        covered:&covered];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (cg && generation == self->_detailGeneration) {
+                NSRect f = NSOffsetRect(covered, -ox, -oy);
+                if (!flipped)
+                    f.origin.y = height - NSMaxY(f);
+                [self->_imageView setDetail:cg frame:f];
+            }
+            if (cg)
+                CGImageRelease(cg);
+        });
     });
 }
 
@@ -1104,15 +1352,10 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
 {
     if (!_table)
         return @"Cannot read this table";
-    NSString *ext = @"";
-    for (FQHDUItem *item in _hdus)
-        if (item.hdu == _tableHDU)
-            ext = item.extname;
     long long rows = fq_table_rows(_table);
     int cols = fq_table_ncols(_table);
-    return [NSString stringWithFormat:@"HDU %d%@%@  ·  %lld row%@ × %d column%@", _tableHDU,
-                                      ext.length ? @" " : @"", ext, rows, rows == 1 ? @"" : @"s",
-                                      cols, cols == 1 ? @"" : @"s"];
+    return [NSString stringWithFormat:@"%lld row%@ × %d column%@", rows, rows == 1 ? @"" : @"s", cols,
+                                      cols == 1 ? @"" : @"s"];
 }
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView
@@ -1179,6 +1422,8 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
     // reading the file again.
     if (!_busy && _rendering && [_rendering restretch:(int)stretch]) {
         _imageView.image = _rendering.image;
+        [self clearDetail];
+        [self scheduleDetail];
         [self updateRenderInfo:nil];
         [self showMode:_mode.selectedSegment];
         return;
@@ -1223,14 +1468,30 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
     [self requestRender];
 }
 
-/// Cmd-F, Cmd-G and Shift-Cmd-G search the header listing.
+/// Command +, - and 0 zoom the image; Cmd-F, Cmd-G and Shift-Cmd-G search
+/// the header listing.
 - (BOOL)handleKeyEquivalent:(NSEvent *)event
 {
-    if (_headerScroll.hidden)
-        return NO;
     NSEventModifierFlags mods = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask &
                                 ~NSEventModifierFlagCapsLock;
     NSString *key = event.charactersIgnoringModifiers.lowercaseString;
+    // Command +, Command - and Command 0 zoom the image in, out, and back.
+    if (!_imageScroll.hidden && _imageView.image && (mods & ~NSEventModifierFlagShift) == NSEventModifierFlagCommand) {
+        if ([key isEqualToString:@"="] || [key isEqualToString:@"+"]) {
+            [self zoomBy:2];
+            return YES;
+        }
+        if ([key isEqualToString:@"-"] || [key isEqualToString:@"_"]) {
+            [self zoomBy:0.5];
+            return YES;
+        }
+        if ([key isEqualToString:@"0"]) {
+            [self fitImage:YES];
+            return YES;
+        }
+    }
+    if (_headerScroll.hidden)
+        return NO;
     NSInteger action = 0;
     if (mods == NSEventModifierFlagCommand && [key isEqualToString:@"f"])
         action = NSTextFinderActionShowFindInterface;

@@ -83,6 +83,8 @@ static NSString *FQTypeName(int bitpix)
         _extname = ext;
         _title = ext.length ? [NSString stringWithFormat:@"HDU %d  %@ — %@", e->hdu, ext, desc]
                             : [NSString stringWithFormat:@"HDU %d — %@", e->hdu, desc];
+        _shortTitle = ext.length ? [NSString stringWithFormat:@"HDU %d %@", e->hdu, ext]
+                                 : [NSString stringWithFormat:@"HDU %d", e->hdu];
     }
     return self;
 }
@@ -99,6 +101,8 @@ static NSString *FQTypeName(int bitpix)
         NSString *desc = empty ? @"no data" : @"header";
         _title = _extname.length ? [NSString stringWithFormat:@"HDU %d  %@ — %@", hdu, _extname, desc]
                                  : [NSString stringWithFormat:@"HDU %d — %@", hdu, desc];
+        _shortTitle = _extname.length ? [NSString stringWithFormat:@"HDU %d %@", hdu, _extname]
+                                      : [NSString stringWithFormat:@"HDU %d", hdu];
     }
     return self;
 }
@@ -243,6 +247,11 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
     return _img;
 }
 
+- (fq_stretch)stretch
+{
+    return _img->stretch;
+}
+
 - (CGSize)pixelSize
 {
     if (_image)
@@ -254,40 +263,75 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
 {
     const fq_info *in = &_img->info;
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
-    NSString *ext = FQString(in->extname);
-    if (in->hdu > 0 || ext.length)
-        [parts addObject:ext.length ? [NSString stringWithFormat:@"HDU %d %@", in->hdu, ext]
-                                    : [NSString stringWithFormat:@"HDU %d", in->hdu]];
     if (in->table) {
         [parts addObject:[NSString stringWithFormat:@"%lld rows", (long long)in->naxes[0]]];
-        [parts addObject:[NSString stringWithFormat:@"%@ vs %@", FQString(_img->y_label),
-                                                    FQString(_img->x_label)]];
     } else {
         NSMutableArray<NSString *> *dims = [NSMutableArray array];
         for (int i = 0; i < in->naxis && i < FQ_MAXAXES; i++)
             [dims addObject:[NSString stringWithFormat:@"%lld", (long long)in->naxes[i]]];
         [parts addObject:[dims componentsJoinedByString:@" × "]];
         [parts addObject:FQTypeName(in->bitpix)];
-        if (in->compressed)
-            [parts addObject:FQString(in->cmptype)];
         if (in->color == FQ_COLOR_RGB)
             [parts addObject:@"RGB"];
         else if (in->color == FQ_COLOR_BAYER)
             [parts addObject:[NSString stringWithFormat:@"Bayer %@", FQString(in->bayer)]];
-        else if (in->nplanes > 1)
-            [parts addObject:[NSString stringWithFormat:@"plane %lld of %lld", (long long)in->plane + 1,
-                                                        (long long)in->nplanes]];
-        if (in->kind == FQ_KIND_PLOT) {
-            if (_img->has_x)
-                [parts addObject:[NSString stringWithFormat:@"%g – %g %@", _img->x_first,
-                                                            _img->x_last, FQString(_img->x_unit)]];
-        } else if (in->bin > 1) {
-            [parts addObject:[NSString stringWithFormat:@"shown at 1/%d", in->bin]];
-        }
     }
     if (in->truncated)
         [parts addObject:@"file is truncated"];
     return [parts componentsJoinedByString:@"  ·  "];
+}
+
+@end
+
+@implementation FQDetailSource {
+    NSString *_path;
+    fq_file *_file;
+}
+
+- (instancetype)initWithPath:(NSString *)path
+{
+    if ((self = [super init]))
+        _path = [path copy];
+    return self;
+}
+
+- (void)dealloc
+{
+    fq_close(_file);
+}
+
+- (CGImageRef)copyDetailOfHDU:(int)hdu
+                        plane:(long long)plane
+                      stretch:(fq_stretch)stretch
+                       region:(CGRect)region
+                     maxWidth:(int)maxWidth
+                    maxHeight:(int)maxHeight
+                      covered:(CGRect *)covered
+{
+    char err[256] = "";
+    if (!_file)
+        _file = fq_open(_path.fileSystemRepresentation, err, sizeof err);
+    if (!_file)
+        return NULL;
+    fq_opts o;
+    fq_opts_default(&o);
+    o.max_width = maxWidth;
+    o.max_height = maxHeight;
+    o.hdu = hdu;
+    o.plane = plane < 0 ? -1 : (int)MIN(plane, (long long)INT_MAX);
+    o.region[0] = (int64_t)floor(region.origin.x);
+    o.region[1] = (int64_t)floor(region.origin.y);
+    o.region[2] = (int64_t)ceil(CGRectGetMaxX(region)) - o.region[0];
+    o.region[3] = (int64_t)ceil(CGRectGetMaxY(region)) - o.region[1];
+    fq_image *img = fq_render_detail(_file, &o, &stretch, err, sizeof err);
+    if (!img)
+        return NULL;
+    CGImageRef cg = FQCreateImage(img);
+    if (covered)
+        *covered = CGRectMake(img->info.region[0], img->info.region[1], img->info.region[2],
+                              img->info.region[3]);
+    fq_image_free(img);
+    return cg;
 }
 
 @end

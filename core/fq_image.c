@@ -770,6 +770,7 @@ typedef struct {
     int map[2][2];            /* Bayer: channel for [y & 1][x & 1] */
     int64_t W, H, nplanes, plane;
     int64_t cw, ch;           /* cells: pixels, or 2x2 Bayer cells */
+    int64_t rx, ry, rw, rh;   /* the part shown, in cells */
     int f, k, offs[MAX_K];
     int w, h;
     int truncated;
@@ -890,7 +891,7 @@ static uint8_t *needed_rows(const plan_t *P)
     }
     for (int oy = 0; oy < P->h; oy++)
         for (int j = 0; j < P->k; j++) {
-            int64_t cy = (int64_t)oy * P->f + P->offs[j];
+            int64_t cy = P->ry + (int64_t)oy * P->f + P->offs[j];
             if (P->color == FQ_COLOR_BAYER) {
                 for (int dy = 0; dy < 2; dy++)
                     if (2 * cy + dy < P->H)
@@ -1033,16 +1034,34 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
         P->cw = P->W;
         P->ch = P->H;
     }
+    /* The part shown: opts.region, or everything. */
+    P->rx = P->ry = 0;
+    P->rw = P->cw;
+    P->rh = P->ch;
+    if (P->kind == FQ_KIND_IMAGE && o->region[2] > 0 && o->region[3] > 0 && P->cw > 0 && P->ch > 0) {
+        int64_t cell = P->color == FQ_COLOR_BAYER ? 2 : 1;
+        int64_t x0 = o->region[0] / cell, y0 = o->region[1] / cell;
+        int64_t x1 = (fqi_add_sat(o->region[0], o->region[2]) + cell - 1) / cell;
+        int64_t y1 = (fqi_add_sat(o->region[1], o->region[3]) + cell - 1) / cell;
+        x0 = x0 < 0 ? 0 : x0 >= P->cw ? P->cw - 1 : x0;
+        y0 = y0 < 0 ? 0 : y0 >= P->ch ? P->ch - 1 : y0;
+        x1 = x1 > P->cw ? P->cw : x1 <= x0 ? x0 + 1 : x1;
+        y1 = y1 > P->ch ? P->ch : y1 <= y0 ? y0 + 1 : y1;
+        P->rx = x0;
+        P->ry = y0;
+        P->rw = x1 - x0;
+        P->rh = y1 - y0;
+    }
     int mw = o->max_width > 0 ? o->max_width : 1024;
     int mh = o->max_height > 0 ? o->max_height : 1024;
-    int64_t f1 = (P->cw + mw - 1) / mw, f2 = (P->ch + mh - 1) / mh;
+    int64_t f1 = (P->rw + mw - 1) / mw, f2 = (P->rh + mh - 1) / mh;
     int64_t fb = f1 > f2 ? f1 : f2;
     if (fb < 1)
         fb = 1;
     if (fb > INT_MAX / 4)
         fb = INT_MAX / 4;
     P->f = (int)fb;
-    int64_t w = P->cw / fb, hh = P->ch / fb;
+    int64_t w = P->rw / fb, hh = P->rh / fb;
     P->w = (int)(w < 1 ? 1 : w);
     P->h = (int)(hh < 1 ? 1 : hh);
     int k = o->max_samples <= 0 ? P->f : (o->max_samples < P->f ? o->max_samples : P->f);
@@ -1150,8 +1169,8 @@ static void bin_plane_row(const plan_t *P, int slot, int oy, float *tmp, float *
         /* Every pixel: sum the block's rows column by column, then add
            up the columns of each block once. */
         int64_t n = (int64_t)w * f;
-        if (n > P->W)
-            n = P->W;
+        if (n > P->rw)
+            n = P->rw;
         float *csum = col, *ccnt = col + n;
         if (f > 1) {
             memset(csum, 0, (size_t)n * sizeof(float));
@@ -1159,10 +1178,10 @@ static void bin_plane_row(const plan_t *P, int slot, int oy, float *tmp, float *
         }
         int any = 0;
         for (int j = 0; j < f; j++) {
-            const uint8_t *row = src_row(s, slot, (int64_t)oy * f + j);
+            const uint8_t *row = src_row(s, slot, P->ry + (int64_t)oy * f + j);
             if (!row)
                 continue;
-            decode_run(s, row, 0, 1, n, tmp);
+            decode_run(s, row, P->rx, 1, n, tmp);
             accumulate(tmp, f > 1 ? csum : acc, f > 1 ? ccnt : cnt, (int)n);
             any = 1;
         }
@@ -1182,15 +1201,16 @@ static void bin_plane_row(const plan_t *P, int slot, int oy, float *tmp, float *
         }
         return;
     }
+    const int64_t xend = P->rx + P->rw;
     for (int j = 0; j < P->k; j++) {
-        const uint8_t *row = src_row(s, slot, (int64_t)oy * f + P->offs[j]);
+        const uint8_t *row = src_row(s, slot, P->ry + (int64_t)oy * f + P->offs[j]);
         if (!row)
             continue;
         for (int i = 0; i < P->k; i++) {
-            int64_t x0 = P->offs[i];
-            if (x0 >= P->W)
+            int64_t x0 = P->rx + P->offs[i];
+            if (x0 >= xend)
                 continue;
-            int64_t n = (P->W - 1 - x0) / f + 1;
+            int64_t n = (xend - 1 - x0) / f + 1;
             if (n > w)
                 n = w;
             decode_step(s, row, x0, f, n, tmp);
@@ -1209,17 +1229,17 @@ static void bin_bayer_row(const plan_t *P, int oy, float *tmp, float *col, float
         /* Column sums kept apart for even and odd rows, since the colour of
            a pixel depends on both parities. */
         int64_t n = 2 * (int64_t)w * f;
-        if (n > P->W)
-            n = P->W;
+        if (n > 2 * P->rw)
+            n = 2 * P->rw;
         float *csum = col, *ccnt = col + 2 * n;
         memset(col, 0, 4 * (size_t)n * sizeof(float));
         for (int j = 0; j < f; j++)
             for (int dy = 0; dy < 2; dy++) {
-                int64_t y = 2 * ((int64_t)oy * f + j) + dy;
+                int64_t y = 2 * (P->ry + (int64_t)oy * f + j) + dy;
                 const uint8_t *row = src_row(s, 0, y);
                 if (!row)
                     continue;
-                decode_run(s, row, 0, 1, n, tmp);
+                decode_run(s, row, 2 * P->rx, 1, n, tmp);
                 accumulate(tmp, csum + (y & 1) * n, ccnt + (y & 1) * n, (int)n);
             }
         for (int ox = 0; ox < w; ox++) {
@@ -1235,8 +1255,9 @@ static void bin_bayer_row(const plan_t *P, int oy, float *tmp, float *col, float
         }
         return;
     }
+    const int64_t xend = 2 * (P->rx + P->rw);
     for (int j = 0; j < P->k; j++) {
-        int64_t cy = (int64_t)oy * f + P->offs[j];
+        int64_t cy = P->ry + (int64_t)oy * f + P->offs[j];
         for (int dy = 0; dy < 2; dy++) {
             int64_t y = 2 * cy + dy;
             const uint8_t *row = src_row(s, 0, y);
@@ -1245,10 +1266,10 @@ static void bin_bayer_row(const plan_t *P, int oy, float *tmp, float *col, float
             const int *map = P->map[y & 1];
             for (int i = 0; i < P->k; i++)
                 for (int dx = 0; dx < 2; dx++) {
-                    int64_t x0 = 2 * (int64_t)P->offs[i] + dx;
-                    if (x0 >= P->W)
+                    int64_t x0 = 2 * (P->rx + (int64_t)P->offs[i]) + dx;
+                    if (x0 >= xend)
                         continue;
-                    int64_t n = (P->W - 1 - x0) / (2 * f) + 1;
+                    int64_t n = (xend - 1 - x0) / (2 * f) + 1;
                     if (n > w)
                         n = w;
                     decode_step(s, row, x0, 2 * f, n, tmp);
@@ -1716,6 +1737,13 @@ static void fill_info(fq_file *f, const plan_t *P, fq_info *in)
     in->height = P->h;
     in->flipped = P->flip;
     in->truncated = P->truncated;
+    if (P->kind == FQ_KIND_IMAGE) {
+        int64_t cell = P->color == FQ_COLOR_BAYER ? 2 : 1;
+        in->region[0] = P->rx * cell;
+        in->region[1] = P->ry * cell;
+        in->region[2] = (int64_t)P->w * P->f * cell;
+        in->region[3] = (int64_t)P->h * P->f * cell;
+    }
 }
 
 static int prepare(fq_file *f, const fq_opts *o, plan_t *P, int force_image, int *table,
@@ -1783,8 +1811,26 @@ static void kept_free(fq_kept *k)
     }
 }
 
+/* Map binned values to img's pixels (allocated here) with stretch st. */
+static int map_pixels(fq_image *img, const float *bin, int w, int h, int nch, int flip,
+                      int has_nan, const stretch_t *st, int threads)
+{
+    img->width = w;
+    img->height = h;
+    img->components = (nch == 1 && !has_nan) ? 1 : 4;
+    img->row_bytes = (size_t)w * img->components;
+    img->pixels = malloc(img->row_bytes * (size_t)h);
+    if (!img->pixels)
+        return -1;
+    int nchunks = h < 128 ? h : 128;
+    mapjob M = { w, h, nch, flip, bin, st, img->pixels, img->row_bytes, img->components, nchunks };
+    par_for((size_t)nchunks, threads, &M, map_task);
+    return 0;
+}
+
 /* Stretch the binned values per channel and map them to img's pixels
-   (allocated here), filling in the display part of img->info. */
+   (allocated here), filling in the display part of img->info and the
+   stretch for fq_render_detail. */
 static int stretch_map(fq_image *img, const fq_kept *k, int mode, int threads)
 {
     stretch_t st[3];
@@ -1810,20 +1856,15 @@ static int stretch_map(fq_image *img, const fq_kept *k, int mode, int threads)
     img->info.black = st[0].lo + k->ref;
     img->info.white = st[0].hi + k->ref;
     img->info.empty = !any_valid;
-    const int has_nan = k->has_nan || !any_valid;
-
-    img->width = k->w;
-    img->height = k->h;
-    img->components = (k->nch == 1 && !has_nan) ? 1 : 4;
-    img->row_bytes = (size_t)k->w * img->components;
-    img->pixels = malloc(img->row_bytes * k->h);
-    if (!img->pixels)
-        return -1;
-    int nchunks = k->h < 128 ? k->h : 128;
-    mapjob M = { k->w, k->h, k->nch, k->flip, k->bin, st, img->pixels, img->row_bytes,
-                 img->components, nchunks };
-    par_for((size_t)nchunks, threads, &M, map_task);
-    return 0;
+    memset(&img->stretch, 0, sizeof img->stretch);
+    img->stretch.nch = k->nch;
+    img->stretch.ref = k->ref;
+    for (int c = 0; c < k->nch && c < 3; c++) {
+        img->stretch.c0[c] = st[c].c0;
+        img->stretch.inv[c] = st[c].inv;
+        img->stretch.m[c] = st[c].m;
+    }
+    return map_pixels(img, k->bin, k->w, k->h, k->nch, k->flip, k->has_nan || !any_valid, st, threads);
 }
 
 fq_image *fq_render(fq_file *f, const fq_opts *opts, char *err, size_t errlen)
@@ -1891,6 +1932,60 @@ fq_image *fq_render(fq_file *f, const fq_opts *opts, char *err, size_t errlen)
         img->kept = k;
     else
         kept_free(k);
+    return img;
+}
+
+fq_image *fq_render_detail(fq_file *f, const fq_opts *opts, const fq_stretch *stretch,
+                           char *err, size_t errlen)
+{
+    if (!opts || !stretch || stretch->nch < 1 || stretch->nch > 3) {
+        fqi_seterr(err, errlen, "no stretch to render with");
+        return NULL;
+    }
+    fq_opts o = *opts;
+    plan_t P;
+    int table;
+    if (prepare(f, &o, &P, 0, &table, err, errlen) != 0)
+        return NULL;
+    if (table || P.kind != FQ_KIND_IMAGE || P.nch != stretch->nch) {
+        plan_free(&P);
+        fqi_seterr(err, errlen, "not the image this stretch is for");
+        return NULL;
+    }
+    fq_image *img = calloc(1, sizeof *img);
+    if (!img) {
+        plan_free(&P);
+        fqi_seterr(err, errlen, "out of memory");
+        return NULL;
+    }
+    fill_info(f, &P, &img->info);
+    int has_nan = 0;
+    float *bin = bin_image(&P, o.threads, &has_nan);
+    double ref = P.src.ref;
+    plan_free(&P);
+    if (!bin) {
+        fq_image_free(img);
+        fqi_seterr(err, errlen, "out of memory");
+        return NULL;
+    }
+    /* Values here are relative to this plan's ref, those of the stretch to
+       its own. */
+    stretch_t st[3];
+    memset(st, 0, sizeof st);
+    for (int c = 0; c < P.nch; c++) {
+        st[c].valid = 1;
+        st[c].c0 = (float)(stretch->c0[c] + (stretch->ref - ref));
+        st[c].inv = stretch->inv[c];
+        st[c].m = stretch->m[c];
+    }
+    img->stretch = *stretch;
+    int rc = map_pixels(img, bin, P.w, P.h, P.nch, P.flip, has_nan, st, o.threads);
+    free(bin);
+    if (rc != 0) {
+        fq_image_free(img);
+        fqi_seterr(err, errlen, "out of memory");
+        return NULL;
+    }
     return img;
 }
 

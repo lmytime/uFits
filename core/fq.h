@@ -49,6 +49,9 @@ typedef struct {
     int threads;       /* 0 = all cores, 1 = single threaded */
     int exact;         /* 1 = keep absolute values in fq_decode_float */
     int keep;          /* 1 = keep the binned values, for fq_restretch */
+    int64_t region[4]; /* images: only this part, in pixels: x, y, width,
+                          height, from the first pixel of the first row in
+                          the file (all 0 = the whole image) */
 } fq_opts;
 
 void fq_opts_default(fq_opts *o);
@@ -75,7 +78,18 @@ typedef struct {
                                  naxes[0] is then the number of rows */
     double median, sigma;     /* channel 0 statistics in data units */
     double black, white;      /* display range of channel 0 */
+    int64_t region[4];        /* images: the pixels shown, as in fq_opts
+                                 (binning leaves out up to bin - 1 at the
+                                 right and at the last rows) */
 } fq_info;
+
+/* How values became grey levels, per channel: t = (v - ref - c0) * inv
+   clamped to [0, 1], then the midtones transfer function with m. */
+typedef struct {
+    int nch;
+    float c0[3], inv[3], m[3];
+    double ref;
+} fq_stretch;
 
 typedef struct fq_kept fq_kept;
 
@@ -109,6 +123,7 @@ typedef struct {
     int dot_rows;
     uint8_t *dots;
 
+    fq_stretch stretch;        /* FQ_KIND_IMAGE: for fq_render_detail */
     fq_kept *kept;             /* binned values (opts.keep), private */
 } fq_image;
 
@@ -127,6 +142,12 @@ fq_image *fq_render(fq_file *f, const fq_opts *opts, char *err, size_t errlen);
    file: new pixels (the old ones are freed unless taken: set pixels to
    NULL to keep them) and display range. 0 on success. */
 int fq_restretch(fq_image *img, int stretch, int threads);
+/* Render the part opts->region of an image with more detail (to fit
+   opts->max_width x max_height), mapped to grey levels with the stretch
+   of a whole-image rendering of the same HDU and plane (its img->stretch),
+   so that it can be laid over it. */
+fq_image *fq_render_detail(fq_file *f, const fq_opts *opts, const fq_stretch *stretch,
+                           char *err, size_t errlen);
 void fq_image_free(fq_image *img);
 
 /* Binned values before stretching, nch planes of w*h floats, FITS row

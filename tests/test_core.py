@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import zlib
 
 import numpy as np
 from astropy.io import fits
@@ -552,9 +553,88 @@ def check_restretch():
                 print(f"  ok  {fn} restretch")
 
 
+def read_png(path):
+    """Pixels of a PNG written by fqtool (8 bit grey or RGBA, no filters),
+    as RGBA."""
+    data = open(path, "rb").read()
+    pos, idat, w = 8, b"", 0
+    while pos < len(data):
+        n = int.from_bytes(data[pos:pos + 4], "big")
+        kind, body = data[pos + 4:pos + 8], data[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, ctype = int.from_bytes(body[:4], "big"), int.from_bytes(body[4:8], "big"), body[9]
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + n
+    comps = 1 if ctype == 0 else 4
+    rows = np.frombuffer(zlib.decompress(idat), np.uint8).reshape(h, 1 + w * comps)[:, 1:]
+    px = rows.reshape(h, w, comps)
+    if comps == 1:
+        px = np.concatenate([px, px, px, np.full((h, w, 1), 255, np.uint8)], axis=2)
+    return px
+
+
+def check_regions():
+    """A part of an image rendered for the zoom (--region, with the whole
+    image's stretch) has the pixels of the whole image rendered at the
+    same scale, at the same place."""
+    def render(path, out, *opts):
+        r = subprocess.run([FQ, "render", path, out, *opts], capture_output=True, text=True)
+        info = dict(kv.split("=", 1) for kv in r.stdout.split() if "=" in kv)
+        return (read_png(out), info) if r.returncode == 0 else (None, r.stderr.strip())
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for fn in ("f32.fits", "nan_f32.fits", "f64_offset.fits", "u16.fits", "rgb.fits", "cube5.fits",
+                   "bayer_rggb.fits", "bayer_offset.fits", "rice_f32_sd1.fits", "rice_i16_tiles.fits",
+                   "gzip2_i16.fits", "f32.fits.gz"):
+            path = os.path.join(DATA, fn)
+            if not os.path.exists(path):
+                continue
+            whole, info = render(path, os.path.join(tmp, "w.png"), "--max", "100000")
+            if whole is None:
+                failures.append(f"{fn}: render failed: {info}")
+                continue
+            b = int(info["bin"])
+            hc = whole.shape[0]
+            W, H = (int(v) for v in info["dims"].split("x")[:2])
+            ok = True
+            for region in ((10, 7, 37, 23), (0, 0, 16, 16), (W - 30, H - 20, 30, 20),
+                           (-20, H - 9, 60, 40), (W // 3, H // 4, W // 2, H // 2)):
+                part, pinfo = render(path, os.path.join(tmp, "p.png"), "--max", "100000",
+                                     "--region", ",".join(str(v) for v in region))
+                if part is None:
+                    failures.append(f"{fn}: region {region}: {pinfo}")
+                    ok = False
+                    break
+                rx, ry, rw, rh = (int(v) for v in pinfo["region"].split(","))
+                if int(pinfo["bin"]) != b or part.shape[:2] != (rh // b, rw // b):
+                    failures.append(f"{fn}: region {region} came out {pinfo['out']} at bin {pinfo['bin']}"
+                                    f" for {pinfo['region']}")
+                    ok = False
+                    break
+                x0, y0 = rx // b, ry // b
+                rows = slice(hc - y0 - rh // b, hc - y0) if info["flipped"] == "1" else slice(y0, y0 + rh // b)
+                want = whole[rows, x0:x0 + rw // b]
+                if want.shape != part.shape or not np.array_equal(want, part):
+                    bad = np.count_nonzero(np.any(want != part, axis=2)) if want.shape == part.shape else -1
+                    failures.append(f"{fn}: region {region} ({pinfo['region']}) differs from the whole"
+                                    f" image there ({bad} pixels)")
+                    ok = False
+                    break
+            # Bigger than the window: binned, still inside the whole image.
+            part, pinfo = render(path, os.path.join(tmp, "p.png"), "--max", "20",
+                                 "--region", f"0,0,{W},{H}")
+            if part is None or max(part.shape[:2]) > 20 or int(pinfo["bin"]) < 2:
+                failures.append(f"{fn}: binned region: {pinfo}")
+                ok = False
+            if ok:
+                print(f"  ok  {fn} regions")
+
+
 def main():
     check_stretch()
     check_restretch()
+    check_regions()
     check_listings()
     files = sorted(f for f in os.listdir(DATA) if f.endswith((".fits", ".fits.gz")))
     check_headers(files)
