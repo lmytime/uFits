@@ -4,6 +4,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// The app's settings, in the app and in the preview extension alike:
+/// "Check for updates", what was seen out there, the stretch of previews.
+NSUserDefaults *FQSettings(void);
+
 /// Looks, at most once a day and in the background, at the release that
 /// GitHub's .../releases/latest leads to, and remembers what it saw in the
 /// app's settings. Only the app looks (Quick Look keeps its previews off

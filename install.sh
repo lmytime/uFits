@@ -181,6 +181,20 @@ install_ufits() {
         [ -z "$missing" ] && break
         sleep 1
     done
+    # Other copies of uFits that macOS knows (an old build, a copy left in
+    # Downloads): Quick Look can use one of them instead, when it is numbered
+    # higher. Unregister them, and say where they are.
+    others=$(for id in $IDS; do
+        pluginkit -m -A -D -v -i "$id" 2>/dev/null | awk -F '\t' 'NF > 1 { print $NF }'
+    done | grep '^/' | grep -v -F "$dest/$APP/" | sort -u)
+    if [ -n "$others" ]; then
+        printf '%s\n' "$others" | while IFS= read -r ext; do
+            pluginkit -r "$ext" 2>/dev/null || true
+            "$LSREGISTER" -u "${ext%/Contents/PlugIns/*}" 2>/dev/null || true
+        done
+        say "Note: Quick Look now uses this uFits, not these other copies. Delete them, or macOS may take them up again:"
+        printf '%s\n' "$others" | sed 's|/Contents/PlugIns/.*||' | sort -u | sed 's/^/  /'
+    fi
     reset_quicklook
     # Looking for updates now and then, unless turned off in the app (by
     # versions that can: an older one would just start).

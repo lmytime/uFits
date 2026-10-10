@@ -131,6 +131,8 @@ jobs:
           # Both extensions are registered (the tests below need them).
           pluginkit -m -v -i io.github.lmytime.uFits.Preview | grep io.github.lmytime.uFits.Preview
           pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail | grep io.github.lmytime.uFits.Thumbnail
+          # Every copy that pluginkit knows of (the installer unregisters others).
+          pluginkit -m -A -D -v -i io.github.lmytime.uFits.Thumbnail || true
           /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
             | grep -B2 -A8 "gov.nasa.gsfc.fits" | head -40 || true
       - name: Quick Look thumbnails (QLThumbnailGenerator)
@@ -213,10 +215,63 @@ jobs:
           open /Applications/uFits.app
           sleep 4
           screencapture -x build/ql/app-setup.png || true
+          # uFits › About uFits (when System Events may click it).
+          osascript -e 'tell application "System Events" to tell process "uFits" to click menu item 1 of menu 1 of menu bar item 2 of menu bar 1' || true
+          sleep 2
+          screencapture -x build/ql/app-about.png || true
           open -a /Applications/uFits.app build/testdata/rgb.fits
           sleep 4
           screencapture -x build/ql/app-viewer.png || true
           osascript -e 'quit app "uFits"' || true
+      - name: Another copy of uFits, numbered higher (as the first builds were)
+        if: always()
+        timeout-minutes: 4
+        run: |
+          # A copy of uFits 1.0.0 left somewhere: which copy makes Finder's
+          # thumbnails? The app says what it sees; the installer unregisters
+          # the other copy and says where it is.
+          lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+          old=/private/tmp/old-builds/uFits.app
+          mkdir -p /private/tmp/old-builds /tmp/copycheck
+          ditto /Applications/uFits.app "$old"
+          for p in "$old/Contents" "$old"/Contents/PlugIns/*.appex/Contents; do
+            plutil -replace CFBundleShortVersionString -string 1.0.0 "$p/Info.plist"
+            plutil -replace CFBundleVersion -string 1 "$p/Info.plist"
+          done
+          for x in "$old"/Contents/PlugIns/*.appex "$old"; do
+            codesign --force --sign - --preserve-metadata=entitlements,flags "$x"
+          done
+          "$lsregister" -f "$old"
+          pluginkit -a "$old"/Contents/PlugIns/*.appex
+          sleep 2
+          pluginkit -m -A -D -v -i io.github.lmytime.uFits.Thumbnail
+          # The copy whose thumbnail extension runs for a file not seen before.
+          which_copy() {
+            pkill -x uFitsThumbnail || true
+            qlmanage -r >/dev/null 2>&1 || true
+            qlmanage -r cache >/dev/null 2>&1 || true
+            sleep 1
+            cp build/testdata/orient-ll.fits "/tmp/copycheck/$1.fits"
+            build/qlthumb /tmp/copycheck "/tmp/copycheck/$1.fits" || true
+            echo "pluginkit: $(pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail)"
+            echo "running: $(ps -axo command | grep '[u]FitsThumbnail' || echo none)"
+          }
+          which_copy before
+          open /Applications/uFits.app
+          sleep 5
+          screencapture -x build/ql/app-copies.png || true
+          pkill -x uFits || true
+          UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh | tee /tmp/copycheck/install.log
+          grep -F old-builds/uFits.app /tmp/copycheck/install.log
+          for id in Preview Thumbnail; do
+            for i in 1 2 3 4 5; do
+              pluginkit -m -v -i io.github.lmytime.uFits.$id | grep -qF /Applications/uFits.app/ && break
+              sleep 1
+            done
+            pluginkit -m -v -i io.github.lmytime.uFits.$id | grep -F /Applications/uFits.app/
+          done
+          which_copy after
+          rm -rf /private/tmp/old-builds
       - name: Crash reports
         if: always()
         run: |

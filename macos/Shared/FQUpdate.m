@@ -16,9 +16,9 @@ static BOOL FQInExtension(void)
 
 /// The app's settings, where what was seen is kept too: its own defaults in
 /// the app; in an extension (whose identifier is the app's and a last
-/// part, ".Preview"), the app's, which its sandbox lets it read
+/// part, ".Preview"), the app's, which its sandbox lets it read and write
 /// (Preview.entitlements).
-static NSUserDefaults *FQSettings(void)
+NSUserDefaults *FQSettings(void)
 {
     static NSUserDefaults *settings;
     static dispatch_once_t once;

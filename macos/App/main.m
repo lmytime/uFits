@@ -54,7 +54,8 @@ static void FQScheduleChecks(BOOL on);
 @implementation AppDelegate {
     NSWindow *_welcome;
     NSTextField *_status;
-    NSButton *_autoCheck;
+    NSButton *_autoCheck, *_thumbnails, *_removeCopies;
+    NSPopUpButton *_stretch;
     NSMutableArray<NSWindow *> *_viewers;
     NSPoint _cascade;
     BOOL _openedFiles, _launched;
@@ -136,7 +137,7 @@ static void FQScheduleChecks(BOOL on);
 
     NSMenu *appMenu = [[NSMenu alloc] initWithTitle:name];
     [appMenu addItemWithTitle:[@"About " stringByAppendingString:name]
-                       action:@selector(orderFrontStandardAboutPanel:)
+                       action:@selector(showAbout:)
                 keyEquivalent:@""];
     [appMenu addItemWithTitle:@"Check for Updates…" action:@selector(checkForUpdates:) keyEquivalent:@""];
     [appMenu addItem:NSMenuItem.separatorItem];
@@ -237,75 +238,128 @@ static void FQScheduleChecks(BOOL on);
 
 #pragma mark Setup window
 
+/// A label wrapping at width points.
+static NSTextField *FQWrappingLabel(NSString *text, CGFloat width)
+{
+    NSTextField *label = [NSTextField wrappingLabelWithString:text];
+    label.preferredMaxLayoutWidth = width;
+    [label.widthAnchor constraintEqualToConstant:width].active = YES;
+    return label;
+}
+
+/// views side by side, centred on one line.
+static NSStackView *FQRow(NSArray<NSView *> *views, CGFloat spacing)
+{
+    NSStackView *row = [NSStackView stackViewWithViews:views];
+    row.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    row.alignment = NSLayoutAttributeCenterY;
+    row.spacing = spacing;
+    return row;
+}
+
 - (void)showWelcome:(id)sender
 {
     (void)sender;
     if (!_welcome) {
-        NSView *v = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 540, 378)];
-
+        const CGFloat width = 500;
         NSImageView *icon = [NSImageView imageViewWithImage:NSApp.applicationIconImage];
-        icon.frame = NSMakeRect(24, 274, 80, 80);
-        [v addSubview:icon];
-
+        [icon.widthAnchor constraintEqualToConstant:72].active = YES;
+        [icon.heightAnchor constraintEqualToConstant:72].active = YES;
         NSTextField *title = [NSTextField labelWithString:@"uFits"];
         title.font = [NSFont systemFontOfSize:26 weight:NSFontWeightSemibold];
-        title.frame = NSMakeRect(120, 318, 380, 34);
-        [v addSubview:title];
-
-        NSTextField *sub = [NSTextField labelWithString:@"Quick Look for FITS and XISF images."];
+        NSTextField *sub = [NSTextField
+            labelWithString:[NSString stringWithFormat:@"Quick Look for FITS and XISF files · version %@",
+                                                       FQUpdate.currentVersion]];
         sub.textColor = NSColor.secondaryLabelColor;
-        sub.frame = NSMakeRect(120, 294, 400, 20);
-        [v addSubview:sub];
+        NSStackView *names = [NSStackView stackViewWithViews:@[ title, sub ]];
+        names.orientation = NSUserInterfaceLayoutOrientationVertical;
+        names.alignment = NSLayoutAttributeLeading;
+        names.spacing = 2;
 
-        NSTextField *how = [NSTextField wrappingLabelWithString:
-            @"Select a FITS or XISF file in Finder and press Space. Thumbnails appear "
-            @"in Finder windows. Nothing needs to keep running: macOS loads the extensions on demand.\n\n"
-            @"If previews do not show up, check that uFits is enabled under System Settings › "
-            @"General › Login Items & Extensions › Quick Look, then click Reset Quick Look."];
-        how.frame = NSMakeRect(24, 158, 492, 110);
-        [v addSubview:how];
+        NSTextField *how = FQWrappingLabel(
+            @"Select a FITS or XISF file in Finder and press Space. Finder shows thumbnails in its icon "
+            @"and gallery views. Nothing needs to keep running: macOS loads the Quick Look extensions of "
+            @"uFits when they are needed. If previews do not show up, check that uFits is on under "
+            @"System Settings › General › Login Items & Extensions › Quick Look, then click Reset Quick Look.",
+            width);
 
-        _status = [NSTextField wrappingLabelWithString:@""];
+        _status = FQWrappingLabel(@"", width);
         _status.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
         _status.textColor = NSColor.secondaryLabelColor;
-        _status.frame = NSMakeRect(24, 74, 492, 80);
-        [v addSubview:_status];
+        _removeCopies = [NSButton buttonWithTitle:@"Move Other Copies to Trash…"
+                                           target:self
+                                           action:@selector(removeOtherCopies:)];
+        _removeCopies.hidden = YES;
 
+        NSTextField *settings = [NSTextField labelWithString:@"Settings"];
+        settings.font = [NSFont boldSystemFontOfSize:NSFont.systemFontSize];
+        _thumbnails = [NSButton checkboxWithTitle:@"Show thumbnails in Finder's icon and gallery views"
+                                           target:self
+                                           action:@selector(thumbnailsChanged:)];
+        _stretch = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+        [_stretch addItemsWithTitles:@[ @"Auto stretch", @"Linear 0.5–99.5%", @"Min – max" ]];
+        _stretch.target = self;
+        _stretch.action = @selector(previewStretchChanged:);
+        NSStackView *stretchRow = FQRow(@[ [NSTextField labelWithString:@"Previews open with:"], _stretch ], 8);
         _autoCheck = [NSButton checkboxWithTitle:@"Check for updates automatically (once a day)"
                                           target:self
                                           action:@selector(autoCheckChanged:)];
-        _autoCheck.frame = NSMakeRect(22, 48, 492, 20);
-        [v addSubview:_autoCheck];
+        NSButton *checkNow = [NSButton buttonWithTitle:@"Check Now" target:self action:@selector(checkForUpdates:)];
+        NSStackView *updateRow = FQRow(@[ _autoCheck, checkNow ], 12);
 
         NSButton *open = [NSButton buttonWithTitle:@"Open a File…" target:self action:@selector(openDocument:)];
-        NSButton *settings = [NSButton buttonWithTitle:@"Extension Settings…" target:self action:@selector(openSettings:)];
+        NSButton *extensions = [NSButton buttonWithTitle:@"Extension Settings…"
+                                                  target:self
+                                                  action:@selector(openSettings:)];
         NSButton *reset = [NSButton buttonWithTitle:@"Reset Quick Look" target:self action:@selector(resetQuickLook:)];
-        CGFloat x = 24;
-        for (NSButton *b in @[ open, settings, reset ]) {
-            [b sizeToFit];
-            b.frame = NSMakeRect(x, 16, NSWidth(b.frame) + 8, NSHeight(b.frame));
-            x = NSMaxX(b.frame) + 8;
-            [v addSubview:b];
-        }
+        NSStackView *buttons = FQRow(@[ open, extensions, reset ], 8);
 
-        _welcome = [[NSWindow alloc] initWithContentRect:v.frame
+        NSStackView *all = [NSStackView stackViewWithViews:@[
+            FQRow(@[ icon, names ], 16), how, _status, _removeCopies, settings, _thumbnails, stretchRow, updateRow,
+            buttons
+        ]];
+        all.orientation = NSUserInterfaceLayoutOrientationVertical;
+        all.alignment = NSLayoutAttributeLeading;
+        all.spacing = 12;
+        all.edgeInsets = NSEdgeInsetsMake(20, 24, 20, 24);
+        [all setCustomSpacing:20 afterView:_removeCopies];
+        [all setCustomSpacing:20 afterView:updateRow];
+
+        _welcome = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, width + 48, 480)
                                                styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                                          NSWindowStyleMaskMiniaturizable
                                                  backing:NSBackingStoreBuffered
                                                    defer:YES];
         _welcome.title = @"uFits";
-        _welcome.contentView = v;
+        _welcome.contentView = all;
         _welcome.releasedWhenClosed = NO;
         _welcome.delegate = self;
-        [_welcome center];
     }
     _autoCheck.state = FQUpdate.enabled ? NSControlStateValueOn : NSControlStateValueOff;
+    [_stretch selectItemAtIndex:MIN(MAX([FQSettings() integerForKey:@"stretch"], 0), _stretch.numberOfItems - 1)];
+    BOOL first = !_welcome.visible;
     [self refreshStatus];
+    if (first)
+        [_welcome center];
     [_welcome makeKeyAndOrderFront:nil];
     if (@available(macOS 14.0, *))
         [NSApp activate];
     else
         [NSApp activateIgnoringOtherApps:YES];
+}
+
+/// Fits the setup window to what it shows, keeping its top where it is.
+- (void)fitWelcome
+{
+    if (!_welcome)
+        return;
+    NSView *v = _welcome.contentView;
+    [v layoutSubtreeIfNeeded];
+    NSSize size = v.fittingSize;
+    NSRect old = _welcome.frame;
+    NSRect frame = [_welcome frameRectForContentRect:NSMakeRect(0, 0, size.width, size.height)];
+    frame.origin = NSMakePoint(NSMinX(old), NSMaxY(old) - NSHeight(frame));
+    [_welcome setFrame:frame display:YES];
 }
 
 /// Runs a command line tool and returns what it printed.
@@ -322,6 +376,70 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args)
     NSData *data = [pipe.fileHandleForReading readDataToEndOfFile];
     [task waitUntilExit];
     return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+}
+
+static NSString *const kLSRegister =
+    @"/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+
+/// A Quick Look extension as pluginkit -v lists it, "+    io.github.lmytime.
+/// uFits.Preview(0.0.5)<tab>uuid<tab>date<tab>path": its version and path
+/// (NO for a line that is not one).
+static BOOL FQParsePlugin(NSString *line, NSString **version, NSString **path)
+{
+    NSArray<NSString *> *f = [line componentsSeparatedByString:@"\t"];
+    NSString *p = [f.lastObject stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (f.count < 2 || ![p hasPrefix:@"/"])
+        return NO;
+    NSString *head = f.firstObject;
+    NSRange a = [head rangeOfString:@"("], b = [head rangeOfString:@")" options:NSBackwardsSearch];
+    *version = a.location != NSNotFound && b.location != NSNotFound && b.location > a.location
+                   ? [head substringWithRange:NSMakeRange(NSMaxRange(a), b.location - NSMaxRange(a))]
+                   : @"?";
+    *path = p;
+    return YES;
+}
+
+/// Whether path is in this copy of uFits.
+static BOOL FQIsMine(NSString *path)
+{
+    if ([path hasPrefix:@"/System/Volumes/Data/"])
+        path = [path substringFromIndex:@"/System/Volumes/Data".length];
+    return [path hasPrefix:[NSBundle.mainBundle.bundlePath stringByAppendingString:@"/"]];
+}
+
+/// The app a Quick Look extension (.../uFits.app/Contents/PlugIns/x.appex) is in.
+static NSString *FQAppOf(NSString *appex)
+{
+    NSRange r = [appex rangeOfString:@"/Contents/PlugIns/" options:NSBackwardsSearch];
+    return r.location == NSNotFound ? appex : [appex substringToIndex:r.location];
+}
+
+/// The Quick Look extensions of other copies of uFits that macOS knows
+/// (an old build, a copy left in Downloads), path to version: one numbered
+/// higher than this one can be the one Quick Look uses.
+static NSDictionary<NSString *, NSString *> *FQOtherCopies(void)
+{
+    NSString *bundleID = NSBundle.mainBundle.bundleIdentifier ?: @"";
+    NSMutableDictionary<NSString *, NSString *> *out = [NSMutableDictionary dictionary];
+    for (NSString *suffix in @[ @"Preview", @"Thumbnail" ]) {
+        NSString *ident = [NSString stringWithFormat:@"%@.%@", bundleID, suffix];
+        NSString *list = RunTool(@"/usr/bin/pluginkit", @[ @"-m", @"-A", @"-D", @"-v", @"-i", ident ]);
+        for (NSString *line in [list componentsSeparatedByString:@"\n"]) {
+            NSString *version, *path;
+            if (FQParsePlugin(line, &version, &path) && !FQIsMine(path))
+                out[path] = version;
+        }
+    }
+    return out;
+}
+
+/// Whether this copy of uFits is the one in Applications (not one opened
+/// from the disk image, or from where it was built).
+static BOOL FQInApplications(void)
+{
+    NSString *path = NSBundle.mainBundle.bundlePath;
+    return [path hasPrefix:@"/Applications/"] ||
+           [path hasPrefix:[NSHomeDirectory() stringByAppendingPathComponent:@"Applications/"]];
 }
 
 - (void)refreshStatus
@@ -346,11 +464,15 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args)
     NSString *bundleID = NSBundle.mainBundle.bundleIdentifier ?: @"";
     for (NSString *suffix in @[ @"Preview", @"Thumbnail" ]) {
         NSString *ext = [NSString stringWithFormat:@"%@.%@", bundleID, suffix];
-        NSString *out = [RunTool(@"/usr/bin/pluginkit", @[ @"-m", @"-i", ext ])
+        // The copy of the extension that Quick Look uses.
+        NSString *out = [RunTool(@"/usr/bin/pluginkit", @[ @"-m", @"-v", @"-i", ext ])
             stringByTrimmingCharactersInSet:NSCharacterSet.newlineCharacterSet];
-        NSString *state;
+        NSString *version, *path, *state;
         if (!out.length)
             state = @"not registered";
+        else if (FQParsePlugin(out, &version, &path) && !FQIsMine(path))
+            state = [NSString stringWithFormat:@"Quick Look uses another copy's (uFits %@ in %@)", version,
+                                               FQAppOf(path).stringByDeletingLastPathComponent.stringByAbbreviatingWithTildeInPath];
         else if ([out hasPrefix:@"-"])
             state = @"disabled";
         else
@@ -358,15 +480,41 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args)
         [lines addObject:[NSString stringWithFormat:@"%@ %@ extension: %@",
                                                     [state isEqualToString:@"enabled"] ? @"✓" : @"⚠︎",
                                                     suffix, state]];
+        if ([suffix isEqualToString:@"Thumbnail"]) {
+            _thumbnails.state = out.length && ![out hasPrefix:@"-"] ? NSControlStateValueOn : NSControlStateValueOff;
+            _thumbnails.enabled = out.length > 0;
+        }
     }
+    // Other copies of uFits that macOS knows (an old build, a copy in
+    // Downloads): Quick Look may use them instead of this one. Say where
+    // they are and offer to move them to the Trash (from the copy in
+    // Applications only: opened from elsewhere, this is the other copy).
+    NSMutableDictionary<NSString *, NSString *> *apps = [NSMutableDictionary dictionary];
+    if (FQInApplications()) {
+        NSDictionary<NSString *, NSString *> *others = FQOtherCopies();
+        for (NSString *appex in others)
+            apps[FQAppOf(appex)] = others[appex];
+    }
+    if (apps.count) {
+        NSMutableArray<NSString *> *names = [NSMutableArray array];
+        for (NSString *app in [apps.allKeys sortedArrayUsingSelector:@selector(compare:)])
+            [names addObject:[NSString stringWithFormat:@"uFits %@ in %@", apps[app],
+                                                        app.stringByDeletingLastPathComponent.stringByAbbreviatingWithTildeInPath]];
+        [lines addObject:[NSString stringWithFormat:@"⚠︎ Other copies of uFits, which Quick Look may use instead of "
+                                                    @"this one: %@.",
+                                                    [names componentsJoinedByString:@"; "]]];
+    }
+    _removeCopies.hidden = apps.count == 0;
+
     NSString *now = FQUpdate.currentVersion, *latest = FQUpdate.latestVersion;
     if (latest && [FQUpdate version:latest isNewerThan:now])
-        [lines addObject:[NSString stringWithFormat:@"⬆︎ uFits %@ is out (this is %@): uFits › Check for Updates…",
+        [lines addObject:[NSString stringWithFormat:@"⬆︎ uFits %@ is out (this is %@): click Check Now to update.",
                                                     latest, now]];
     else
         [lines addObject:[NSString stringWithFormat:@"✓ uFits %@%@", now,
                                                     latest ? @" is the latest version." : @"."]];
     _status.stringValue = [lines componentsJoinedByString:@"\n"];
+    [self fitWelcome];
 }
 
 - (void)openSettings:(id)sender
@@ -387,6 +535,101 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args)
     RunTool(@"/usr/bin/qlmanage", @[ @"-r" ]);
     RunTool(@"/usr/bin/qlmanage", @[ @"-r", @"cache" ]);
     [self refreshStatus];
+}
+
+/// Finder's thumbnails on or off: the thumbnail extension's election.
+- (void)thumbnailsChanged:(NSButton *)sender
+{
+    NSString *ident = [NSBundle.mainBundle.bundleIdentifier stringByAppendingString:@".Thumbnail"];
+    RunTool(@"/usr/bin/pluginkit",
+            @[ @"-e", sender.state == NSControlStateValueOn ? @"use" : @"ignore", @"-i", ident ]);
+    RunTool(@"/usr/bin/qlmanage", @[ @"-r" ]);
+    RunTool(@"/usr/bin/qlmanage", @[ @"-r", @"cache" ]);   // Finder draws its icons again
+    [self refreshStatus];
+}
+
+/// The stretch previews open with, in Quick Look and in the app (a
+/// preview's own menu changes the same setting).
+- (void)previewStretchChanged:(NSPopUpButton *)sender
+{
+    [FQSettings() setInteger:sender.indexOfSelectedItem forKey:@"stretch"];
+}
+
+/// Moves the other copies of uFits that macOS knows to the Trash, once
+/// asked, and makes Quick Look use this one.
+- (void)removeOtherCopies:(id)sender
+{
+    (void)sender;
+    NSDictionary<NSString *, NSString *> *appexes = FQOtherCopies();
+    NSMutableDictionary<NSString *, NSString *> *apps = [NSMutableDictionary dictionary];
+    for (NSString *appex in appexes)
+        apps[FQAppOf(appex)] = appexes[appex];
+    if (!apps.count) {
+        [self refreshStatus];
+        return;
+    }
+    NSMutableArray<NSString *> *list = [NSMutableArray array];
+    for (NSString *app in [apps.allKeys sortedArrayUsingSelector:@selector(compare:)])
+        [list addObject:[NSString stringWithFormat:@"uFits %@: %@", apps[app], app.stringByAbbreviatingWithTildeInPath]];
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = @"Move the other copies of uFits to the Trash?";
+    alert.informativeText = [NSString
+        stringWithFormat:@"Quick Look may use them instead of this uFits (%@).\n\n%@", FQUpdate.currentVersion,
+                         [list componentsJoinedByString:@"\n"]];
+    [alert addButtonWithTitle:@"Move to Trash"];
+    [alert addButtonWithTitle:@"Cancel"];
+    if ([alert runModal] != NSAlertFirstButtonReturn)
+        return;
+    for (NSString *appex in appexes)
+        RunTool(@"/usr/bin/pluginkit", @[ @"-r", appex ]);
+    // Copies already in the Trash, or gone, are only unregistered.
+    NSString *bin = [NSHomeDirectory() stringByAppendingString:@"/.Trash/"];
+    NSMutableArray<NSURL *> *trash = [NSMutableArray array];
+    for (NSString *app in apps) {
+        RunTool(kLSRegister, @[ @"-u", app ]);
+        if (![app hasPrefix:bin] && [NSFileManager.defaultManager fileExistsAtPath:app])
+            [trash addObject:[NSURL fileURLWithPath:app]];
+    }
+    if (!trash.count) {
+        [self resetQuickLook:nil];
+        return;
+    }
+    [NSWorkspace.sharedWorkspace recycleURLs:trash
+                           completionHandler:^(NSDictionary<NSURL *, NSURL *> *moved, NSError *error) {
+                               (void)moved;
+                               dispatch_async(dispatch_get_main_queue(), ^{
+                                   if (error)
+                                       [[NSAlert alertWithError:error] runModal];
+                                   [self resetQuickLook:nil];   // this copy's extensions, registered again
+                               });
+                           }];
+}
+
+#pragma mark About
+
+- (void)showAbout:(id)sender
+{
+    (void)sender;
+    NSMutableParagraphStyle *centred = [NSMutableParagraphStyle new];
+    centred.alignment = NSTextAlignmentCenter;
+    NSDictionary *plain = @{
+        NSFontAttributeName : [NSFont systemFontOfSize:NSFont.smallSystemFontSize],
+        NSForegroundColorAttributeName : NSColor.secondaryLabelColor,
+        NSParagraphStyleAttributeName : centred
+    };
+    NSMutableAttributedString *credits = [[NSMutableAttributedString alloc]
+        initWithString:@"Quick Look for FITS and XISF files.\nXISF support by Shihao Wang.\n"
+            attributes:plain];
+    NSMutableDictionary *link = [plain mutableCopy];
+    link[NSLinkAttributeName] = [NSURL URLWithString:@"https://lmytime.github.io/uFits/"];
+    [credits appendAttributedString:[[NSAttributedString alloc] initWithString:@"lmytime.github.io/uFits"
+                                                                    attributes:link]];
+    // "Version 0.0.6", without the build number after it ("(1)").
+    [NSApp orderFrontStandardAboutPanelWithOptions:@{
+        NSAboutPanelOptionVersion : @"",
+        NSAboutPanelOptionCredits : credits
+    }];
+    [self activate];
 }
 
 #pragma mark Updates

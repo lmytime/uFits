@@ -738,7 +738,11 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 
 - (int)currentStretch
 {
-    NSInteger s = [NSUserDefaults.standardUserDefaults integerForKey:kStretchDefaultsKey];
+    // The app's setting, the same in Quick Look and in the app (before 0.0.6
+    // a preview kept its own choice: still taken until there is one).
+    id v = [FQSettings() objectForKey:kStretchDefaultsKey]
+               ?: [NSUserDefaults.standardUserDefaults objectForKey:kStretchDefaultsKey];
+    NSInteger s = [v respondsToSelector:@selector(integerValue)] ? [v integerValue] : FQ_STRETCH_AUTO;
     return (s >= FQ_STRETCH_AUTO && s <= FQ_STRETCH_MINMAX) ? (int)s : FQ_STRETCH_AUTO;
 }
 
@@ -1572,7 +1576,7 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
 {
     (void)sender;
     NSInteger stretch = _stretchMenu.indexOfSelectedItem;
-    [NSUserDefaults.standardUserDefaults setInteger:stretch forKey:kStretchDefaultsKey];
+    [FQSettings() setInteger:stretch forKey:kStretchDefaultsKey];
     // Only the mapping changes: redo it from the binned values, without
     // reading the file again.
     if (!_busy && _rendering && [_rendering restretch:(int)stretch]) {
