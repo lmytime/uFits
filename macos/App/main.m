@@ -50,8 +50,9 @@ static void FQScheduleChecks(BOOL on);
 
 #pragma mark App icon
 
-/// The icon setting: "auto", the app's own icon (Dusk; on macOS 26 the light
-/// one in light mode), or always "dusk" or always "light".
+/// The icon setting: "auto", the app's own icon (on macOS 26 the light one,
+/// and Dusk when icons are dark; Dusk on earlier versions), or always "dusk"
+/// or always "light".
 static NSString *const kIconKey = @"FQAppIcon";
 static NSArray<NSString *> *FQIconChoices(void)
 {
@@ -359,8 +360,8 @@ static NSStackView *FQRow(NSArray<NSView *> *views, CGFloat spacing)
             image.size = NSMakeSize(16, 16);
             [_appIcon itemAtIndex:k].image = image;
         }
-        _appIcon.toolTip = @"Automatic: the light icon in light mode and Dusk in dark mode (macOS 26), "
-                           @"Dusk on earlier versions of macOS.";
+        _appIcon.toolTip = @"Automatic: on macOS 26, the light icon, and Dusk when icons are dark (System "
+                           @"Settings › Appearance › Icon & widget style); Dusk on earlier versions of macOS.";
         _appIcon.target = self;
         _appIcon.action = @selector(appIconChanged:);
         NSStackView *iconRow = FQRow(@[ [NSTextField labelWithString:@"App icon:"], _appIcon ], 8);

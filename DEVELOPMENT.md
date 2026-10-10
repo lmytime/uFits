@@ -196,10 +196,11 @@ cells across the 1024 x 1024 icon (one cell a pixel at 32 px, exact at every siz
 and 16 cells for 16 px. It comes in two palettes, Dusk (the app's icon) and a light one,
 and the script writes `macos/App/AppIcon.icns` (Dusk), `AppIconLight.icns`,
 `macos/App/AppIcon.icon` and the homepage's icons and favicons. `AppIcon.icon` is in Icon
-Composer's format, the only one that lets macOS 26 change a Mac app's icon with light and
-dark mode (an asset catalog's dark and light app icons are for iOS): the light icon over
-Dusk, hidden in dark mode, flat. The Makefile compiles it with the `actool` of Xcode 26 or
-later, when there is one. The app's **App icon** setting, Dusk or
+Composer's format, the only one in which a Mac app's icon has a dark look (`actool` drops
+the dark and light app icons of an asset catalog): the light icon over Dusk, hidden when
+icons are dark (System Settings › Appearance › Icon & widget style), flat. The Makefile
+compiles it with the `actool` of Xcode 26 or later, for macOS 26 only: earlier versions
+find nothing they can use in it and show `AppIcon.icns`, Dusk. The app's **App icon** setting, Dusk or
 Light, sets a custom icon on the app (`NSWorkspace setIcon:forFile:`, as
 `uFits --set-icon auto|dusk|light` does); the app, and the installer, set it again after
 an update replaces the app.

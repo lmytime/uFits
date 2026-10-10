@@ -71,8 +71,9 @@ Open uFits (in Applications) to see whether its Quick Look extensions are on, an
 - **Show thumbnails in Finder's icon and gallery views.** Small icons (list and column
   views) always keep the file's own icon.
 - **Previews open with** the automatic, linear or min–max stretch.
-- **App icon:** Automatic (on macOS 26, light in light mode and dark in dark mode), or
-  always the dark or the light one.
+- **App icon:** Automatic (on macOS 26 the light icon, and the dark one, Dusk, when System
+  Settings › Appearance › Icon & widget style is Dark; Dusk on earlier versions), or always
+  Dusk or always the light one.
 - **Check for updates automatically (once a day)**: uFits asks GitHub, in the background,
   whether a new version is out, and offers it. **Check Now** asks at once.
 
