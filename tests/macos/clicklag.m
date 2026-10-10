@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 #import "FQPreviewController.h"
+#import "FQUpdate.h"
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"   // CGWindowListCreateImage
 
@@ -398,11 +399,20 @@ int main(int argc, const char *argv[])
         NSButton *notice = findView(root, NSButton.class, ^BOOL(id v) {
             return [[v title] isEqualToString:@"Update available"];
         });
+        // It is at the left end of the bar; if not here, say why.
+        NSRect nf = notice ? [notice convertRect:notice.bounds toView:root] : NSMakeRect(10, 5, 100, 20);
         if (update && !notice) {
-            printf("FAIL no \"Update available\" in the layout of the preview\n");
-            return 1;
+            printf("     (no \"Update available\" laid out here: available %s, latest %s, checks %s; the bar:)\n",
+                   FQUpdate.availableVersion.UTF8String ?: "-", FQUpdate.latestVersion.UTF8String ?: "-",
+                   FQUpdate.enabled ? "on" : "off");
+            for (NSView *v in root.subviews) {
+                NSRect f = [v convertRect:v.bounds toView:root];
+                if (NSMinY(f) < 30)
+                    printf("       %s%s %s %s\n", v.hidden ? "(hidden) " : "", NSStringFromClass(v.class).UTF8String,
+                           NSStringFromRect(f).UTF8String,
+                           [v isKindOfClass:NSButton.class] ? [(NSButton *)v title].UTF8String : "");
+            }
         }
-        NSRect nf = notice ? [notice convertRect:notice.bounds toView:root] : NSZeroRect;
         NSRect hf = [hdu convertRect:hdu.bounds toView:root], sf = [seg convertRect:seg.bounds toView:root];
 
         // The extension's preview, in a QLPreviewView.

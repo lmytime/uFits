@@ -679,11 +679,18 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     _info.lineBreakMode = NSLineBreakByTruncatingTail;
     [root addSubview:_info];
 
-    // When a newer uFits is out (FQUpdate): "Update available", left.
+    // When a newer uFits is out (FQUpdate): "Update available", left, in
+    // the link colour (a preview's window is never key: a bezel would be
+    // grey).
     _update = [NSButton buttonWithTitle:@"Update available" target:self action:@selector(updateClicked:)];
-    _update.bezelStyle = NSBezelStyleInline;
-    _update.controlSize = NSControlSizeSmall;
-    _update.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightMedium];
+    _update.bordered = NO;
+    NSFont *updateFont = [NSFont systemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightSemibold];
+    _update.attributedTitle = [[NSAttributedString alloc]
+        initWithString:@"Update available"
+            attributes:@{NSFontAttributeName : updateFont, NSForegroundColorAttributeName : NSColor.linkColor}];
+    _update.image = [NSImage imageWithSystemSymbolName:@"arrow.down.circle.fill" accessibilityDescription:nil];
+    _update.imagePosition = NSImageLeading;
+    _update.contentTintColor = NSColor.linkColor;
     [_update sizeToFit];
     _update.hidden = YES;
     [root addSubview:_update];
