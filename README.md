@@ -82,8 +82,8 @@ Open uFits (in Applications) to see whether its Quick Look extensions are on, an
   app.
 - **Thumbnails fill only a quarter of the icon or are upside down, or the uFits app says
   "Version 1.0.0".** An old copy of uFits is still on your Mac. The first builds were
-  numbered 1.0.0, higher than today's versions, and macOS 15 makes Finder's thumbnails
-  with the copy numbered highest. The uFits app in Applications lists other copies and
+  numbered 1.0.0, higher than today's versions, and on macOS 15 Finder's thumbnails can
+  come from the copy numbered highest. The uFits app in Applications lists other copies and
   moves them to the Trash; the installer unregisters them too. To find them yourself:
   `pluginkit -m -A -D -v -i io.github.lmytime.uFits.Thumbnail`.
 - **Another app takes over `.fits` files.** The uFits app shows which file type `.fits`

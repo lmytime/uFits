@@ -258,7 +258,7 @@ jobs:
           sleep 2
           pluginkit -m -A -D -v -i io.github.lmytime.uFits.Thumbnail
           # The copy whose thumbnail extension runs for a file not seen before
-          # (macOS 15 takes the old one, though pluginkit names the other).
+          # (on macOS 15 it has been the old one, though pluginkit named the other).
           which_copy() {
             pkill -x uFitsThumbnail || true
             qlmanage -r >/dev/null 2>&1 || true

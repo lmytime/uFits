@@ -229,8 +229,8 @@ install_ufits() {
     xattr -dr com.apple.quarantine "$dest/$APP" 2>/dev/null || true
 
     # Other copies of uFits that macOS knows of (an old build, a copy left in
-    # Downloads): Quick Look can use one of them instead of this one (macOS
-    # 15 takes the one numbered highest). Unregister them, and say where.
+    # Downloads): Quick Look can use one of them instead of this one (on
+    # macOS 15, one numbered higher). Unregister them, and say where.
     others=$(known_extensions | unregister_copies "$dest/$APP")
 
     # Register the app and turn its Quick Look extensions on. pluginkit now

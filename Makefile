@@ -23,7 +23,7 @@
 
 APP        := uFits
 BUNDLE_ID  ?= io.github.lmytime.uFits
-VERSION    ?= 0.0.5
+VERSION    ?= 0.0.6
 BUILD_NUM  ?= 1
 MINOS      ?= 11.0
 ARCHS      ?= arm64 x86_64
