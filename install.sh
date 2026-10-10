@@ -260,6 +260,12 @@ install_ufits() {
     # Looking for updates now and then, unless turned off in the app (by
     # versions that can: an older one would just start).
     bin="$dest/$APP/Contents/MacOS/uFits"
+    # The icon chosen in the app: a custom icon on the app, gone with the copy
+    # replaced (versions that have the setting).
+    choice=$(defaults read io.github.lmytime.uFits FQAppIcon 2>/dev/null || true)
+    case $choice in
+    dusk | light) ! grep -q -- --set-icon "$bin" 2>/dev/null || "$bin" --set-icon "$choice" >/dev/null 2>&1 || true ;;
+    esac
     if grep -q -- --schedule-update-checks "$bin" 2>/dev/null; then
         "$bin" --schedule-update-checks >/dev/null 2>&1 || true
     else

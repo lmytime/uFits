@@ -137,7 +137,7 @@ jobs:
           /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
             | grep -B2 -A8 "gov.nasa.gsfc.fits" | head -40 || true
       - name: Icon size beside other apps' (best effort)
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 3
         run: |
           # The share of its square each icon fills, as Finder and the Dock
@@ -148,6 +148,69 @@ jobs:
             /System/Applications/TextEdit.app /System/Applications/Preview.app /Applications/Safari.app \
             "/System/Applications/System Settings.app" "/Applications/Google Chrome.app" /Applications/Firefox.app \
             ${xcode:+"$xcode"} || true
+      - name: App icon in light and dark mode, and the icon of choice (best effort)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: |
+          app=/Applications/uFits.app
+          ls -d /Applications/Xcode*.app; xcrun --find actool; xcrun actool --version | head -12 || true
+          # What actool makes of the icon catalog (Dusk for any appearance, the
+          # light icon for light mode), and of the usual way round (light for
+          # any, Dusk for dark).
+          cat > /tmp/renditions.py <<'PY'
+          import json, sys
+          for r in json.load(sys.stdin):
+              if r.get("AssetType") in ("Icon Image", "MultiSized Image", "Image") or "Appearance" in r:
+                  print("  ", r.get("Name"), r.get("Appearance", "-"), r.get("PixelWidth", ""), r.get("Idiom", ""),
+                        r.get("RenditionName", ""))
+          PY
+          xcrun assetutil --info $app/Contents/Resources/Assets.car | python3 /tmp/renditions.py || true
+          mkdir -p /tmp/catalog-b/out
+          cp -R macos/App/Assets.xcassets /tmp/catalog-b/
+          python3 - <<'PY'
+          import json
+          p = "/tmp/catalog-b/Assets.xcassets/AppIcon.appiconset/Contents.json"
+          d = json.load(open(p))
+          for im in d["images"]:
+              if im.pop("appearances", None):
+                  im["filename"] = im["filename"].replace("light-", "dusk-")
+                  im["appearances"] = [{"appearance": "luminosity", "value": "dark"}]
+              else:
+                  im["filename"] = im["filename"].replace("dusk-", "light-")
+          json.dump(d, open(p, "w"), indent=2)
+          PY
+          xcrun actool /tmp/catalog-b/Assets.xcassets --compile /tmp/catalog-b/out --platform macosx \
+            --minimum-deployment-target 11.0 --app-icon AppIcon --output-partial-info-plist /tmp/catalog-b/p.plist \
+            --warnings --notices --errors || true
+          xcrun assetutil --info /tmp/catalog-b/out/Assets.car | python3 /tmp/renditions.py || true
+          # The icon as drawn in light and dark mode, then with macOS itself in
+          # dark mode and back.
+          build/iconsize build/ql/app-icon-modes.png --appearance aqua $app --appearance dark $app || true
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true' || true
+          sleep 3
+          build/iconsize /tmp/icon-dark.png $app || true
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true
+          sleep 3
+          build/iconsize /tmp/icon-light.png $app || true
+          # The icon of choice: a custom icon on the app. It still opens, and
+          # Quick Look still uses its extensions.
+          $app/Contents/MacOS/uFits --set-icon light && echo "set: light" || echo "could not set the icon"
+          ls -la $app | head -8
+          build/iconsize build/ql/app-icon-chosen.png $app || true
+          codesign --verify --deep --strict $app 2>&1 && echo "signature: whole" || echo "signature: not whole"
+          open $app
+          sleep 4
+          pgrep -x uFits > /dev/null && echo "uFits opens with an icon chosen" || echo "uFits did not open"
+          screencapture -x build/ql/app-dock-chosen.png || true
+          pkill -x uFits || true
+          mkdir -p /tmp/iconcheck
+          cp build/testdata/f32.fits /tmp/iconcheck/chosen.fits
+          make qltools > /dev/null 2>&1 || true
+          build/qlthumb /tmp/iconcheck /tmp/iconcheck/chosen.fits || true
+          pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail || true
+          $app/Contents/MacOS/uFits --set-icon auto && echo "set: auto" || echo "could not unset the icon"
+          ls -la $app | head -8
+          build/iconsize /tmp/icon-auto.png $app || true
       - name: Quick Look thumbnails (QLThumbnailGenerator)
         timeout-minutes: 4
         run: |
@@ -175,7 +238,7 @@ jobs:
           # The same as Finder asks for its icons (Quick Look may frame them).
           ../qlthumb --icon ../ql orient-ll.fits orient-ll-big.fits orient-ul-topdown.fits orient-ul.xisf
       - name: Finder icons (best effort)
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 3
         run: |
           # The orientation files in a Finder window, for review: blocks in
@@ -190,7 +253,7 @@ jobs:
           screencapture -x build/ql/app-finder.png || true
           osascript -e 'tell application "Finder" to close every window' || true
       - name: Quick Look preview (QLPreviewView)
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 4
         run: |
           cd build/testdata
@@ -200,17 +263,17 @@ jobs:
             spectrum.pha events.evt image.img disk.img xisf_mono.xisf xisf_multi.xisf xisf_zstd.xisf \
             xisf_utf8_declaration.xisf xisf_uppercase_hex_zstd.xisf
       - name: Preview UI (HDU menu, plane slider, plots, tables, find bar, timings)
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 6
         run: |
           python3 tests/macos/make_big_files.py build/testdata
           build/uitest build/ql build/testdata
       - name: Quick Look clicks (HDU menu and mode switch answer at once)
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 3
         run: build/clicklag build/ql build/testdata/mef.fits
       - name: Update notice in Quick Look
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 2
         run: |
           # As if the app had seen uFits 99.0.0 out (a preview may not go online:
@@ -222,7 +285,7 @@ jobs:
           defaults delete io.github.lmytime.uFits FQUpdateLatest
           exit $status
       - name: Stretch chosen in Quick Look
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 2
         run: |
           # The stretch menu of a preview in Quick Look sets the app's setting:
@@ -234,7 +297,7 @@ jobs:
           defaults delete io.github.lmytime.uFits stretch 2>/dev/null || true
           exit $status
       - name: App windows (best effort)
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 2
         run: |
           open /Applications/uFits.app
@@ -249,7 +312,7 @@ jobs:
           screencapture -x build/ql/app-viewer.png || true
           osascript -e 'quit app "uFits"' || true
       - name: Another copy of uFits, numbered higher (as the first builds were)
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 4
         run: |
           # A copy of uFits 1.0.0 left somewhere: which copy makes Finder's
@@ -300,7 +363,7 @@ jobs:
           esac
           rm -rf /private/tmp/old-builds
       - name: Update, as a user would
-        if: always()
+        if: ${{ !cancelled() }}
         timeout-minutes: 6
         run: |
           # This build, numbered 0.0.1, updates itself to the latest release
@@ -327,12 +390,12 @@ jobs:
           UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh > /dev/null
           exit $status
       - name: Crash reports
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
           ls ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i ufits || echo "no uFits crash reports"
           for f in ~/Library/Logs/DiagnosticReports/*uFits*; do [ -f "$f" ] && head -150 "$f"; done; true
       - name: Quick Look logs
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
           # Looks for a newer release (the app, the launchd job), the preview's
           # "Update available", and what the sandbox kept the preview from
@@ -343,16 +406,16 @@ jobs:
             --predicate 'process BEGINSWITH "uFits" OR (subsystem CONTAINS "quicklook" AND messageType >= 16)' \
             | tail -60 || true
       - name: Uninstall, and nothing is left
-        if: always()
+        if: ${{ !cancelled() }}
         run: sh tests/macos/uninstall_check.sh
       - name: Images for review (base64)
-        if: always()
+        if: ${{ !cancelled() }}
         run: tests/macos/print_images.sh build/ql
       - name: Package
-        if: always()
+        if: ${{ !cancelled() }}
         run: make zip
       - uses: actions/upload-artifact@v4
-        if: always() && matrix.os == 'macos-15'
+        if: ${{ !cancelled() && matrix.os == 'macos-15' }}
         with:
           name: uFits
           path: |
@@ -430,8 +493,8 @@ jobs:
           mkdir -p pics
           sh tests/macos/update_check.sh "${TAG#v}" pics
       - name: Uninstall, and nothing is left
-        if: always()
+        if: ${{ !cancelled() }}
         run: sh tests/macos/uninstall_check.sh
       - name: Pictures for review (base64)
-        if: always()
+        if: ${{ !cancelled() }}
         run: tests/macos/print_images.sh pics

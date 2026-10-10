@@ -48,6 +48,54 @@ static NSDictionary<NSString *, UTType *> *FQExtensionsElsewhere(void)
 
 static void FQScheduleChecks(BOOL on);
 
+#pragma mark App icon
+
+/// The icon setting: "auto", the app's own icon (Dusk; on macOS 26 the light
+/// one in light mode), or always "dusk" or always "light".
+static NSString *const kIconKey = @"FQAppIcon";
+static NSArray<NSString *> *FQIconChoices(void)
+{
+    return @[ @"auto", @"dusk", @"light" ];
+}
+
+static NSString *FQIconChoice(void)
+{
+    NSString *choice = [FQSettings() stringForKey:kIconKey];
+    return [FQIconChoices() containsObject:choice] ? choice : @"auto";
+}
+
+/// The icon of choice (nil for "auto"), from the app's resources.
+static NSImage *FQIconImage(NSString *choice)
+{
+    NSString *name = [choice isEqualToString:@"light"] ? @"AppIconLight"
+                     : [choice isEqualToString:@"dusk"] ? @"AppIcon"
+                                                        : nil;
+    return name ? [[NSImage alloc] initWithContentsOfFile:[NSBundle.mainBundle pathForResource:name ofType:@"icns"]]
+                : nil;
+}
+
+/// Whether the app has a custom icon (Finder keeps a folder's in a file
+/// named "Icon\r" in it).
+static BOOL FQHasCustomIcon(void)
+{
+    return [NSFileManager.defaultManager
+        fileExistsAtPath:[NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Icon\r"]];
+}
+
+/// Shows the icon of choice for uFits in Finder, Launchpad and the Dock: a
+/// custom icon on the app (a Mac app has no other way to change its icon),
+/// none for "auto". NO when the app cannot be changed (a disk image).
+static BOOL FQApplyIcon(NSString *choice)
+{
+    NSImage *image = FQIconImage(choice);
+    if (!image && ![choice isEqualToString:@"auto"])
+        return NO;
+    BOOL ok = [NSWorkspace.sharedWorkspace setIcon:image forFile:NSBundle.mainBundle.bundlePath options:0];
+    if (ok && NSApp)
+        NSApp.applicationIconImage = image;   // the Dock, at once (nil: the app's own)
+    return ok;
+}
+
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate>
 @end
 
@@ -55,7 +103,7 @@ static void FQScheduleChecks(BOOL on);
     NSWindow *_welcome;
     NSTextField *_status;
     NSButton *_autoCheck, *_thumbnails, *_removeCopies;
-    NSPopUpButton *_stretch;
+    NSPopUpButton *_stretch, *_appIcon;
     NSMutableArray<NSWindow *> *_viewers;
     NSPoint _cascade;
     BOOL _openedFiles, _launched;
@@ -79,6 +127,9 @@ static void FQScheduleChecks(BOOL on);
     if (!_openedFiles)
         [self showWelcome:nil];
     FQScheduleChecks(FQUpdate.enabled);   // in case uFits moved
+    // An update replaces the app, and its custom icon with it.
+    if (![FQIconChoice() isEqualToString:@"auto"] && !FQHasCustomIcon())
+        FQApplyIcon(FQIconChoice());
     if (_updateAsked) {
         [self offerUpdate:_updateAsked.length ? _updateAsked : nil];
         _updateAsked = nil;
@@ -301,6 +352,18 @@ static NSStackView *FQRow(NSArray<NSView *> *views, CGFloat spacing)
         _stretch.target = self;
         _stretch.action = @selector(previewStretchChanged:);
         NSStackView *stretchRow = FQRow(@[ [NSTextField labelWithString:@"Previews open with:"], _stretch ], 8);
+        _appIcon = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+        [_appIcon addItemsWithTitles:@[ @"Automatic", @"Dusk", @"Light" ]];
+        for (NSUInteger k = 1; k < FQIconChoices().count; k++) {
+            NSImage *image = FQIconImage(FQIconChoices()[k]);
+            image.size = NSMakeSize(16, 16);
+            [_appIcon itemAtIndex:k].image = image;
+        }
+        _appIcon.toolTip = @"Automatic: the light icon in light mode and Dusk in dark mode (macOS 26), "
+                           @"Dusk on earlier versions of macOS.";
+        _appIcon.target = self;
+        _appIcon.action = @selector(appIconChanged:);
+        NSStackView *iconRow = FQRow(@[ [NSTextField labelWithString:@"App icon:"], _appIcon ], 8);
         _autoCheck = [NSButton checkboxWithTitle:@"Check for updates automatically (once a day)"
                                           target:self
                                           action:@selector(autoCheckChanged:)];
@@ -315,8 +378,8 @@ static NSStackView *FQRow(NSArray<NSView *> *views, CGFloat spacing)
         NSStackView *buttons = FQRow(@[ open, extensions, reset ], 8);
 
         NSStackView *all = [NSStackView stackViewWithViews:@[
-            FQRow(@[ icon, names ], 16), how, _status, _removeCopies, settings, _thumbnails, stretchRow, updateRow,
-            buttons
+            FQRow(@[ icon, names ], 16), how, _status, _removeCopies, settings, _thumbnails, stretchRow, iconRow,
+            updateRow, buttons
         ]];
         all.orientation = NSUserInterfaceLayoutOrientationVertical;
         all.alignment = NSLayoutAttributeLeading;
@@ -338,6 +401,7 @@ static NSStackView *FQRow(NSArray<NSView *> *views, CGFloat spacing)
     }
     _autoCheck.state = FQUpdate.enabled ? NSControlStateValueOn : NSControlStateValueOff;
     [_stretch selectItemAtIndex:MIN(MAX([FQSettings() integerForKey:@"stretch"], 0), _stretch.numberOfItems - 1)];
+    [_appIcon selectItemAtIndex:(NSInteger)[FQIconChoices() indexOfObject:FQIconChoice()]];
     BOOL first = !_welcome.visible;
     [self refreshStatus];
     if (first)
@@ -554,6 +618,24 @@ static BOOL FQInApplications(void)
 - (void)previewStretchChanged:(NSPopUpButton *)sender
 {
     [FQSettings() setInteger:sender.indexOfSelectedItem forKey:@"stretch"];
+}
+
+/// The app's icon: automatic, Dusk or light.
+- (void)appIconChanged:(NSPopUpButton *)sender
+{
+    NSString *choice = FQIconChoices()[(NSUInteger)MAX(0, sender.indexOfSelectedItem)];
+    if (!FQApplyIcon(choice)) {
+        NSAlert *alert = [NSAlert new];
+        alert.messageText = @"uFits could not change its icon";
+        alert.informativeText = [NSString
+            stringWithFormat:@"%@ cannot be changed where it is. Install uFits in Applications, then choose again.",
+                             NSBundle.mainBundle.bundlePath.stringByAbbreviatingWithTildeInPath];
+        [self activate];
+        [alert runModal];
+        [sender selectItemAtIndex:(NSInteger)[FQIconChoices() indexOfObject:FQIconChoice()]];
+        return;
+    }
+    [FQSettings() setObject:choice forKey:kIconKey];
 }
 
 /// Moves the other copies of uFits that macOS knows to the Trash, once
@@ -909,6 +991,21 @@ int main(int argc, const char *argv[])
                        : FQAlsoPreviewed(t)                 ? "previewed (not FITS to macOS: no Finder icons)"
                                                             : "NOT RECOGNISED");
             }
+            return 0;
+        }
+        if (argc > 2 && !strcmp(argv[1], "--set-icon")) {
+            // The app's icon: auto, dusk or light (install.sh sets it again
+            // after an update, as the app does when it opens).
+            NSString *choice = @(argv[2]);
+            if (![FQIconChoices() containsObject:choice]) {
+                fprintf(stderr, "uFits --set-icon auto|dusk|light\n");
+                return 2;
+            }
+            if (!FQApplyIcon(choice)) {
+                fprintf(stderr, "could not set the icon of %s\n", NSBundle.mainBundle.bundlePath.UTF8String);
+                return 1;
+            }
+            [FQSettings() setObject:choice forKey:kIconKey];
             return 0;
         }
         if (argc > 1 && !strcmp(argv[1], "--schedule-update-checks")) {

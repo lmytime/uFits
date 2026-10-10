@@ -158,9 +158,21 @@ $(THUMB)/Contents/Info.plist: macos/Thumbnail/Info.plist Makefile
 $(B)/Preview.entitlements: macos/Preview/Preview.entitlements Makefile
 	$(call make_plist,$<,$@)
 
-$(APPDIR)/Contents/Resources/AppIcon.icns: macos/App/AppIcon.icns
+$(APPDIR)/Contents/Resources/%.icns: macos/App/%.icns
 	@mkdir -p $(dir $@)
 	cp $< $@
+
+# The icon for macOS 26, which follows light and dark mode (Assets.xcassets,
+# by tools/make_icon.py): compiled by Xcode's actool, when there is one.
+ACTOOL := $(shell xcrun --find actool 2>/dev/null)
+ICON_CATALOG := $(wildcard macos/App/Assets.xcassets/*.json macos/App/Assets.xcassets/*/*)
+
+$(APPDIR)/Contents/Resources/Assets.car: $(ICON_CATALOG)
+	@mkdir -p $(dir $@) $(B)/assets
+	xcrun actool macos/App/Assets.xcassets --compile $(B)/assets --platform macosx \
+	    --minimum-deployment-target $(MINOS) --app-icon AppIcon \
+	    --output-partial-info-plist $(B)/assets/partial.plist --warnings --notices --errors
+	cp $(B)/assets/Assets.car $@
 
 $(APPDIR)/Contents/Resources/LICENSE: LICENSE
 	@mkdir -p $(dir $@)
@@ -174,7 +186,8 @@ $(APPDIR)/Contents/Resources/zstd-LICENSE: third_party/zstd/LICENSE
 # Extensions must be signed (sandboxed) before the app that contains them.
 
 BUNDLE_PARTS := $(APPDIR)/Contents/MacOS/$(APP) $(APPDIR)/Contents/Info.plist \
-	$(APPDIR)/Contents/Resources/AppIcon.icns $(APPDIR)/Contents/Resources/LICENSE \
+	$(APPDIR)/Contents/Resources/AppIcon.icns $(APPDIR)/Contents/Resources/AppIconLight.icns \
+	$(if $(ACTOOL),$(APPDIR)/Contents/Resources/Assets.car) $(APPDIR)/Contents/Resources/LICENSE \
 	$(APPDIR)/Contents/Resources/zstd-LICENSE \
 	$(PREVIEW)/Contents/MacOS/uFitsPreview $(PREVIEW)/Contents/Info.plist \
 	$(THUMB)/Contents/MacOS/uFitsThumbnail $(THUMB)/Contents/Info.plist

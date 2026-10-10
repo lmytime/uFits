@@ -1,104 +1,201 @@
 #!/usr/bin/env python3
-"""Draw the uFits app icon (a spiral galaxy) and write macos/App/AppIcon.icns.
+"""Draw the uFits icon, a pixel-art spiral galaxy, in its dark (Dusk) and
+light versions, and write
 
-Needs numpy and Pillow. The .icns is committed, so this only needs to run
-when the artwork changes.
+  macos/App/AppIcon.icns          the app's icon: Dusk (macOS 15 and earlier)
+  macos/App/AppIconLight.icns     the light one, for the app's icon setting
+  macos/App/Assets.xcassets       both: macOS 26 follows light and dark mode
+  docs/icon.png, docs/icon-light.png, docs/favicon.png, docs/favicon-light.png
+
+The galaxy is drawn cell by cell from the maps below: 32 cells across the
+1024 x 1024 icon, so that every size from 32 px up is drawn exactly (one cell
+a pixel at 32 px), and a map of its own for 16 px. The icon's shape is
+Apple's (824 of 1024, corners of radius 185.4), cut smoothly at each size.
+
+Needs numpy and Pillow. What it writes is committed, so this only needs to
+run when the artwork changes.
 """
 import io
+import json
+import os
 import struct
 import sys
 
 import numpy as np
 from PIL import Image
 
-N = 1024
+# Cells: . night, , faint disc, 0-3 arms (dim to bright), A C W the core
+# (amber, cream, white), * star-forming knots, s S stars. F, the cells along
+# the icon's edge, is added below.
+ART32 = """
+................................
+................................
+................................
+................................
+.......................s........
+......................sSs.......
+..........,,,,,,,......s........
+........,000000000,,............
+.......,000000,,,,,,,,,.........
+......,0100,,......,,,,,,.......
+......0110,............,,,s.....
+......0*10...,,,.........,,.....
+......0110,,0122110.............
+......,110,0232111210...........
+.......011,022ACA11110..........
+........011,1ACWWA2,111,........
+........,111,2AWWCA1,110........
+..........01111ACA220,110.......
+...........0121112320,011,......
+.............0112210,,0110......
+.....s,.........,,,...01*0......
+......,,,............,0110......
+.......,,,,,,......,,0010,......
+.........,,,,,,,,,000000,.......
+............,,000000000,........
+........S......,,,,,,,..........
+................................
+...................s............
+................................
+................................
+................................
+................................
+"""
+
+ART16 = """
+................
+................
+................
+....,0000,..S...
+...0100,,,......
+...11,..........
+...1102321......
+...,10AWW210....
+....012WWA01,...
+......1232011...
+..........,11...
+......,,,0010...
+...s..,0000,....
+................
+................
+................
+"""
+
+PALETTES = {
+    # Dark: muted lavender arms and a soft gold core on indigo.
+    "dusk": {
+        ".": "#161825", "F": "#232740", ",": "#1e2133",
+        "0": "#32375a", "1": "#525a89", "2": "#8890be", "3": "#c3c8e6",
+        "A": "#d8b886", "C": "#efdcb8", "W": "#fff8ea",
+        "*": "#e39ab0", "s": "#6c74a2", "S": "#eceef8",
+    },
+    # Light: the same galaxy in indigo ink on pale lavender, with a gold core.
+    "light": {
+        ".": "#f0eff6", "F": "#dedcea", ",": "#e1dfec",
+        "0": "#bbb9d6", "1": "#8988ba", "2": "#5a5d98", "3": "#363a71",
+        "A": "#b07a2c", "C": "#d49d3a", "W": "#f0c457",
+        "*": "#cc7093", "s": "#a5a4c8", "S": "#33376b",
+    },
+}
+
+SHAPE, RADIUS = 824 / 1024, 185.4 / 1024  # of the icon's width
 
 
-def galaxy(n):
-    y, x = (np.mgrid[0:n, 0:n] - n / 2 + 0.5) / (n / 2)
-    # Tilt the disc.
-    ang = np.deg2rad(-28)
-    xr = x * np.cos(ang) - y * np.sin(ang)
-    yr = (x * np.sin(ang) + y * np.cos(ang)) / 0.62
-    r = np.hypot(xr, yr) + 1e-6
-    th = np.arctan2(yr, xr)
-    # Two logarithmic spiral arms.
-    pitch = 0.32
-    phase = th - np.log(r) / pitch
-    arms = (0.5 + 0.5 * np.cos(2 * phase)) ** 3
-    disc = np.exp(-r / 0.22)
-    bulge = np.exp(-(r / 0.07) ** 1.2)
-    light = disc * (0.25 + 1.6 * arms) + 3.0 * bulge
-    # Dust lanes trail the arms.
-    light *= 1 - 0.35 * (0.5 + 0.5 * np.cos(2 * phase - 0.9)) ** 6 * np.exp(-r / 0.5)
-    return light, r, arms
+def cells(text):
+    rows = [r for r in text.split("\n") if r]
+    g = len(rows)
+    assert all(len(r) == g for r in rows), "a map must be square"
+    # 180-degree symmetric, but for the stars and knots.
+    for i in range(g):
+        for j in range(g):
+            a, b = rows[i][j], rows[g - 1 - i][g - 1 - j]
+            assert a == b or {a, b} & set("sS*"), f"not symmetric at {i},{j}"
+    # The night along the icon's edge is a shade lighter: the edge shows on
+    # any background.
+    out = [list(r) for r in rows]
+    half, rad = SHAPE * g / 2, RADIUS * g
+    edge = 1.0 if g >= 32 else 0.5  # cells
+    for i in range(g):
+        for j in range(g):
+            dx = max(abs(j + 0.5 - g / 2) - (half - rad), 0)
+            dy = max(abs(i + 0.5 - g / 2) - (half - rad), 0)
+            if out[i][j] == "." and rad - np.hypot(dx, dy) < edge:
+                out[i][j] = "F"
+    return out
 
 
-def render():
-    rng = np.random.default_rng(7)
-    light, r, arms = galaxy(N)
-    v = np.arcsinh(light * 6) / np.arcsinh(6 * 3.5)
-    v = np.clip(v, 0, 1)
-    # Warm core, blue arms.
-    warm = np.array([1.0, 0.86, 0.66])
-    blue = np.array([0.55, 0.72, 1.0])
-    mix = np.clip(r / 0.35, 0, 1)[..., None]
-    col = (warm * (1 - mix) + blue * mix) * v[..., None]
-
-    # Background: deep blue gradient.
-    yy = np.linspace(0, 1, N)[:, None, None]
-    bg = np.array([0.02, 0.03, 0.09]) * (1 - yy) + np.array([0.06, 0.08, 0.20]) * yy
-    img = bg + col * 1.15
-
-    # A few stars.
-    for _ in range(70):
-        sx, sy = rng.uniform(80, N - 80, 2)
-        if np.hypot(sx - N / 2, sy - N / 2) < 260:
-            continue
-        b = rng.uniform(0.25, 1.0) ** 2
-        s = rng.uniform(1.2, 3.2)
-        y0, y1 = int(sy - 12), int(sy + 13)
-        x0, x1 = int(sx - 12), int(sx + 13)
-        gy, gx = np.mgrid[y0:y1, x0:x1]
-        g = b * np.exp(-((gx - sx) ** 2 + (gy - sy) ** 2) / (2 * s * s))
-        img[y0:y1, x0:x1] += g[..., None] * np.array([0.9, 0.95, 1.0])
-    img = np.clip(img, 0, 1)
-
-    # Rounded square (macOS grid: 824 px shape, radius 185 on a 1024 canvas).
-    size, rad = 824, 185.4
-    c = (N - 1) / 2
-    gy, gx = np.mgrid[0:N, 0:N]
+def shape(n):
+    """The icon's shape at n x n pixels, antialiased."""
+    size, rad = SHAPE * n, RADIUS * n
+    c = (n - 1) / 2
+    gy, gx = np.mgrid[0:n, 0:n]
     dx = np.maximum(np.abs(gx - c) - (size / 2 - rad), 0)
     dy = np.maximum(np.abs(gy - c) - (size / 2 - rad), 0)
-    d = np.hypot(dx, dy) - rad
-    alpha = np.clip(0.5 - d, 0, 1)
-    rgba = np.dstack([img, alpha])
-    # Subtle top highlight on the rim.
-    rim = np.clip(1 - np.abs(d + 3) / 3, 0, 1) * (gy < c) * 0.25
-    rgba[..., :3] = np.clip(rgba[..., :3] + rim[..., None], 0, 1)
-    return Image.fromarray((rgba * 255 + 0.5).astype(np.uint8), "RGBA")
+    return np.clip(0.5 - (np.hypot(dx, dy) - rad), 0, 1)
 
 
-def png(im, px):
+def render(palette, n):
+    """The icon at n pixels (16, or a multiple of 32), cells drawn exactly."""
+    art = cells(ART16 if n < 32 else ART32)
+    g = len(art)
+    assert n % g == 0, n
+    rgb = {k: [int(v[i:i + 2], 16) for i in (1, 3, 5)] for k, v in PALETTES[palette].items()}
+    a = np.array([[rgb[c] for c in row] for row in art], np.uint8)
+    a = a.repeat(n // g, axis=0).repeat(n // g, axis=1)
+    alpha = (shape(n) * 255 + 0.5).astype(np.uint8)
+    return Image.fromarray(np.dstack([a, alpha]), "RGBA")
+
+
+def png(im):
     out = io.BytesIO()
-    im.resize((px, px), Image.LANCZOS).save(out, "PNG", optimize=True)
+    im.save(out, "PNG", optimize=True)
     return out.getvalue()
 
 
-def main(path):
-    im = render()
+def icns(palette, path):
     entries = [(b"icp4", 16), (b"icp5", 32), (b"icp6", 64), (b"ic07", 128), (b"ic08", 256),
                (b"ic09", 512), (b"ic10", 1024), (b"ic11", 32), (b"ic12", 64), (b"ic13", 256),
                (b"ic14", 512)]
-    cache = {}
     body = b""
     for tag, px in entries:
-        data = cache.setdefault(px, png(im, px))
+        data = png(render(palette, px))
         body += tag + struct.pack(">I", len(data) + 8) + data
     with open(path, "wb") as f:
         f.write(b"icns" + struct.pack(">I", len(body) + 8) + body)
-    im.resize((256, 256), Image.LANCZOS).save(path.replace(".icns", "-preview.png"))
+
+
+def catalog(path):
+    """An asset catalog with the app's icon: Dusk for any appearance, the
+    light one for light mode (macOS 26; earlier versions show Dusk)."""
+    iconset = os.path.join(path, "AppIcon.appiconset")
+    os.makedirs(iconset, exist_ok=True)
+    with open(os.path.join(path, "Contents.json"), "w") as f:
+        json.dump({"info": {"author": "xcode", "version": 1}}, f, indent=2)
+    images = []
+    for palette, appearance in (("dusk", None), ("light", "light")):
+        for pt in (16, 32, 128, 256, 512):
+            for scale in (1, 2):
+                px = pt * scale
+                name = f"{palette}-{px}.png"
+                render(palette, px).save(os.path.join(iconset, name), optimize=True)
+                image = {"filename": name, "idiom": "mac", "scale": f"{scale}x", "size": f"{pt}x{pt}"}
+                if appearance:
+                    image["appearances"] = [{"appearance": "luminosity", "value": appearance}]
+                images.append(image)
+    with open(os.path.join(iconset, "Contents.json"), "w") as f:
+        json.dump({"images": images, "info": {"author": "xcode", "version": 1}}, f, indent=2)
+
+
+def main(root):
+    app = os.path.join(root, "macos", "App")
+    docs = os.path.join(root, "docs")
+    icns("dusk", os.path.join(app, "AppIcon.icns"))
+    icns("light", os.path.join(app, "AppIconLight.icns"))
+    catalog(os.path.join(app, "Assets.xcassets"))
+    for palette, suffix in (("dusk", ""), ("light", "-light")):
+        render(palette, 256).save(os.path.join(docs, f"icon{suffix}.png"), optimize=True)
+        render(palette, 64).save(os.path.join(docs, f"favicon{suffix}.png"), optimize=True)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "macos/App/AppIcon.icns")
+    main(sys.argv[1] if len(sys.argv) > 1 else ".")
