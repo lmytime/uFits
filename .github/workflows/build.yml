@@ -82,6 +82,9 @@ jobs:
           lipo -info build/uFits.app/Contents/MacOS/uFits build/uFits.app/Contents/PlugIns/*.appex/Contents/MacOS/*
           codesign -d --entitlements - build/uFits.app/Contents/PlugIns/uFitsPreview.appex
           du -sh build/uFits.app
+      - name: Probe ways to compile the icon (temporary)
+        timeout-minutes: 5
+        run: bash tests/macos/icon_probe.sh
       - name: Disk image
         run: |
           make dmg
