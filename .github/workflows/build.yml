@@ -114,6 +114,8 @@ jobs:
           UFITS_FROM_APP=1 UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh
           pgrep -x uFits
           osascript -e 'quit app "uFits"' || pkill -x uFits || true
+          # What macOS takes each extension uFits claims for.
+          /Applications/uFits.app/Contents/MacOS/uFits --file-types
           # A launchd job (set up by the installer) looks for updates now and then.
           plutil -p ~/Library/LaunchAgents/io.github.lmytime.uFits.update.plist
           launchctl print "gui/$(id -u)/io.github.lmytime.uFits.update" | grep -E "^\s*(state|program|path) =" || true
@@ -126,6 +128,12 @@ jobs:
         run: |
           make qltools
           cd build/testdata
+          # The FITS files of X-ray missions, by their own extensions.
+          cp pha.fits spectrum.pha; cp pha.fits spectrum.pi; cp pha.fits response.rmf
+          cp lc_tess.fits curve.lc; cp catalog_gaia.fits events.evt; cp f32.fits image.img
+          ../qlthumb ../ql spectrum.pha spectrum.pi response.rmf curve.lc events.evt
+          # .img is a disk image to macOS too: not checked.
+          ../qlthumb ../ql image.img || true
           ../qlthumb ../ql f32.fits u16.fits rgb.fits bayer_rggb.fits rice_f32_sd1.fits \
             footprint_f32.fits mef.fits spec1d.fits cube5.fits lc_tess.fits lc_mag.fits spec_sdss.fits pha.fits \
             catalog_wrap.fits catalog_gaia.fits
@@ -134,7 +142,8 @@ jobs:
         timeout-minutes: 4
         run: |
           cd build/testdata
-          ../qlpreview ../ql f32.fits spec1d.fits mef.fits lc_tess.fits catalog_gaia.fits tables_mixed.fits
+          ../qlpreview ../ql f32.fits spec1d.fits mef.fits lc_tess.fits catalog_gaia.fits tables_mixed.fits \
+            spectrum.pha events.evt
       - name: Preview UI (HDU menu, plane slider, plots, tables, find bar, timings)
         if: always()
         timeout-minutes: 6

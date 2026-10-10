@@ -65,6 +65,7 @@
 			<array>
 				<string>gov.nasa.gsfc.fits</string>
 				<string>io.github.lmytime.ufits.fz</string>
+				<string>io.github.lmytime.ufits.ogip</string>
 			</array>
 		</dict>
 	</array>
@@ -89,6 +90,9 @@
 					<string>fits</string>
 					<string>fit</string>
 					<string>fts</string>
+					<string>FITS</string>
+					<string>FIT</string>
+					<string>FTS</string>
 				</array>
 				<key>public.mime-type</key>
 				<array>
@@ -115,6 +119,38 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>fz</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<!-- FITS files of X-ray and gamma-ray missions (OGIP formats):
+			     spectra, responses, events, light curves, images,
+			     housekeeping and filter files. -->
+			<key>UTTypeIdentifier</key>
+			<string>io.github.lmytime.ufits.ogip</string>
+			<key>UTTypeDescription</key>
+			<string>FITS File</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>gov.nasa.gsfc.fits</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>pha</string>
+					<string>pi</string>
+					<string>arf</string>
+					<string>rmf</string>
+					<string>rsp</string>
+					<string>rsp2</string>
+					<string>evt</string>
+					<string>lc</string>
+					<string>img</string>
+					<string>hk</string>
+					<string>mkf</string>
+					<string>dph</string>
 				</array>
 			</dict>
 		</dict>

@@ -14,6 +14,28 @@
 
 static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
 
+/// The extensions uFits claims (Info.plist): FITS, tile-compressed FITS,
+/// and the FITS files of X-ray missions.
+static NSArray<NSString *> *FQExtensions(void)
+{
+    return @[ @"fits", @"fit", @"fts", @"fz", @"pha", @"pi", @"arf", @"rmf", @"rsp", @"rsp2", @"evt", @"lc", @"img",
+              @"hk", @"mkf", @"dph" ];
+}
+
+/// Those that macOS takes for something else (another app's type, or its
+/// own: .img is a disk image too), with what it takes them for.
+static NSDictionary<NSString *, UTType *> *FQExtensionsElsewhere(void)
+{
+    NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    UTType *fits = [UTType typeWithIdentifier:kFITSType];
+    for (NSString *ext in FQExtensions()) {
+        UTType *t = [UTType typeWithFilenameExtension:ext];
+        if (!t || !fits || ![t conformsToType:fits])
+            out[ext] = t ?: UTTypeData;
+    }
+    return out;
+}
+
 static void FQScheduleChecks(BOOL on);
 
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate>
@@ -209,34 +231,34 @@ static void FQScheduleChecks(BOOL on);
 {
     (void)sender;
     if (!_welcome) {
-        NSView *v = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 540, 362)];
+        NSView *v = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 540, 378)];
 
         NSImageView *icon = [NSImageView imageViewWithImage:NSApp.applicationIconImage];
-        icon.frame = NSMakeRect(24, 258, 80, 80);
+        icon.frame = NSMakeRect(24, 274, 80, 80);
         [v addSubview:icon];
 
         NSTextField *title = [NSTextField labelWithString:@"uFits"];
         title.font = [NSFont systemFontOfSize:26 weight:NSFontWeightSemibold];
-        title.frame = NSMakeRect(120, 302, 380, 34);
+        title.frame = NSMakeRect(120, 318, 380, 34);
         [v addSubview:title];
 
         NSTextField *sub = [NSTextField labelWithString:@"Fast Quick Look previews and thumbnails for FITS files."];
         sub.textColor = NSColor.secondaryLabelColor;
-        sub.frame = NSMakeRect(120, 278, 400, 20);
+        sub.frame = NSMakeRect(120, 294, 400, 20);
         [v addSubview:sub];
 
         NSTextField *how = [NSTextField wrappingLabelWithString:
-            @"Select a .fits, .fit, .fts or .fz file in Finder and press Space. Thumbnails appear "
+            @"Select a FITS file (.fits, .fz, .pha, .evt, .lc, …) in Finder and press Space. Thumbnails appear "
             @"in Finder windows. Nothing needs to keep running: macOS loads the extensions on demand.\n\n"
             @"If previews do not show up, check that uFits is enabled under System Settings › "
             @"General › Login Items & Extensions › Quick Look, then click Reset Quick Look."];
-        how.frame = NSMakeRect(24, 142, 492, 110);
+        how.frame = NSMakeRect(24, 158, 492, 110);
         [v addSubview:how];
 
         _status = [NSTextField wrappingLabelWithString:@""];
         _status.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
         _status.textColor = NSColor.secondaryLabelColor;
-        _status.frame = NSMakeRect(24, 74, 492, 64);
+        _status.frame = NSMakeRect(24, 74, 492, 80);
         [v addSubview:_status];
 
         _autoCheck = [NSButton checkboxWithTitle:@"Check for updates automatically (once a day)"
@@ -296,12 +318,20 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args)
 {
     NSMutableArray<NSString *> *lines = [NSMutableArray array];
     NSString *ident = [UTType typeWithFilenameExtension:@"fits"].identifier ?: @"?";
-    if ([ident isEqualToString:kFITSType])
-        [lines addObject:@"✓ .fits files are recognised as FITS."];
-    else if ([ident hasPrefix:@"dyn."])
+    NSDictionary<NSString *, UTType *> *elsewhere = FQExtensionsElsewhere();
+    if ([ident hasPrefix:@"dyn."])
         [lines addObject:@"⚠︎ The FITS file type is not registered yet: move uFits to Applications and open it once."];
-    else
-        [lines addObject:[NSString stringWithFormat:@"⚠︎ Another app declares .fits as “%@”; Quick Look may not use uFits.", ident]];
+    else if (!elsewhere.count)
+        [lines addObject:@"✓ FITS files (.fits .fit .fts .fz .pha .pi .arf .rmf .rsp .evt .lc .img …) are recognised."];
+    else {
+        NSMutableArray<NSString *> *names = [NSMutableArray array];
+        for (NSString *ext in FQExtensions())
+            if (elsewhere[ext])
+                [names addObject:[NSString stringWithFormat:@".%@ (%@)", ext,
+                                                            elsewhere[ext].localizedDescription ?: elsewhere[ext].identifier]];
+        [lines addObject:[NSString stringWithFormat:@"⚠︎ Taken by other types, so Quick Look may not use uFits: %@.",
+                                                    [names componentsJoinedByString:@", "]]];
+    }
 
     NSString *bundleID = NSBundle.mainBundle.bundleIdentifier ?: @"";
     for (NSString *suffix in @[ @"Preview", @"Thumbnail" ]) {
@@ -612,6 +642,16 @@ int main(int argc, const char *argv[])
             return CheckForUpdates(YES);
         if (argc > 1 && !strcmp(argv[1], "--check-for-updates-if-due"))
             return FQUpdate.due ? CheckForUpdates(NO) : 0;
+        if (argc > 1 && !strcmp(argv[1], "--file-types")) {
+            // What macOS takes each extension uFits claims for.
+            UTType *fits = [UTType typeWithIdentifier:kFITSType];
+            for (NSString *ext in FQExtensions()) {
+                UTType *t = [UTType typeWithFilenameExtension:ext];
+                printf(".%-5s %-40s %s\n", ext.UTF8String, t.identifier.UTF8String ?: "?",
+                       t && fits && [t conformsToType:fits] ? "FITS" : "NOT FITS");
+            }
+            return 0;
+        }
         if (argc > 1 && !strcmp(argv[1], "--schedule-update-checks")) {
             FQScheduleChecks(FQUpdate.enabled);
             return 0;

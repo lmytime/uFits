@@ -1,7 +1,9 @@
 # uFits
 
-Quick Look for FITS files on macOS. Select a `.fits`, `.fit`, `.fts` or `.fz` file in
-Finder and press Space to see it, and get real thumbnails in Finder windows.
+Quick Look for FITS files on macOS. Select a FITS file in Finder and press Space to see
+it, and get real thumbnails in Finder windows. Files named `.fits`, `.fit`, `.fts` and
+`.fz` work, and so do the FITS files of X-ray missions: `.pha`, `.pi`, `.arf`, `.rmf`,
+`.rsp`, `.rsp2`, `.evt`, `.lc`, `.img`, `.hk`, `.mkf` and `.dph`.
 
 Homepage: **[lmytime.github.io/uFits](https://lmytime.github.io/uFits/)**
 
