@@ -72,10 +72,12 @@ endif
 CORE_H   := core/fq.h core/fq_internal.h
 CORE_SRC := core/fq.c core/fq_image.c core/fq_table.c core/fq_codec.c
 CORE_OBJ := $(patsubst core/%.c,$(B)/obj/core/%.o,$(CORE_SRC))
-SHARED_H := macos/Shared/FQRender.h macos/Shared/FQPreviewController.h
+SHARED_H := macos/Shared/FQRender.h macos/Shared/FQPreviewController.h macos/Shared/FQUpdate.h
 
-APP_OBJ     := $(B)/obj/app/main.o $(B)/obj/app/FQRender.o $(B)/obj/app/FQPreviewController.o
-PREVIEW_OBJ := $(B)/obj/ext/PreviewViewController.o $(B)/obj/ext/FQRender.o $(B)/obj/ext/FQPreviewController.o
+APP_OBJ     := $(B)/obj/app/main.o $(B)/obj/app/FQRender.o $(B)/obj/app/FQPreviewController.o \
+               $(B)/obj/app/FQUpdate.o
+PREVIEW_OBJ := $(B)/obj/ext/PreviewViewController.o $(B)/obj/ext/FQRender.o $(B)/obj/ext/FQPreviewController.o \
+               $(B)/obj/ext/FQUpdate.o
 THUMB_OBJ   := $(B)/obj/ext/ThumbnailProvider.o $(B)/obj/ext/FQRender.o
 
 .PHONY: all app install uninstall zip dmg notarize test fqtool qltools clean
@@ -145,6 +147,10 @@ $(PREVIEW)/Contents/Info.plist: macos/Preview/Info.plist Makefile
 $(THUMB)/Contents/Info.plist: macos/Thumbnail/Info.plist Makefile
 	$(call make_plist,$<,$@)
 
+# The preview may read the app's settings, named by its bundle identifier.
+$(B)/Preview.entitlements: macos/Preview/Preview.entitlements Makefile
+	$(call make_plist,$<,$@)
+
 $(APPDIR)/Contents/Resources/AppIcon.icns: macos/App/AppIcon.icns
 	@mkdir -p $(dir $@)
 	cp $< $@
@@ -157,9 +163,9 @@ BUNDLE_PARTS := $(APPDIR)/Contents/MacOS/$(APP) $(APPDIR)/Contents/Info.plist \
 	$(PREVIEW)/Contents/MacOS/uFitsPreview $(PREVIEW)/Contents/Info.plist \
 	$(THUMB)/Contents/MacOS/uFitsThumbnail $(THUMB)/Contents/Info.plist
 
-$(APPDIR)/Contents/_CodeSignature/CodeResources: $(BUNDLE_PARTS) macos/Preview/Preview.entitlements macos/Thumbnail/Thumbnail.entitlements
+$(APPDIR)/Contents/_CodeSignature/CodeResources: $(BUNDLE_PARTS) $(B)/Preview.entitlements macos/Thumbnail/Thumbnail.entitlements
 	printf 'APPL????' > $(APPDIR)/Contents/PkgInfo
-	$(CODESIGN) --force --sign "$(SIGN)" $(SIGNFLAGS) --entitlements macos/Preview/Preview.entitlements $(PREVIEW)
+	$(CODESIGN) --force --sign "$(SIGN)" $(SIGNFLAGS) --entitlements $(B)/Preview.entitlements $(PREVIEW)
 	$(CODESIGN) --force --sign "$(SIGN)" $(SIGNFLAGS) --entitlements macos/Thumbnail/Thumbnail.entitlements $(THUMB)
 	$(CODESIGN) --force --sign "$(SIGN)" $(SIGNFLAGS) $(APPDIR)
 	$(CODESIGN) --verify --deep --strict $(APPDIR)
@@ -251,11 +257,13 @@ $(B)/qlpreview: tests/macos/qlpreview.m
 	@mkdir -p $(B)
 	$(CC) -fobjc-arc -O2 -o $@ $< -framework Cocoa -framework Quartz
 
-$(B)/uitest: tests/macos/uitest.m $(B)/obj/app/FQPreviewController.o $(B)/obj/app/FQRender.o $(CORE_OBJ)
+$(B)/uitest: tests/macos/uitest.m $(B)/obj/app/FQPreviewController.o $(B)/obj/app/FQRender.o $(B)/obj/app/FQUpdate.o \
+	$(CORE_OBJ)
 	@mkdir -p $(B)
 	$(CC) $(OBJC_) -o $@ $^ -framework Cocoa -framework QuartzCore -framework CoreGraphics -lz
 
-$(B)/clicklag: tests/macos/clicklag.m $(B)/obj/app/FQPreviewController.o $(B)/obj/app/FQRender.o $(CORE_OBJ)
+$(B)/clicklag: tests/macos/clicklag.m $(B)/obj/app/FQPreviewController.o $(B)/obj/app/FQRender.o $(B)/obj/app/FQUpdate.o \
+	$(CORE_OBJ)
 	@mkdir -p $(B)
 	$(CC) $(OBJC_) -o $@ $^ -framework Cocoa -framework Quartz -framework QuartzCore -framework CoreGraphics \
 	    -framework ApplicationServices -lz

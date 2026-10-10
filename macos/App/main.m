@@ -1,11 +1,14 @@
 // main.m - the uFits app. Its job is to carry the two Quick Look
-// extensions; it also opens FITS files in small viewer windows and shows
-// whether the extensions are registered.
+// extensions; it also opens FITS files in small viewer windows, shows
+// whether the extensions are registered, and updates uFits when a newer
+// version is out (asked from its menu, or from the preview's "Update
+// available" through ufits://update).
 
 #import <Cocoa/Cocoa.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #import "FQPreviewController.h"
+#import "FQUpdate.h"
 
 static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
 
@@ -15,9 +18,12 @@ static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
 @implementation AppDelegate {
     NSWindow *_welcome;
     NSTextField *_status;
+    NSButton *_autoCheck;
     NSMutableArray<NSWindow *> *_viewers;
     NSPoint _cascade;
-    BOOL _openedFiles;
+    BOOL _openedFiles, _launched;
+    NSString *_updateAsked;   // ufits://update before the launch was done
+    NSWindow *_updating;      // while an update runs
 }
 
 #pragma mark Launch
@@ -32,8 +38,22 @@ static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
 - (void)applicationDidFinishLaunching:(NSNotification *)note
 {
     (void)note;
+    _launched = YES;
     if (!_openedFiles)
         [self showWelcome:nil];
+    if (_updateAsked) {
+        [self offerUpdate:_updateAsked.length ? _updateAsked : nil];
+        _updateAsked = nil;
+        return;
+    }
+    // Once a day: say so when a newer version is out.
+    [FQUpdate check:NO
+               done:^(NSString *newer, NSError *error) {
+                   if (self->_welcome.visible)
+                       [self refreshStatus];
+                   if (FQUpdate.availableVersion && !self->_updating)
+                       [self offerUpdate:FQUpdate.availableVersion];
+               }];
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender
@@ -45,9 +65,29 @@ static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
 - (void)application:(NSApplication *)app openURLs:(NSArray<NSURL *> *)urls
 {
     (void)app;
-    _openedFiles = YES;
-    for (NSURL *url in urls)
+    for (NSURL *url in urls) {
+        if ([url.scheme isEqualToString:@"ufits"]) {
+            if ([url.host isEqualToString:@"update"])
+                [self updateAsked:url];
+            continue;
+        }
+        _openedFiles = YES;
         [self openViewer:url];
+    }
+}
+
+/// ufits://update?version=X, from the preview's "Update available".
+- (void)updateAsked:(NSURL *)url
+{
+    NSString *version = @"";
+    for (NSURLQueryItem *q in [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO].queryItems)
+        if ([q.name isEqualToString:@"version"] && q.value.length)
+            version = q.value;
+    if (!_launched) {   // still launching: once it is done
+        _updateAsked = version;
+        return;
+    }
+    [self offerUpdate:version.length ? version : nil];
 }
 
 #pragma mark Menu
@@ -61,6 +101,7 @@ static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
     [appMenu addItemWithTitle:[@"About " stringByAppendingString:name]
                        action:@selector(orderFrontStandardAboutPanel:)
                 keyEquivalent:@""];
+    [appMenu addItemWithTitle:@"Check for Updates…" action:@selector(checkForUpdates:) keyEquivalent:@""];
     [appMenu addItem:NSMenuItem.separatorItem];
     [appMenu addItemWithTitle:[@"Hide " stringByAppendingString:name]
                        action:@selector(hide:)
@@ -117,6 +158,10 @@ static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
 {
     FQPreviewController *vc = [FQPreviewController new];
     vc.maxPixels = 4096;
+    __weak AppDelegate *weakSelf = self;
+    vc.updateAction = ^(NSString *version) {
+        [weakSelf offerUpdate:version];
+    };
     NSWindow *w = [NSWindow windowWithContentViewController:vc];
     w.styleMask |= NSWindowStyleMaskResizable;
     w.title = url.lastPathComponent ?: @"FITS";
@@ -159,20 +204,20 @@ static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
 {
     (void)sender;
     if (!_welcome) {
-        NSView *v = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 540, 330)];
+        NSView *v = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 540, 362)];
 
         NSImageView *icon = [NSImageView imageViewWithImage:NSApp.applicationIconImage];
-        icon.frame = NSMakeRect(24, 226, 80, 80);
+        icon.frame = NSMakeRect(24, 258, 80, 80);
         [v addSubview:icon];
 
         NSTextField *title = [NSTextField labelWithString:@"uFits"];
         title.font = [NSFont systemFontOfSize:26 weight:NSFontWeightSemibold];
-        title.frame = NSMakeRect(120, 270, 380, 34);
+        title.frame = NSMakeRect(120, 302, 380, 34);
         [v addSubview:title];
 
         NSTextField *sub = [NSTextField labelWithString:@"Fast Quick Look previews and thumbnails for FITS files."];
         sub.textColor = NSColor.secondaryLabelColor;
-        sub.frame = NSMakeRect(120, 246, 400, 20);
+        sub.frame = NSMakeRect(120, 278, 400, 20);
         [v addSubview:sub];
 
         NSTextField *how = [NSTextField wrappingLabelWithString:
@@ -180,14 +225,20 @@ static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
             @"in Finder windows. Nothing needs to keep running: macOS loads the extensions on demand.\n\n"
             @"If previews do not show up, check that uFits is enabled under System Settings › "
             @"General › Login Items & Extensions › Quick Look, then click Reset Quick Look."];
-        how.frame = NSMakeRect(24, 110, 492, 110);
+        how.frame = NSMakeRect(24, 142, 492, 110);
         [v addSubview:how];
 
         _status = [NSTextField wrappingLabelWithString:@""];
         _status.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
         _status.textColor = NSColor.secondaryLabelColor;
-        _status.frame = NSMakeRect(24, 56, 492, 48);
+        _status.frame = NSMakeRect(24, 74, 492, 64);
         [v addSubview:_status];
+
+        _autoCheck = [NSButton checkboxWithTitle:@"Check for updates automatically (once a day)"
+                                          target:self
+                                          action:@selector(autoCheckChanged:)];
+        _autoCheck.frame = NSMakeRect(22, 48, 492, 20);
+        [v addSubview:_autoCheck];
 
         NSButton *open = [NSButton buttonWithTitle:@"Open a FITS File…" target:self action:@selector(openDocument:)];
         NSButton *settings = [NSButton buttonWithTitle:@"Extension Settings…" target:self action:@selector(openSettings:)];
@@ -211,6 +262,7 @@ static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
         _welcome.delegate = self;
         [_welcome center];
     }
+    _autoCheck.state = FQUpdate.enabled ? NSControlStateValueOn : NSControlStateValueOff;
     [self refreshStatus];
     [_welcome makeKeyAndOrderFront:nil];
     if (@available(macOS 14.0, *))
@@ -262,6 +314,13 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args)
                                                     [state isEqualToString:@"enabled"] ? @"✓" : @"⚠︎",
                                                     suffix, state]];
     }
+    NSString *now = FQUpdate.currentVersion, *latest = FQUpdate.latestVersion;
+    if (latest && [FQUpdate version:latest isNewerThan:now])
+        [lines addObject:[NSString stringWithFormat:@"⬆︎ uFits %@ is out (this is %@): uFits › Check for Updates…",
+                                                    latest, now]];
+    else
+        [lines addObject:[NSString stringWithFormat:@"✓ uFits %@%@", now,
+                                                    latest ? @" is the latest version." : @"."]];
     _status.stringValue = [lines componentsJoinedByString:@"\n"];
 }
 
@@ -285,13 +344,215 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args)
     [self refreshStatus];
 }
 
+#pragma mark Updates
+
+- (void)autoCheckChanged:(NSButton *)sender
+{
+    FQUpdate.enabled = sender.state == NSControlStateValueOn;
+}
+
+/// uFits › Check for Updates…: looks now, and says what it found.
+- (void)checkForUpdates:(id)sender
+{
+    (void)sender;
+    FQUpdate.skippedVersion = nil;   // asked for: offer it even if skipped
+    [FQUpdate check:YES
+               done:^(NSString *newer, NSError *error) {
+                   if (self->_welcome.visible)
+                       [self refreshStatus];
+                   if (newer) {
+                       [self offerUpdate:newer];
+                       return;
+                   }
+                   NSAlert *alert = [NSAlert new];
+                   if (error) {
+                       alert.messageText = @"Could not check for updates";
+                       alert.informativeText = error.localizedDescription;
+                   } else {
+                       alert.messageText = @"uFits is up to date";
+                       alert.informativeText = [NSString stringWithFormat:@"%@ is the latest version.",
+                                                                          FQUpdate.currentVersion];
+                   }
+                   [self activate];
+                   [alert runModal];
+               }];
+}
+
+- (void)activate
+{
+    if (@available(macOS 14.0, *))
+        [NSApp activate];
+    else
+        [NSApp activateIgnoringOtherApps:YES];
+}
+
+/// Offers to update to version (nil: the newest seen, looked for first).
+- (void)offerUpdate:(NSString *)version
+{
+    if (_updating)
+        return;
+    if (!version.length) {
+        [FQUpdate check:YES
+                   done:^(NSString *newer, NSError *error) {
+                       if (newer)
+                           [self offerUpdate:newer];
+                       else
+                           [self checkForUpdates:nil];   // says why not
+                   }];
+        return;
+    }
+    if (![FQUpdate version:version isNewerThan:FQUpdate.currentVersion])
+        return;
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = [NSString stringWithFormat:@"uFits %@ is available", version];
+    alert.informativeText = [NSString stringWithFormat:@"You have %@. Updating takes a few seconds: uFits downloads "
+                                                       @"the new version, puts it in place of this one and opens it.",
+                                                       FQUpdate.currentVersion];
+    [alert addButtonWithTitle:@"Update"];
+    [alert addButtonWithTitle:@"Not Now"];
+    [alert addButtonWithTitle:@"What’s New"];
+    alert.showsSuppressionButton = YES;
+    alert.suppressionButton.title = @"Skip this version";
+    [self activate];
+    NSModalResponse answer = [alert runModal];
+    if (alert.suppressionButton.state == NSControlStateValueOn)
+        FQUpdate.skippedVersion = version;
+    if (answer == NSAlertFirstButtonReturn)
+        [self runUpdate:version];
+    else if (answer == NSAlertThirdButtonReturn)
+        [NSWorkspace.sharedWorkspace openURL:[FQUpdate releasePage:version]];
+}
+
+/// Where uFits is: updated in place when it can be written to (not, say,
+/// a disk image), else where the installer puts it.
+- (NSString *)updateFolder
+{
+    NSString *here = NSBundle.mainBundle.bundlePath.stringByDeletingLastPathComponent;
+    if ([NSFileManager.defaultManager isWritableFileAtPath:here] && ![here hasPrefix:@"/Volumes/"] &&
+        [here rangeOfString:@"/AppTranslocation/"].location == NSNotFound)
+        return here;
+    if ([NSFileManager.defaultManager isWritableFileAtPath:@"/Applications"])
+        return @"/Applications";
+    return [NSHomeDirectory() stringByAppendingPathComponent:@"Applications"];
+}
+
+/// Runs the installer that comes with release version (install.sh, as the
+/// README's one command does), leaving this copy running, then opens the
+/// new one and quits.
+- (void)runUpdate:(NSString *)version
+{
+    NSView *v = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 360, 84)];
+    NSProgressIndicator *spinner = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(20, 34, 16, 16)];
+    spinner.style = NSProgressIndicatorStyleSpinning;
+    spinner.controlSize = NSControlSizeSmall;
+    [spinner startAnimation:nil];
+    [v addSubview:spinner];
+    NSTextField *label = [NSTextField labelWithString:[NSString stringWithFormat:@"Updating uFits to %@…", version]];
+    label.frame = NSMakeRect(46, 33, 300, 18);
+    [v addSubview:label];
+    _updating = [[NSWindow alloc] initWithContentRect:v.frame
+                                            styleMask:NSWindowStyleMaskTitled
+                                              backing:NSBackingStoreBuffered
+                                                defer:NO];
+    _updating.title = @"uFits";
+    _updating.contentView = v;
+    _updating.releasedWhenClosed = NO;
+    [_updating center];
+    [_updating makeKeyAndOrderFront:nil];
+    [NSProcessInfo.processInfo disableAutomaticTermination:@"updating"];
+    [NSProcessInfo.processInfo disableSuddenTermination];
+
+    NSString *folder = [self updateFolder];
+    NSString *script = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                                                   [NSString stringWithFormat:@"ufits-install-%@.sh",
+                                                                              NSUUID.UUID.UUIDString]];
+    NSMutableDictionary *env = [NSProcessInfo.processInfo.environment mutableCopy];
+    env[@"UFITS_DEST"] = folder;
+    env[@"UFITS_FROM_APP"] = @"1";
+    env[@"UFITS_VERSION"] = version;
+    NSTask *task = [NSTask new];
+    task.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
+    task.arguments = @[ @"-c", @"curl -fsSL --retry 2 -o \"$2\" \"$1\" && /bin/sh \"$2\"; s=$?; rm -f \"$2\"; exit $s",
+                        @"sh", [FQUpdate installer:version].absoluteString, script ];
+    task.environment = env;
+    NSPipe *pipe = [NSPipe pipe];
+    task.standardOutput = pipe;
+    task.standardError = pipe;
+    NSError *error = nil;
+    if (![task launchAndReturnError:&error]) {
+        [self updateFailed:version output:error.localizedDescription];
+        return;
+    }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSData *out = [pipe.fileHandleForReading readDataToEndOfFile];
+        [task waitUntilExit];
+        int status = task.terminationStatus;
+        NSString *text = [[NSString alloc] initWithData:out encoding:NSUTF8StringEncoding] ?: @"";
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (status != 0) {
+                [self updateFailed:version output:text];
+                return;
+            }
+            NSURL *app = [NSURL fileURLWithPath:[folder stringByAppendingPathComponent:@"uFits.app"]];
+            NSWorkspaceOpenConfiguration *config = [NSWorkspaceOpenConfiguration configuration];
+            config.createsNewApplicationInstance = YES;
+            [NSWorkspace.sharedWorkspace openApplicationAtURL:app
+                                                configuration:config
+                                            completionHandler:^(NSRunningApplication *running, NSError *err) {
+                                                dispatch_async(dispatch_get_main_queue(), ^{
+                                                    [NSApp terminate:nil];
+                                                });
+                                            }];
+        });
+    });
+}
+
+- (void)updateFailed:(NSString *)version output:(NSString *)output
+{
+    [_updating orderOut:nil];
+    _updating = nil;
+    [NSProcessInfo.processInfo enableAutomaticTermination:@"updating"];
+    [NSProcessInfo.processInfo enableSuddenTermination];
+    NSArray<NSString *> *lines = [[output stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
+        componentsSeparatedByString:@"\n"];
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = @"uFits could not be updated";
+    alert.informativeText = [NSString stringWithFormat:@"%@\n\nThe new version can also be downloaded from its page.",
+                                                       lines.lastObject.length ? lines.lastObject : @"The installer failed."];
+    [alert addButtonWithTitle:@"OK"];
+    [alert addButtonWithTitle:@"Open Its Page"];
+    [self activate];
+    if ([alert runModal] == NSAlertSecondButtonReturn)
+        [NSWorkspace.sharedWorkspace openURL:[FQUpdate releasePage:version]];
+}
+
 @end
+
+/// uFits --check-for-updates: says whether a newer version is out.
+static int CheckForUpdates(void)
+{
+    __block int status = -1;
+    [FQUpdate check:YES
+               done:^(NSString *newer, NSError *error) {
+                   if (error)
+                       fprintf(stderr, "uFits: %s\n", error.localizedDescription.UTF8String);
+                   else if (newer)
+                       printf("uFits %s is out (this is %s)\n", newer.UTF8String, FQUpdate.currentVersion.UTF8String);
+                   else
+                       printf("uFits %s is the latest version (%s is out)\n", FQUpdate.currentVersion.UTF8String,
+                              FQUpdate.latestVersion.UTF8String);
+                   status = error ? 1 : 0;
+               }];
+    while (status < 0)
+        [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+    return status;
+}
 
 int main(int argc, const char *argv[])
 {
-    (void)argc;
-    (void)argv;
     @autoreleasepool {
+        if (argc > 1 && !strcmp(argv[1], "--check-for-updates"))
+            return CheckForUpdates();
         NSApplication *app = NSApplication.sharedApplication;
         AppDelegate *delegate = [AppDelegate new];
         app.delegate = delegate;

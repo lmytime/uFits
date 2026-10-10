@@ -48,8 +48,13 @@ The bar at the bottom of the preview has:
 - A slider for the planes of a cube.
 - The stretch: automatic, linear (0.5–99.5 %) or min–max. Your choice is remembered.
 
-To zoom into an image, pinch, press ⌘+ and ⌘−, or scroll with ⌘ or ⌥ held; ⌘0 shows
-the whole image again. Zoomed in, the part on view is shown at full resolution.
+To zoom into an image, pinch, ⌥-click (⇧⌥-click zooms out), or scroll with ⌘ or ⌥
+held; in the uFits app ⌘+, ⌘− and ⌘0 work too. Zoomed in, the part on view is shown at
+full resolution.
+
+When a new version of uFits is out, **Update available** appears in the bar: click it to
+update in a few seconds. uFits looks for new versions on GitHub at most once a day; turn
+this off in the uFits app.
 
 You can also open FITS files in the uFits app (File › Open, or drop them on its icon).
 

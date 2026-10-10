@@ -40,6 +40,18 @@
 	<true/>
 	<key>NSSupportsSuddenTermination</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>@BUNDLE_ID@</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<!-- ufits://update: the preview's "Update available" -->
+				<string>ufits</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

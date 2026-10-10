@@ -16,6 +16,8 @@
 #                         came with, or the latest)
 #   UFITS_DEST=folder     install into this folder
 #   UFITS_DMG=file.dmg    install from this disk image, without downloading
+#   UFITS_FROM_APP=1      leave uFits running (it runs this to update itself,
+#                         and opens the new copy when this is done)
 #
 # When curl cannot download, the GitHub CLI is tried (a private copy of the
 # repository needs it, signed in with gh auth login).
@@ -39,7 +41,7 @@ fail() {
 
 # Quits uFits and its extensions, if they are running.
 stop() {
-    pkill -x uFits 2>/dev/null || true
+    [ -n "${UFITS_FROM_APP:-}" ] || pkill -x uFits 2>/dev/null || true
     pkill -x uFitsPreview 2>/dev/null || true
     pkill -x uFitsThumbnail 2>/dev/null || true
 }

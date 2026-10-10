@@ -321,6 +321,7 @@ int main(int argc, const char *argv[])
             return 2;
         }
         NSString *out = @(argv[1]), *path = @(argv[2]);
+        [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"FQCheckForUpdates"];   // no "Update available"
         NSApplication *app = NSApplication.sharedApplication;
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];
         [app finishLaunching];

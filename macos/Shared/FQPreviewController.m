@@ -6,6 +6,7 @@
 #import <QuartzCore/QuartzCore.h>
 
 #import "FQRender.h"
+#import "FQUpdate.h"
 
 #include <math.h>
 
@@ -433,6 +434,8 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     NSInteger _loadingToken;
     BOOL _focusOnReady;   // give the table or header the keyboard once shown
     NSTextField *_info;
+    NSButton *_update;           // "Update available"
+    NSString *_updateVersion;    // the version it offers
     NSPopUpButton *_stretchMenu;
     NSPopUpButton *_hduMenu;
     NSMenuItem *_hduTitle;   // what the HDU menu shows closed: "HDU 1 SCI"
@@ -676,6 +679,15 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     _info.lineBreakMode = NSLineBreakByTruncatingTail;
     [root addSubview:_info];
 
+    // When a newer uFits is out (FQUpdate): "Update available", left.
+    _update = [NSButton buttonWithTitle:@"Update available" target:self action:@selector(updateClicked:)];
+    _update.bezelStyle = NSBezelStyleInline;
+    _update.controlSize = NSControlSizeSmall;
+    _update.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightMedium];
+    [_update sizeToFit];
+    _update.hidden = YES;
+    [root addSubview:_update];
+
     self.view = root;
     [self layoutBar];
     // Before each click is handed out, in case Quick Look adds its
@@ -783,6 +795,8 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
                 if (first)
                     self->_hdus = hdus;
                 [self showRendering:r error:error first:first];
+                if (first)
+                    [self checkForUpdate];
                 if (self->_again)
                     [self render:NO completion:nil];
             }
@@ -925,9 +939,11 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 }
 
 /// Right to left: the switch, then the stretch menu, plane slider and HDU
-/// menu; the info text takes what is left. When the bar is too narrow,
-/// the HDU menu shrinks (down to 120 points) and the least important
-/// controls are hidden, keeping at least 80 points of info text.
+/// menu; the info text takes what is left, after "Update available" on the
+/// left when a newer uFits is out. When the bar is too narrow, the HDU menu
+/// shrinks (down to 120 points) and the least important controls are
+/// hidden ("Update available" first), keeping at least 80 points of info
+/// text.
 - (void)layoutBar
 {
     NSRect b = self.view.bounds;
@@ -941,6 +957,14 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
         shown[i] = wanted[i] && used + w + 8 <= room;
         if (shown[i])
             used += w + 8;
+    }
+    CGFloat left = 10;
+    _update.hidden = !_updateVersion || used + NSWidth(_update.frame) + 8 > room;
+    if (!_update.hidden) {
+        NSSize us = _update.frame.size;
+        _update.frame = NSMakeRect(left, floor((kBarHeight - us.height) / 2), us.width, us.height);
+        left += us.width + 8;
+        used += us.width + 8;
     }
     CGFloat hduWidth = MIN(_hduWidth, minHDU + MAX(0, room - used));
 
@@ -960,7 +984,48 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
         x -= sz.width + 8;
     }
     CGFloat ih = 16;
-    _info.frame = NSMakeRect(10, floor((kBarHeight - ih) / 2), MAX(0, x - 10), ih);
+    _info.frame = NSMakeRect(left, floor((kBarHeight - ih) / 2), MAX(0, x - left), ih);
+}
+
+#pragma mark Update notice
+
+/// Shows "Update available" if a newer uFits is known to be out.
+- (void)showUpdateNotice
+{
+    NSString *v = FQUpdate.availableVersion;
+    if (v == _updateVersion || [v isEqualToString:_updateVersion])
+        return;
+    _updateVersion = v;
+    _update.toolTip = v ? [NSString stringWithFormat:@"uFits %@ is out (this is %@). Click to update.", v,
+                                                     FQUpdate.currentVersion]
+                        : nil;
+    [self layoutBar];
+}
+
+/// Shows what is known, then looks for a newer uFits if a day has passed.
+- (void)checkForUpdate
+{
+    [self showUpdateNotice];
+    __weak FQPreviewController *weakSelf = self;
+    [FQUpdate check:NO
+               done:^(NSString *newer, NSError *error) {
+                   [weakSelf showUpdateNotice];
+               }];
+}
+
+- (void)updateClicked:(id)sender
+{
+    NSString *v = _updateVersion;
+    if (!v)
+        return;
+    if (self.updateAction) {
+        self.updateAction(v);
+        return;
+    }
+    // In Quick Look: the uFits app updates itself.
+    NSURL *app = [NSURL URLWithString:[@"ufits://update?version=" stringByAppendingString:v]];
+    if (!app || ![NSWorkspace.sharedWorkspace openURL:app])
+        [NSWorkspace.sharedWorkspace openURL:[FQUpdate releasePage:v]];
 }
 
 /// The HDU picked in the menu.

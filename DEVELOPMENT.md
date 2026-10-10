@@ -75,10 +75,24 @@ Time spent in the core alone, measured on a 4-core Linux VM:
   with "Loading…" shown if that takes more than a moment.
 - Changing the stretch only remaps the image already binned, so it is instant even for
   big or compressed files.
-- Zoom (pinch, ⌘+ ⌘− ⌘0, ⌘- or ⌥-scroll) goes up to 32 points per image pixel. Once
-  an image shown binned is zoomed in past its binned pixels, the part on view is read
-  again at full resolution in the background (`fq_render_detail`: a region, mapped with
-  the stretch of the whole image) and laid over it.
+- Zoom (pinch, ⌥-click, ⌘- or ⌥-scroll; ⌘+ ⌘− ⌘0 where keys reach the preview) goes up
+  to 32 points per image pixel. Once an image shown binned is zoomed in past its binned
+  pixels, the part on view is read again at full resolution in the background
+  (`fq_render_detail`: a region, mapped with the stretch of the whole image) and laid
+  over it.
+
+## Updates
+
+`FQUpdate` (shared by the app and the preview extension) looks at most once a day, in
+the background, at where `github.com/lmytime/uFits/releases/latest` redirects
+(`.../releases/tag/vX.Y.Z`, read with a `HEAD` request: no API, no rate limit). The
+preview does this itself, since the app is seldom opened: its sandbox allows outgoing
+connections and reading the app's settings (`Preview.entitlements`: "Check for updates"
+and a skipped version, kept by the app). A newer version puts **Update available** in
+the preview's bar; its click opens `ufits://update`, and the app runs that release's
+`install.sh` with `UFITS_FROM_APP=1` (the installer then leaves it running) and
+`UFITS_DEST` set to the folder it is in, then opens the new copy and quits.
+`uFits --check-for-updates` looks at once and prints what it found.
 
 Not supported: `HCOMPRESS_1` tiles (such files still open on their header), random groups.
 

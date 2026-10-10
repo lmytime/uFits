@@ -18,6 +18,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// Renders path in the background and calls completion on the main queue.
 - (void)loadFile:(NSString *)path completion:(nullable void (^)(void))completion;
 
+/// Called with the new version when "Update available" in the bar is
+/// clicked. When unset (in Quick Look), the uFits app is asked to update
+/// (ufits://update), or else the release page opens.
+@property(nonatomic, copy, nullable) void (^updateAction)(NSString *version);
+
 @end
 
 NS_ASSUME_NONNULL_END

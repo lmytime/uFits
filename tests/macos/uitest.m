@@ -11,6 +11,7 @@
 #include <math.h>
 
 #import "FQPreviewController.h"
+#import "FQUpdate.h"
 
 static NSWindow *gWindow;
 static NSString *gOut;
@@ -77,6 +78,8 @@ static NSString *barState(NSView *root)
         }
         else if ([v isKindOfClass:NSTextField.class] && ((NSTextField *)v).stringValue.length)
             [parts addObject:[NSString stringWithFormat:@"\"%@\"", ((NSTextField *)v).stringValue]];
+        else if ([v isKindOfClass:NSButton.class])
+            [parts addObject:[NSString stringWithFormat:@"button=\"%@\"", ((NSButton *)v).title]];
     }
     return [parts componentsJoinedByString:@"  "];
 }
@@ -332,6 +335,51 @@ static void checkZoom(FQPreviewController *vc, NSString *data)
     vc.maxPixels = maxPixels;
 }
 
+/// "Update available" in the bar when a newer uFits is out (as if seen
+/// just now: nothing is looked up), its click handed to the app; none
+/// when that version was skipped, or when looking is turned off.
+static void checkUpdateNotice(FQPreviewController *vc, NSString *data)
+{
+    NSView *root = vc.view;
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    NSString *mef = [data stringByAppendingPathComponent:@"mef.fits"];
+    BOOL order = [FQUpdate version:@"0.0.10" isNewerThan:@"0.0.9"] && [FQUpdate version:@"1.0" isNewerThan:@"0.9.9"] &&
+                 ![FQUpdate version:@"0.0.3" isNewerThan:@"0.0.3"] && ![FQUpdate version:@"0.0.2" isNewerThan:@"0.0.3"] &&
+                 [FQUpdate version:@"0.1" isNewerThan:@"0.0.9"];
+    report(@"update-versions", order, @"0.0.10 > 0.0.9, 1.0 > 0.9.9, 0.1 > 0.0.9; not 0.0.3 > 0.0.3 or 0.0.2 > 0.0.3");
+
+    [d setBool:YES forKey:@"FQCheckForUpdates"];
+    [d setObject:@"99.0.0" forKey:@"FQUpdateLatest"];
+    [d setObject:[NSDate date] forKey:@"FQUpdateChecked"];
+    __block NSString *asked = nil;
+    vc.updateAction = ^(NSString *version) {
+        asked = version;
+    };
+    load(vc, mef);
+    capture(@"update", @"button=\"Update available\"");
+    NSButton *notice = findView(root, NSButton.class, ^BOOL(id v) {
+        return [[v title] isEqualToString:@"Update available"];
+    });
+    if (notice)
+        act(notice);
+    report(@"update-click", [asked isEqualToString:@"99.0.0"],
+           [NSString stringWithFormat:@"the click asked for %@", asked ?: @"nothing"]);
+
+    [d setObject:@"99.0.0" forKey:@"FQSkippedVersion"];
+    load(vc, mef);
+    BOOL skipped = [barState(root) rangeOfString:@"Update available"].location == NSNotFound;
+    [d removeObjectForKey:@"FQSkippedVersion"];
+    [d setBool:NO forKey:@"FQCheckForUpdates"];
+    load(vc, mef);
+    BOOL off = [barState(root) rangeOfString:@"Update available"].location == NSNotFound;
+    report(@"update-quiet", skipped && off,
+           [NSString stringWithFormat:@"no notice for a skipped version: %@; with checks off: %@", skipped ? @"yes" : @"NO",
+                                      off ? @"yes" : @"NO"]);
+    [d removeObjectForKey:@"FQUpdateLatest"];
+    [d removeObjectForKey:@"FQUpdateChecked"];
+    vc.updateAction = nil;
+}
+
 /// Checks that the part of the header listing in view shows text.
 static void expectListing(NSString *step, NSString *text)
 {
@@ -541,6 +589,8 @@ int main(int argc, const char *argv[])
         }
         gOut = @(argv[1]);
         NSString *data = @(argv[2]);
+        // No looking for updates (checkUpdateNotice pretends to have).
+        [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"FQCheckForUpdates"];
         NSApplication *app = NSApplication.sharedApplication;
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];
         [app finishLaunching];
@@ -577,6 +627,7 @@ int main(int argc, const char *argv[])
         capture(@"cube-plane1", @"\"1 / 5\"");
 
         checkZoom(vc, data);
+        checkUpdateNotice(vc, data);
 
         // Tables: light curves (points; magnitudes upside down) and spectra,
         // each with its rows in the Table view.

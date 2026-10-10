@@ -105,6 +105,15 @@ jobs:
           # then the disk image built above, which the tests below use.
           sh install.sh
           UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh
+          # The app looks for a newer release, as it does once a day.
+          /Applications/uFits.app/Contents/MacOS/uFits --check-for-updates
+          # When the app runs the installer to update itself, it keeps running
+          # (and opens the new copy once the installer is done).
+          open -a /Applications/uFits.app
+          sleep 3
+          UFITS_FROM_APP=1 UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh
+          pgrep -x uFits
+          osascript -e 'quit app "uFits"' || pkill -x uFits || true
           pluginkit -m -v -i io.github.lmytime.uFits.Preview
           pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail
           /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
@@ -152,6 +161,9 @@ jobs:
       - name: Quick Look logs
         if: always()
         run: |
+          # The preview's own look for a newer release (sandboxed: network)
+          log show --last 15m --style compact --predicate 'eventMessage CONTAINS "the latest release is"' \
+            | tail -5 || true
           log show --last 5m --style compact \
             --predicate 'process BEGINSWITH "uFits" OR (subsystem CONTAINS "quicklook" AND messageType >= 16)' \
             | tail -60 || true
