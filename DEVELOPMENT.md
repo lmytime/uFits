@@ -189,6 +189,19 @@ release, from the disk image just built, and to uninstall. The installer also ta
 `UFITS_VERSION`, `UFITS_DEST`, `UFITS_DMG` and `UFITS_FROM_APP` (see the top of
 `install.sh`).
 
+## The icon
+
+The icon is pixel art, drawn cell by cell by `tools/make_icon.py` from two maps: 32
+cells across the 1024 x 1024 icon (one cell a pixel at 32 px, exact at every size above)
+and 16 cells for 16 px. It comes in two palettes, Dusk (the app's icon) and a light one,
+and the script writes `macos/App/AppIcon.icns` (Dusk), `AppIconLight.icns`,
+`macos/App/Assets.xcassets` and the homepage's icons and favicons. The Makefile compiles
+the asset catalog with Xcode's `actool` (when there is one): macOS 26 shows the light icon
+in light mode; earlier versions show Dusk. The app's **App icon** setting, Dusk or
+Light, sets a custom icon on the app (`NSWorkspace setIcon:forFile:`, as
+`uFits --set-icon auto|dusk|light` does); the app, and the installer, set it again after
+an update replaces the app.
+
 ## Code and tests
 
 ```
