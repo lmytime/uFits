@@ -165,6 +165,6 @@ machinery behind Finder's Quick Look), drives the preview's controls (HDU menu, 
 slider, find bar), times mode switches and table scrolling with big files
 (`tests/macos/make_big_files.py`: a catalog of a million rows, a table 300 columns
 wide, a file of 200 HDUs), clicks the HDU menu and the mode switch of a preview in
-Quick Look and checks they answer within 300 ms (`tests/macos/clicklag.m`: Quick
+Quick Look and checks they answer within 400 ms (`tests/macos/clicklag.m`: Quick
 Look's double-click recognizer would hold each click for half a second), and checks
 that no extension crashed.

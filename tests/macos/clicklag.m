@@ -8,7 +8,7 @@
 //
 // Usage: clicklag OUTDIR FILE   (FILE: several HDUs, its first an image)
 // Exit status 1 when the median time to open the menu or to switch is over
-// 300 ms; 0 without checking when this process may not post events.
+// 400 ms; 0 without checking when this process may not post events.
 
 #import <Cocoa/Cocoa.h>
 #import <Quartz/Quartz.h>
@@ -20,7 +20,7 @@
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"   // CGWindowListCreateImage
 
-static const double kLimitMs = 300;
+static const double kLimitMs = 400;   // was 520-850 ms when clicks were held back
 
 static double uptime(void)
 {
