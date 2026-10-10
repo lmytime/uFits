@@ -150,47 +150,38 @@ jobs:
             ${xcode:+"$xcode"} || true
       - name: App icon in light and dark mode, and the icon of choice (best effort)
         if: ${{ !cancelled() }}
-        timeout-minutes: 5
+        timeout-minutes: 6
         run: |
           app=/Applications/uFits.app
-          mkdir -p build/ql
+          shots=/tmp/iconshots
+          mkdir -p build/ql $shots
           xcode=$(ls -d /Applications/Xcode_26*.app | sort | tail -1)
-          DEVELOPER_DIR=$xcode/Contents/Developer xcrun actool --help 2>&1 | grep -i -E "icon|appear|stack|fallback" || true
-          # What actool made of AppIcon.icon.
-          cat > /tmp/renditions.py <<'PY'
-          import collections, json, sys
-          seen = collections.Counter()
-          for r in json.load(sys.stdin):
-              key = (r.get("AssetType"), r.get("Name"), r.get("Appearance", "-"), r.get("Idiom", ""))
-              seen[key] += 1
-          for key, n in sorted(seen.items(), key=str):
-              print("  ", n, "x", key)
-          PY
-          ls -la $app/Contents/Resources
-          plutil -p build/icon/partial.plist || true
-          xcrun assetutil --info $app/Contents/Resources/Assets.car | python3 /tmp/renditions.py || true
-          # Which icon is drawn: with macOS in light mode, then in dark mode.
-          for mode in false true false; do
-            osascript -e "tell application \"System Events\" to tell appearance preferences to set dark mode to $mode" || true
-            sleep 4
-            echo "dark mode: $mode"
-            build/iconsize /tmp/icon-$mode.png $app || true
-            build/iconsize /tmp/icon-$mode.png --appearance aqua $app --appearance dark $app || true
-            killall Dock 2>/dev/null || true
-            sleep 4
-            screencapture -x build/ql/app-dock-dark-$mode.png || true
+          echo "actool options:"
+          DEVELOPER_DIR=$xcode/Contents/Developer xcrun actool --help 2>&1 | grep -E "^ *--" | head -80 || true
+          for f in $(find $xcode/Contents -maxdepth 4 -name "*AssetCatalog*" -type d 2>/dev/null); do
+            echo "in $f:"
+            find "$f" -type f -perm -u+x -size +100k 2>/dev/null | head -3 | while read -r bin; do
+              strings "$bin" | grep -i -E "fallback|icon-stack|iconstack" | sort -u | head -20
+            done
           done
-          # The icon of choice: a custom icon on the app. It still opens, and
-          # Quick Look still uses its extensions.
-          $app/Contents/MacOS/uFits --set-icon light && echo "set: light" || echo "could not set the icon"
-          build/iconsize build/ql/app-icon-chosen.png $app || true
+          # The icon as Finder and the Dock draw it, with macOS in light mode
+          # and in dark mode: uFits running, and a Finder window on Applications.
           open $app
-          sleep 4
-          pgrep -x uFits > /dev/null && echo "uFits opens with an icon chosen" || echo "uFits did not open"
-          screencapture -x build/ql/app-dock-chosen.png || true
+          sleep 3
+          mkdir -p /tmp/iconview
+          ln -sf $app /tmp/iconview/uFits.app
+          osascript -e 'tell application "Finder"' -e 'set w to make new Finder window to (POSIX file "/tmp/iconview" as alias)' \
+            -e 'set current view of w to icon view' -e 'set icon size of icon view options of w to 256' \
+            -e 'set bounds of w to {40, 60, 640, 560}' -e 'end tell' || true
+          for mode in false true; do
+            osascript -e "tell application \"System Events\" to tell appearance preferences to set dark mode to $mode" || true
+            sleep 6
+            screencapture -x $shots/app-mode-dark-$mode.png || true
+          done
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' || true
+          osascript -e 'tell application "Finder" to close every window' || true
           pkill -x uFits || true
-          $app/Contents/MacOS/uFits --set-icon auto && echo "set: auto" || echo "could not unset the icon"
-          build/iconsize /tmp/icon-auto.png $app || true
+          tests/macos/print_images.sh $shots
       - name: Quick Look thumbnails (QLThumbnailGenerator)
         timeout-minutes: 4
         run: |
