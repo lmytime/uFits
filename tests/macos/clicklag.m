@@ -294,6 +294,7 @@ int main(int argc, const char *argv[])
                                                    backing:NSBackingStoreBuffered
                                                      defer:NO];
         aw.becomesKeyOnlyIfNeeded = NO;
+        aw.hidesOnDeactivate = NO;
         aw.contentView = vc.view;
         [aw makeKeyAndOrderFront:nil];
         __block BOOL loaded = NO;
@@ -340,11 +341,11 @@ int main(int argc, const char *argv[])
         NSRect rframe = [remote convertRect:remote.bounds toView:nil];
         printf("B: the extension's view at %s\n", NSStringFromRect(rframe).UTF8String);
         screenshot(qw, @"ql.png");
-        NSPoint off = rframe.origin;
-        NSPoint hduB = NSMakePoint(off.x + hduAt.x, off.y + hduAt.y);
+        CGFloat dx = NSMaxX(rframe) - NSWidth(root.bounds), dy = NSMinY(rframe);
+        NSPoint hduB = NSMakePoint(dx + hduAt.x, dy + hduAt.y);
         NSPoint segB[3];
         for (int i = 0; i < 3; i++)
-            segB[i] = NSMakePoint(off.x + segAt[i].x, off.y + segAt[i].y);
+            segB[i] = NSMakePoint(dx + segAt[i].x, dy + segAt[i].y);
         measure("B (Quick Look) ", qw, hduB, segB);
         screenshot(qw, @"ql-end.png");
         [pv close];

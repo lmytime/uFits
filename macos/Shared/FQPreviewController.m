@@ -320,10 +320,49 @@ static void FQStartClickProbe(NSView *root)
                                                     }];
     });
 }
+/// Lists the gesture recognizers on view and its ancestors.
+static void FQProbeRecognizers(NSView *view, const char *when)
+{
+    if (!gProbe)
+        return;
+    for (NSView *v = view; v; v = v.superview)
+        for (NSGestureRecognizer *g in v.gestureRecognizers) {
+            NSInteger clicks = [g isKindOfClass:NSClickGestureRecognizer.class]
+                                   ? ((NSClickGestureRecognizer *)g).numberOfClicksRequired
+                                   : 0;
+            os_log(gProbe, "probe %.3f: %{public}s: %{public}s on %{public}s: clicks %ld, delays primary %d, "
+                           "enabled %d, target %{public}s, action %{public}s, delegate %{public}s",
+                   FQUptime(), when, NSStringFromClass(g.class).UTF8String, NSStringFromClass(v.class).UTF8String,
+                   (long)clicks, g.delaysPrimaryMouseButtonEvents, g.enabled,
+                   g.target ? NSStringFromClass([g.target class]).UTF8String : "none",
+                   g.action ? NSStringFromSelector(g.action).UTF8String : "none",
+                   g.delegate ? NSStringFromClass([g.delegate class]).UTF8String : "none");
+        }
+}
+
 #define FQ_PROBE(...) os_log(gProbe, __VA_ARGS__)
 #else
 #define FQ_PROBE(...) ((void)0)
 #endif
+
+#pragma mark - Clicks in Quick Look
+
+/// Quick Look shows the preview in a view with a gesture recognizer of its
+/// own (double clicks) that holds back every click until the double-click
+/// time has passed without a second one: half a second before the HDU menu
+/// opens, the mode switch switches or a table row is picked. Let clicks
+/// through at once: the recognizer still sees them, and still knows a
+/// double click.
+static void FQLetClicksThrough(NSView *view)
+{
+#ifdef FQ_CLICKPROBE
+    FQProbeRecognizers(view, "before");
+#endif
+    for (NSView *v = view; v; v = v.superview)
+        for (NSGestureRecognizer *g in v.gestureRecognizers)
+            if (g.delaysPrimaryMouseButtonEvents)
+                g.delaysPrimaryMouseButtonEvents = NO;
+}
 
 #pragma mark - Root view
 
@@ -400,6 +439,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     NSInteger _generation;
     NSSize _fitting;
     CGFloat _hduWidth;    // natural width of the HDU menu
+    id _clickMonitor;     // see FQLetClicksThrough
 }
 
 - (instancetype)initWithNibName:(NSNibName)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil
@@ -421,6 +461,8 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 
 - (void)dealloc
 {
+    if (_clickMonitor)
+        [NSEvent removeMonitor:_clickMonitor];
     _tableView.dataSource = nil;
     _tableView.delegate = nil;
 }
@@ -586,6 +628,22 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 #ifdef FQ_CLICKPROBE
     FQStartClickProbe(root);
 #endif
+    // Before each click is handed out, in case Quick Look adds its
+    // recognizer after the view appears.
+    __weak NSView *weakRoot = root;
+    _clickMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown
+                                                          handler:^NSEvent *(NSEvent *event) {
+                                                              NSView *r = weakRoot;
+                                                              if (r && event.window == r.window)
+                                                                  FQLetClicksThrough(r);
+                                                              return event;
+                                                          }];
+}
+
+- (void)viewDidAppear
+{
+    [super viewDidAppear];
+    FQLetClicksThrough(self.view);
 }
 
 - (NSSize)fittingContentSize
