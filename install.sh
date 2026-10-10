@@ -56,6 +56,50 @@ unregister() {
     "$LSREGISTER" -u "$1" 2>/dev/null || true
 }
 
+# The Quick Look extensions of every copy of uFits that macOS knows of (an
+# old build, a copy left in Downloads, this one), a path a line.
+known_extensions() {
+    for id in $IDS; do
+        pluginkit -m -A -D -v -i "$id" 2>/dev/null | awk -F '\t' 'NF > 1 { print $NF }'
+    done | grep '^/' | sort -u
+}
+
+# Unregisters the copies of uFits whose extensions are listed on stdin,
+# but the one at $1 (if any), and prints where they are.
+unregister_copies() {
+    while IFS= read -r ext; do
+        if [ -n "$1" ]; then
+            case $ext in "$1"/*) continue ;; esac
+        fi
+        pluginkit -r "$ext" 2>/dev/null || true
+        app=${ext%/Contents/PlugIns/*}
+        "$LSREGISTER" -u "$app" 2>/dev/null || true
+        echo "$app"
+    done | sort -u
+}
+
+# The paths among the lines of $1 that are there, indented.
+existing() {
+    printf '%s\n' "$1" | while IFS= read -r f; do
+        [ -z "$f" ] || [ ! -e "$f" ] || echo "  $f"
+    done
+}
+
+# What uFits keeps in the Library, a path a line: its settings, the
+# containers of its sandboxed Quick Look extensions (their settings and
+# temporary files), caches, saved windows, the files it opened recently.
+library_files() {
+    L=$HOME/Library
+    for dir in "$L/Preferences" "$L/Preferences/ByHost" "$L/Containers" "$L/Application Scripts" "$L/Caches" \
+        "$L/HTTPStorages" "$L/Saved Application State" "$L/WebKit" "$L/Logs" "$L/LaunchAgents" \
+        "$L/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.ApplicationRecentDocuments" \
+        "$(getconf DARWIN_USER_CACHE_DIR 2>/dev/null || true)" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"; do
+        if [ -n "$dir" ] && [ -d "$dir" ]; then
+            find "$dir" -maxdepth 1 -iname 'io.github.lmytime.ufits*' 2>/dev/null || true
+        fi
+    done
+}
+
 reset_quicklook() {
     qlmanage -r >/dev/null 2>&1 || true
     qlmanage -r cache >/dev/null 2>&1 || true
@@ -108,6 +152,8 @@ uninstall_ufits() {
     stop
     launchctl bootout "gui/$(id -u)/$AGENT" 2>/dev/null || true
     rm -f "$HOME/Library/LaunchAgents/$AGENT.plist"
+    # Quick Look forgets every copy of uFits; the installed ones go.
+    others=$(known_extensions | unregister_copies "")
     gone=0
     for dir in ${UFITS_DEST:+"$UFITS_DEST"} /Applications "$HOME/Applications"; do
         [ -d "$dir/$APP" ] || continue
@@ -116,8 +162,26 @@ uninstall_ufits() {
         say "Removed $dir/$APP"
         gone=1
     done
+    # Its settings and what else it keeps in the Library.
+    defaults delete io.github.lmytime.uFits >/dev/null 2>&1 || true
+    files=$(library_files)
+    kept=$(printf '%s\n' "$files" | while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        rm -rf "$f" 2>/dev/null || true
+        [ ! -e "$f" ] || echo "  $f"
+    done)
+    [ -z "$files" ] || say "Removed the settings and other files of uFits"
+    if [ -n "$kept" ]; then
+        say "macOS would not let these go; move them to the Trash in Finder:"
+        say "$kept"
+    fi
     reset_quicklook
-    [ $gone = 1 ] || say "uFits is not installed."
+    rest=$(existing "$others")
+    if [ -n "$rest" ]; then
+        say "Other copies of uFits are on this Mac (Quick Look no longer uses them); delete them too:"
+        say "$rest"
+    fi
+    [ $gone = 1 ] || [ -n "$files" ] || [ -n "$rest" ] || say "uFits is not installed."
 }
 
 install_ufits() {
@@ -157,11 +221,17 @@ install_ufits() {
 
     stop
     mkdir -p "$dest" || fail "could not make $dest"
+    dest=$(CDPATH='' cd -- "$dest" && pwd -P)   # as pluginkit gives paths
     unregister "$dest/$APP"
     rm -rf "$dest/$APP" || fail "could not replace $dest/$APP"
     ditto "$MNT/$APP" "$dest/$APP" || fail "could not copy uFits to $dest"
     hdiutil detach -quiet "$MNT" 2>/dev/null && mounted=0
     xattr -dr com.apple.quarantine "$dest/$APP" 2>/dev/null || true
+
+    # Other copies of uFits that macOS knows of (an old build, a copy left in
+    # Downloads): Quick Look can use one of them instead of this one (macOS
+    # 15 takes the one numbered highest). Unregister them, and say where.
+    others=$(known_extensions | unregister_copies "$dest/$APP")
 
     # Register the app and turn its Quick Look extensions on. pluginkit now
     # and then misses one when a copy of uFits was just replaced: look, and
@@ -176,24 +246,15 @@ install_ufits() {
         done
         missing=
         for id in $IDS; do
-            pluginkit -m -i "$id" 2>/dev/null | grep -q "$id" || missing="$missing $id"
+            pluginkit -m -v -i "$id" 2>/dev/null | grep -qF "$dest/$APP/" || missing="$missing $id"
         done
         [ -z "$missing" ] && break
         sleep 1
     done
-    # Other copies of uFits that macOS knows (an old build, a copy left in
-    # Downloads): Quick Look can use one of them instead, when it is numbered
-    # higher. Unregister them, and say where they are.
-    others=$(for id in $IDS; do
-        pluginkit -m -A -D -v -i "$id" 2>/dev/null | awk -F '\t' 'NF > 1 { print $NF }'
-    done | grep '^/' | grep -v -F "$dest/$APP/" | sort -u)
+    others=$(existing "$others")
     if [ -n "$others" ]; then
-        printf '%s\n' "$others" | while IFS= read -r ext; do
-            pluginkit -r "$ext" 2>/dev/null || true
-            "$LSREGISTER" -u "${ext%/Contents/PlugIns/*}" 2>/dev/null || true
-        done
         say "Note: Quick Look now uses this uFits, not these other copies. Delete them, or macOS may take them up again:"
-        printf '%s\n' "$others" | sed 's|/Contents/PlugIns/.*||' | sort -u | sed 's/^/  /'
+        say "$others"
     fi
     reset_quicklook
     # Looking for updates now and then, unless turned off in the app (by

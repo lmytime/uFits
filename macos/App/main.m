@@ -322,6 +322,7 @@ static NSStackView *FQRow(NSArray<NSView *> *views, CGFloat spacing)
         all.alignment = NSLayoutAttributeLeading;
         all.spacing = 12;
         all.edgeInsets = NSEdgeInsetsMake(20, 24, 20, 24);
+        [all.widthAnchor constraintEqualToConstant:width + 48].active = YES;   // a margin on the right too
         [all setCustomSpacing:20 afterView:_removeCopies];
         [all setCustomSpacing:20 afterView:updateRow];
 
@@ -618,7 +619,7 @@ static BOOL FQInApplications(void)
         NSParagraphStyleAttributeName : centred
     };
     NSMutableAttributedString *credits = [[NSMutableAttributedString alloc]
-        initWithString:@"Quick Look for FITS and XISF files.\nXISF support by Shihao Wang.\n"
+        initWithString:@"Quick Look for FITS and XISF files.\n"
             attributes:plain];
     NSMutableDictionary *link = [plain mutableCopy];
     link[NSLinkAttributeName] = [NSURL URLWithString:@"https://lmytime.github.io/uFits/"];
@@ -626,6 +627,7 @@ static BOOL FQInApplications(void)
                                                                     attributes:link]];
     // "Version 0.0.6", without the build number after it ("(1)").
     [NSApp orderFrontStandardAboutPanelWithOptions:@{
+        NSAboutPanelOptionApplicationVersion : [@"Version " stringByAppendingString:FQUpdate.currentVersion],
         NSAboutPanelOptionVersion : @"",
         NSAboutPanelOptionCredits : credits
     }];

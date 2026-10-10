@@ -17,7 +17,7 @@ curl -fsSL https://github.com/lmytime/uFits/releases/latest/download/install.sh 
 That's all: select a FITS or XISF file in Finder and press Space. Works on macOS 11 or later,
 Apple silicon and Intel.
 
-To uninstall:
+To uninstall (the app, its settings and all it keeps in your Library):
 
 ```sh
 curl -fsSL https://github.com/lmytime/uFits/releases/latest/download/install.sh | sh -s -- --uninstall
@@ -81,10 +81,10 @@ Open uFits (in Applications) to see whether its Quick Look extensions are on, an
   General › Login Items & Extensions › Quick Look, then click **Reset Quick Look** in the
   app.
 - **Thumbnails fill only a quarter of the icon or are upside down, or the uFits app says
-  "Version 1.0.0".** An old copy of uFits is still on your Mac (the first builds were
-  numbered 1.0.0, higher than today's versions), and Quick Look uses it. The uFits app in
-  Applications lists other copies and moves them to the Trash, and the installer
-  unregisters them. To find them yourself:
+  "Version 1.0.0".** An old copy of uFits is still on your Mac. The first builds were
+  numbered 1.0.0, higher than today's versions, and macOS 15 makes Finder's thumbnails
+  with the copy numbered highest. The uFits app in Applications lists other copies and
+  moves them to the Trash; the installer unregisters them too. To find them yourself:
   `pluginkit -m -A -D -v -i io.github.lmytime.uFits.Thumbnail`.
 - **Another app takes over `.fits` files.** The uFits app shows which file type `.fits`
   maps to on your Mac; quitting or removing the other FITS app's Quick Look plug-in

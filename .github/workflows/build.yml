@@ -257,7 +257,8 @@ jobs:
           pluginkit -a "$old"/Contents/PlugIns/*.appex
           sleep 2
           pluginkit -m -A -D -v -i io.github.lmytime.uFits.Thumbnail
-          # The copy whose thumbnail extension runs for a file not seen before.
+          # The copy whose thumbnail extension runs for a file not seen before
+          # (macOS 15 takes the old one, though pluginkit names the other).
           which_copy() {
             pkill -x uFitsThumbnail || true
             qlmanage -r >/dev/null 2>&1 || true
@@ -265,8 +266,9 @@ jobs:
             sleep 1
             cp build/testdata/orient-ll.fits "/tmp/copycheck/$1.fits"
             build/qlthumb /tmp/copycheck "/tmp/copycheck/$1.fits" || true
+            ran=$(ps -axo command | grep '[u]FitsThumbnail' || echo none)
             echo "pluginkit: $(pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail)"
-            echo "running: $(ps -axo command | grep '[u]FitsThumbnail' || echo none)"
+            echo "the thumbnail came from: $ran"
           }
           which_copy before
           open /Applications/uFits.app
@@ -276,14 +278,41 @@ jobs:
           UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh | tee /tmp/copycheck/install.log
           grep -F old-builds/uFits.app /tmp/copycheck/install.log
           for id in Preview Thumbnail; do
-            for i in 1 2 3 4 5; do
-              pluginkit -m -v -i io.github.lmytime.uFits.$id | grep -qF /Applications/uFits.app/ && break
-              sleep 1
-            done
             pluginkit -m -v -i io.github.lmytime.uFits.$id | grep -F /Applications/uFits.app/
           done
           which_copy after
+          case $ran in
+          /Applications/uFits.app/*) ;;
+          *) echo "FAIL the thumbnail did not come from /Applications/uFits.app"; exit 1 ;;
+          esac
           rm -rf /private/tmp/old-builds
+      - name: Update, as a user would
+        if: always()
+        timeout-minutes: 6
+        run: |
+          # This build, numbered 0.0.1, updates itself to the latest release
+          # through its own offer and its Update button: the release's
+          # installer replaces it, the new copy opens and this one quits.
+          latest=$(curl -fsLI -o /dev/null -w '%{url_effective}' https://github.com/lmytime/uFits/releases/latest)
+          latest=${latest##*/v}
+          app=/Applications/uFits.app
+          UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh > /dev/null
+          for p in "$app/Contents" "$app"/Contents/PlugIns/*.appex/Contents; do
+            plutil -replace CFBundleShortVersionString -string 0.0.1 "$p/Info.plist"
+          done
+          for x in "$app"/Contents/PlugIns/*.appex "$app"; do
+            codesign --force --sign - --preserve-metadata=entitlements,flags "$x"
+          done
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app"
+          # As at first: nothing seen out there yet.
+          for key in FQUpdateLatest FQUpdateChecked FQUpdateTried FQSkippedVersion; do
+            defaults delete io.github.lmytime.uFits $key 2>/dev/null || true
+          done
+          status=0
+          sh tests/macos/update_check.sh "$latest" build/ql || status=$?
+          # This build again, for what follows.
+          UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh > /dev/null
+          exit $status
       - name: Crash reports
         if: always()
         run: |
@@ -300,12 +329,9 @@ jobs:
           log show --last 5m --style compact \
             --predicate 'process BEGINSWITH "uFits" OR (subsystem CONTAINS "quicklook" AND messageType >= 16)' \
             | tail -60 || true
-      - name: Uninstall
-        run: |
-          sh install.sh --uninstall
-          test ! -e /Applications/uFits.app
-          test ! -e ~/Library/LaunchAgents/io.github.lmytime.uFits.update.plist
-          pluginkit -m -i io.github.lmytime.uFits.Preview || true
+      - name: Uninstall, and nothing is left
+        if: always()
+        run: sh tests/macos/uninstall_check.sh
       - name: Images for review (base64)
         if: always()
         run: tests/macos/print_images.sh build/ql
@@ -363,3 +389,28 @@ jobs:
             gh release create "$TAG" "$dmg" "$dmg.sha256" install.sh --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" --title "uFits ${TAG#v}" --notes-file notes.md
           fi
+
+  update-from-previous:
+    name: Update from the previous release
+    if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || inputs.release != ''
+    needs: release
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: The previous release updates itself to this one, as a user would
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release }}
+        run: |
+          prev=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=10" --jq '.[].tag_name' | grep -vxF "$TAG" | head -1)
+          echo "uFits ${prev#v}, as released, updating itself to ${TAG#v}"
+          UFITS_VERSION=${prev#v} sh install.sh
+          mkdir -p pics
+          sh tests/macos/update_check.sh "${TAG#v}" pics
+      - name: Uninstall, and nothing is left
+        if: always()
+        run: sh tests/macos/uninstall_check.sh
+      - name: Pictures for review (base64)
+        if: always()
+        run: tests/macos/print_images.sh pics

@@ -233,4 +233,10 @@ slider, find bar), times mode switches and table scrolling with big files
 wide, a file of 200 HDUs), clicks the HDU menu and the mode switch of a preview in
 Quick Look and checks they answer within 400 ms (`tests/macos/clicklag.m`: Quick
 Look's double-click recognizer would hold each click for half a second), and checks
-that no extension crashed.
+that no extension crashed. It also plants an old copy of uFits numbered 1.0.0 and
+checks that the installer takes it out of Quick Look's hands, lets a copy of the build
+numbered 0.0.1 update itself to the latest release as a user would
+(`tests/macos/update_check.sh`: its offer, **Update**, the new copy running), and
+uninstalls, checking that nothing of uFits is left in `~/Library`
+(`tests/macos/uninstall_check.sh`). After a release is published, a last job has the
+previous release update itself to the new one.
