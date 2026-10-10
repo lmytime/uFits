@@ -46,6 +46,10 @@ unexport CODESIGN_ALLOCATE
 ARCHF   := $(foreach a,$(ARCHS),-arch $(a))
 WARN    := -Wall -Wextra -Wno-unused-parameter
 COMMON  := $(ARCHF) -mmacosx-version-min=$(MINOS) -O2 $(WARN) -Icore -Imacos/Shared
+# make PROBE=1: a diagnostic build for CI whose preview logs when clicks reach it.
+ifeq ($(PROBE),1)
+COMMON  += -DFQ_CLICKPROBE
+endif
 CFLAGS_ := -std=c11 $(COMMON)
 OBJC_   := -fobjc-arc $(COMMON)
 EXT     := -fapplication-extension

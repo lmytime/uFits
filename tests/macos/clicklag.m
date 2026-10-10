@@ -1,11 +1,12 @@
 // clicklag - how long the preview takes to answer a click on its HDU menu
 // and on its Image/Table/Header switch: (A) in a window of this process, as
 // in the app's viewer windows, and (B) in a QLPreviewView, where the
-// installed extension draws the preview in its own process, as in Finder's
-// Quick Look panel. Clicks are posted as events (NSEvent into this process;
-// CGEvent through the window server when allowed); a menu counts as open
-// when its window is on screen, a switch as answered when the window's
-// pixels change.
+// installed extension shows the preview from its own process, as in
+// Finder's Quick Look panel. Clicks go through the window server (CGEvent);
+// a menu counts as open when its window is on screen, a switch as answered
+// when the window's pixels change. Each kind of click is also made with the
+// mouse moving a little between press and release, which ends any wait for
+// a second click of a double click at once.
 //
 // Usage: clicklag OUTDIR FILE [TAG]   (FILE: several HDUs, its first an
 // image; TAG goes into the names of the screenshots)
@@ -23,9 +24,9 @@
 
 static NSString *gOut, *gTag = @"";
 
-static double now(void)
+static double uptime(void)
 {
-    return CACurrentMediaTime();
+    return NSProcessInfo.processInfo.systemUptime;
 }
 
 static void spin(double seconds)
@@ -45,17 +46,6 @@ static id findView(NSView *v, Class cls, BOOL (^test)(id view))
             return found;
     }
     return nil;
-}
-
-static void dumpTree(NSView *v, int depth)
-{
-    if (depth > 9)
-        return;
-    NSRect r = [v convertRect:v.bounds toView:nil];
-    printf("   %*s%s %s%s\n", depth * 2, "", NSStringFromClass(v.class).UTF8String, NSStringFromRect(r).UTF8String,
-           v.hidden ? " hidden" : "");
-    for (NSView *sub in v.subviews)
-        dumpTree(sub, depth + 1);
 }
 
 /// The deepest view whose class looks like a view of another process.
@@ -86,25 +76,10 @@ static void screenshot(NSWindow *w, NSString *name)
 
 #pragma mark Events
 
-static void postMouse(NSWindow *w, NSPoint p, NSEventType type)
+static void cgMouseAt(NSPoint screen, CGEventType type)
 {
-    NSEvent *e = [NSEvent mouseEventWithType:type
-                                    location:p
-                               modifierFlags:0
-                                   timestamp:NSProcessInfo.processInfo.systemUptime
-                                windowNumber:w.windowNumber
-                                     context:nil
-                                 eventNumber:0
-                                  clickCount:1
-                                    pressure:type == NSEventTypeLeftMouseDown ? 1 : 0];
-    [NSApp postEvent:e atStart:NO];
-}
-
-static void cgMouse(NSWindow *w, NSPoint p, CGEventType type)
-{
-    NSPoint s = [w convertPointToScreen:p];
     CGFloat top = NSMaxY(NSScreen.screens.firstObject.frame);
-    CGEventRef e = CGEventCreateMouseEvent(NULL, type, CGPointMake(s.x, top - s.y), kCGMouseButtonLeft);
+    CGEventRef e = CGEventCreateMouseEvent(NULL, type, CGPointMake(screen.x, top - screen.y), kCGMouseButtonLeft);
     CGEventSetIntegerValueField(e, kCGMouseEventClickState, 1);
     CGEventPost(kCGHIDEventTap, e);
     CFRelease(e);
@@ -119,18 +94,26 @@ static void cgKey(CGKeyCode key)
     }
 }
 
-static BOOL gCG;   // click with CGEvents (else NSEvents)
-
-static void click(NSWindow *w, NSPoint p)
+/// A click at p (window coordinates); moving: the mouse moves 8 points
+/// between press and release.
+static double click(NSWindow *w, NSPoint p, BOOL moving)
 {
-    if (gCG) {
-        cgMouse(w, p, kCGEventMouseMoved);
-        cgMouse(w, p, kCGEventLeftMouseDown);
-        cgMouse(w, p, kCGEventLeftMouseUp);
+    NSPoint s = [w convertPointToScreen:p];
+    cgMouseAt(s, kCGEventMouseMoved);
+    spin(0.05);
+    double at = uptime();
+    cgMouseAt(s, kCGEventLeftMouseDown);
+    if (moving) {
+        for (int i = 1; i <= 4; i++) {
+            usleep(8000);
+            cgMouseAt(NSMakePoint(s.x + 2 * i, s.y), kCGEventLeftMouseDragged);
+        }
+        cgMouseAt(NSMakePoint(s.x + 8, s.y), kCGEventLeftMouseUp);
     } else {
-        postMouse(w, p, NSEventTypeLeftMouseDown);
-        postMouse(w, p, NSEventTypeLeftMouseUp);
+        usleep(30000);
+        cgMouseAt(s, kCGEventLeftMouseUp);
     }
+    return at;
 }
 
 #pragma mark Screen
@@ -157,28 +140,6 @@ static NSDictionary *newMenu(NSDictionary *before)
     return nil;
 }
 
-/// Makes this app the active one: a click on the window's title bar (macOS
-/// no longer lets an app activate itself).
-static BOOL activate(NSWindow *w, BOOL canPost)
-{
-    [w makeKeyAndOrderFront:nil];
-    [NSApp activateIgnoringOtherApps:YES];
-    spin(0.3);
-    if (!NSApp.isActive && canPost) {
-        NSRect f = w.frame;
-        CGFloat top = NSMaxY(NSScreen.screens.firstObject.frame);
-        CGPoint p = CGPointMake(NSMidX(f), top - (NSMaxY(f) - 12));
-        const CGEventType types[] = {kCGEventMouseMoved, kCGEventLeftMouseDown, kCGEventLeftMouseUp};
-        for (int i = 0; i < 3; i++) {
-            CGEventRef e = CGEventCreateMouseEvent(NULL, types[i], p, kCGMouseButtonLeft);
-            CGEventPost(kCGHIDEventTap, e);
-            CFRelease(e);
-        }
-        spin(0.6);
-    }
-    return NSApp.isActive && w.isKeyWindow;
-}
-
 /// A fingerprint of what the window shows.
 static uint64_t pixels(NSWindow *w)
 {
@@ -190,7 +151,7 @@ static uint64_t pixels(NSWindow *w)
     const uint8_t *p = CFDataGetBytePtr(data);
     CFIndex n = CFDataGetLength(data);
     uint64_t h = 1469598103934665603ULL;
-    for (CFIndex i = 0; i < n; i += 4) {
+    for (CFIndex i = 0; i + 2 < n; i += 4) {
         h ^= (uint64_t)p[i] | (uint64_t)p[i + 1] << 8 | (uint64_t)p[i + 2] << 16;
         h *= 1099511628211ULL;
     }
@@ -213,23 +174,9 @@ static uint64_t settled(NSWindow *w)
     return a;
 }
 
-/// Clicks p and returns the ms until the window's pixels change (-1: no change in 3 s).
-static double timePixels(NSWindow *w, NSPoint p)
-{
-    uint64_t base = settled(w);
-    double t0 = now();
-    click(w, p);
-    while (now() - t0 < 3) {
-        spin(0.002);
-        if (pixels(w) != base)
-            return (now() - t0) * 1000;
-    }
-    return -1;
-}
+#pragma mark Measurements
 
-#pragma mark A: in this process
-
-static double gMenuOpened;
+static double gMenuOpened;   // a menu of this process began tracking
 
 static void watchMenus(void)
 {
@@ -238,7 +185,7 @@ static void watchMenus(void)
                     object:nil
                      queue:nil
                 usingBlock:^(NSNotification *note) {
-                    gMenuOpened = now();
+                    gMenuOpened = uptime();
                     NSMenu *menu = note.object;
                     NSTimer *t = [NSTimer timerWithTimeInterval:0.05
                                                         repeats:NO
@@ -249,11 +196,73 @@ static void watchMenus(void)
                 }];
 }
 
+/// Clicks the HDU menu; ms until a menu is open (-1: none in 3 s). Closes it.
+static double timeMenu(NSWindow *w, NSPoint p, BOOL moving, double *at, NSString **who)
+{
+    NSDictionary *before = windows();
+    gMenuOpened = 0;
+    double t0 = *at = click(w, p, moving);
+    NSDictionary *menu = nil;
+    while (!menu && !gMenuOpened && uptime() - t0 < 3) {
+        spin(0.002);
+        menu = newMenu(before);
+    }
+    double ms = menu ? (uptime() - t0) * 1000 : gMenuOpened ? (gMenuOpened - t0) * 1000 : -1;
+    *who = menu ? (menu[(__bridge id)kCGWindowOwnerName] ?: @"?") : gMenuOpened ? @"this process" : @"none";
+    if (menu) {
+        spin(0.15);
+        cgKey(53);   // Escape
+        spin(0.4);
+        if (newMenu(before)) {
+            pid_t pid = [menu[(__bridge id)kCGWindowOwnerPID] intValue];
+            printf("   (the menu stayed open: ending process %d)\n", pid);
+            if (pid != getpid())
+                kill(pid, SIGKILL);
+            spin(1);
+        }
+    }
+    spin(0.3);
+    return ms;
+}
+
+/// Clicks p; ms until the window's pixels change (-1: no change in 3 s).
+static double timePixels(NSWindow *w, NSPoint p, BOOL moving, double *at)
+{
+    uint64_t base = settled(w);
+    double t0 = *at = click(w, p, moving);
+    while (uptime() - t0 < 3) {
+        spin(0.002);
+        if (pixels(w) != base)
+            return (uptime() - t0) * 1000;
+    }
+    return -1;
+}
+
+static void measure(const char *where, NSWindow *w, NSPoint hduAt, const NSPoint *segAt)
+{
+    for (int moving = 0; moving < 2; moving++) {
+        const char *how = moving ? "click with a move" : "click";
+        for (int k = 0; k < 3; k++) {
+            double at;
+            NSString *who;
+            double ms = timeMenu(w, hduAt, moving, &at, &who);
+            printf("%s %-17s HDU menu open after %7.1f ms (%s; pressed at %.3f)\n", where, how, ms, who.UTF8String, at);
+        }
+        for (int k = 0; k < 2; k++) {
+            double at1, at2;
+            double header = timePixels(w, segAt[2], moving, &at1);
+            double image = timePixels(w, segAt[0], moving, &at2);
+            printf("%s %-17s Header shown after %7.1f ms (pressed at %.3f), Image after %7.1f ms (pressed at %.3f)\n",
+                   where, how, header, at1, image, at2);
+        }
+    }
+}
+
 int main(int argc, const char *argv[])
 {
     @autoreleasepool {
         if (argc < 3) {
-            fprintf(stderr, "usage: clicklag OUTDIR FILE\n");
+            fprintf(stderr, "usage: clicklag OUTDIR FILE [TAG]\n");
             return 2;
         }
         gOut = @(argv[1]);
@@ -264,45 +273,27 @@ int main(int argc, const char *argv[])
         NSApplication *app = NSApplication.sharedApplication;
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];
         [app finishLaunching];
-        [app activateIgnoringOtherApps:YES];
         watchMenus();
-        BOOL canPost = CGPreflightPostEventAccess();
-        printf("double-click interval %.2f s; may post events: %s; accessibility: %s\n", NSEvent.doubleClickInterval,
-               canPost ? "yes" : "no", AXIsProcessTrusted() ? "yes" : "no");
-
+        if (!CGPreflightPostEventAccess()) {
+            printf("cannot post events: no measurements\n");
+            return 0;
+        }
         NSRect vis = NSScreen.mainScreen.visibleFrame;
         NSSize size = NSMakeSize(MIN(720, NSWidth(vis) - 40), MIN(500, NSHeight(vis) - 60));
         NSRect place = NSMakeRect(floor(NSMidX(vis) - size.width / 2), floor(NSMidY(vis) - size.height / 2 - 14),
                                   size.width, size.height);
-        printf("screen %s, visible %s, windows' content at %s\n",
+        printf("double-click interval %.2f s; screen %s, visible %s, content at %s\n", NSEvent.doubleClickInterval,
                NSStringFromRect(NSScreen.mainScreen.frame).UTF8String, NSStringFromRect(vis).UTF8String,
                NSStringFromRect(place).UTF8String);
 
-        // B's window first, to learn where the extension's view sits.
-        NSWindow *qw = [[NSWindow alloc] initWithContentRect:place
-                                                   styleMask:NSWindowStyleMaskTitled
-                                                     backing:NSBackingStoreBuffered
-                                                       defer:NO];
-        QLPreviewView *pv = [[QLPreviewView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)
-                                                           style:QLPreviewViewStyleNormal];
-        qw.contentView = pv;
-        [qw makeKeyAndOrderFront:nil];
-        pv.previewItem = url;
-        spin(5);
-        printf("B: views of the QLPreviewView\n");
-        dumpTree(pv, 0);
-        NSView *remote = remoteView(pv) ?: pv;
-        NSRect rframe = [remote convertRect:remote.bounds toView:nil];
-        printf("B: the extension's view at %s\n", NSStringFromRect(rframe).UTF8String);
-        screenshot(qw, @"ql.png");
-        [qw orderOut:nil];
-
-        // A: the same preview in this process, at the same size.
+        // A: the preview in this process, in a panel that takes clicks
+        // without this app being the active one.
         FQPreviewController *vc = [FQPreviewController new];
-        NSWindow *aw = [[NSWindow alloc] initWithContentRect:place
-                                                   styleMask:NSWindowStyleMaskTitled
-                                                     backing:NSBackingStoreBuffered
-                                                       defer:NO];
+        NSPanel *aw = [[NSPanel alloc] initWithContentRect:place
+                                                 styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskNonactivatingPanel
+                                                   backing:NSBackingStoreBuffered
+                                                     defer:NO];
+        aw.becomesKeyOnlyIfNeeded = NO;
         aw.contentView = vc.view;
         [aw makeKeyAndOrderFront:nil];
         __block BOOL loaded = NO;
@@ -311,10 +302,8 @@ int main(int argc, const char *argv[])
         }];
         for (int i = 0; i < 200 && !loaded; i++)
             spin(0.05);
+        [aw setContentSize:size];
         spin(1.5);
-        [aw setContentSize:rframe.size];
-        spin(0.3);
-        printf("A: active %s\n", activate(aw, canPost) ? "yes" : "NO");
         NSView *root = aw.contentView;
         NSPopUpButton *hdu = findView(root, NSPopUpButton.class, ^BOOL(id v) {
             return [((NSPopUpButton *)v).itemArray.firstObject.title hasPrefix:@"HDU"];
@@ -329,90 +318,34 @@ int main(int argc, const char *argv[])
         NSPoint segAt[3];
         for (int i = 0; i < 3; i++)
             segAt[i] = NSMakePoint(NSMinX(sf) + (i + 0.5) * NSWidth(sf) / 3, NSMidY(sf));
-        printf("A: HDU menu at %s, switch at %s (content %s)\n", NSStringFromRect(hf).UTF8String,
+        printf("A: HDU menu at %s, switch at %s, content %s\n", NSStringFromRect(hf).UTF8String,
                NSStringFromRect(sf).UTF8String, NSStringFromSize(root.bounds.size).UTF8String);
         screenshot(aw, @"app.png");
-
-        for (int method = 0; method < 2; method++) {
-            gCG = method == 1;
-            if (gCG && !canPost)
-                break;
-            const char *how = gCG ? "CGEvent" : "NSEvent";
-            for (int k = 0; k < 3; k++) {
-                gMenuOpened = 0;
-                double t0 = now();
-                click(aw, hduAt);
-                while (!gMenuOpened && now() - t0 < 3)
-                    spin(0.002);
-                printf("A %s: HDU menu open after %7.1f ms\n", how, gMenuOpened ? (gMenuOpened - t0) * 1000 : -1);
-                spin(0.4);
-            }
-            for (int k = 0; k < 2; k++) {
-                double header = timePixels(aw, segAt[2]);
-                double image = timePixels(aw, segAt[0]);
-                printf("A %s: Header shown after %7.1f ms, Image after %7.1f ms (mode now %ld)\n", how, header,
-                       image, (long)seg.selectedSegment);
-            }
-        }
+        measure("A (app)        ", aw, hduAt, segAt);
         [aw orderOut:nil];
 
-        // B: clicks on the extension's controls, at the same places.
-        printf("B: active %s\n", activate(qw, canPost) ? "yes" : "NO");
-        spin(1);
+        // B: the extension in a QLPreviewView of the same size, clicked at
+        // the same places.
+        NSWindow *qw = [[NSWindow alloc] initWithContentRect:place
+                                                   styleMask:NSWindowStyleMaskTitled
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:NO];
+        QLPreviewView *pv = [[QLPreviewView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)
+                                                           style:QLPreviewViewStyleNormal];
+        qw.contentView = pv;
+        [qw makeKeyAndOrderFront:nil];
+        pv.previewItem = url;
+        spin(5);
+        NSView *remote = remoteView(pv) ?: pv;
+        NSRect rframe = [remote convertRect:remote.bounds toView:nil];
+        printf("B: the extension's view at %s\n", NSStringFromRect(rframe).UTF8String);
+        screenshot(qw, @"ql.png");
         NSPoint off = rframe.origin;
         NSPoint hduB = NSMakePoint(off.x + hduAt.x, off.y + hduAt.y);
         NSPoint segB[3];
         for (int i = 0; i < 3; i++)
             segB[i] = NSMakePoint(off.x + segAt[i].x, off.y + segAt[i].y);
-        for (int method = 0; method < 2; method++) {
-            gCG = method == 1;
-            if (gCG && !canPost)
-                break;
-            const char *how = gCG ? "CGEvent" : "NSEvent";
-            for (int k = 0; k < 3; k++) {
-                NSDictionary *before = windows();
-                gMenuOpened = 0;
-                double t0 = now();
-                click(qw, hduB);
-                NSDictionary *menu = nil;
-                while (!menu && !gMenuOpened && now() - t0 < 3) {
-                    spin(0.002);
-                    menu = newMenu(before);
-                }
-                double ms = menu ? (now() - t0) * 1000 : gMenuOpened ? (gMenuOpened - t0) * 1000 : -1;
-                printf("B %s: HDU menu open after %7.1f ms (%s, layer %d)\n", how, ms,
-                       menu ? [menu[(__bridge id)kCGWindowOwnerName] UTF8String] ?: "?" : gMenuOpened ? "this process" : "none",
-                       [menu[(__bridge id)kCGWindowLayer] intValue]);
-                if (k == 0 && menu) {
-                    spin(0.2);
-                    screenshot(nil, [NSString stringWithFormat:@"ql-menu-%s.png", how]);
-                }
-                // Close it: Escape, or end the process showing it.
-                if (menu) {
-                    if (canPost)
-                        cgKey(53);
-                    spin(0.3);
-                    if (newMenu(before)) {
-                        pid_t pid = [menu[(__bridge id)kCGWindowOwnerPID] intValue];
-                        if (pid != getpid()) {
-                            printf("   (menu still open: ending process %d to close it)\n", pid);
-                            kill(pid, SIGKILL);
-                            spin(1);
-                            pv.previewItem = nil;
-                            spin(0.5);
-                            pv.previewItem = url;
-                            spin(5);
-                        }
-                    }
-                }
-                spin(0.4);
-            }
-            for (int k = 0; k < 2; k++) {
-                double header = timePixels(qw, segB[2]);
-                double image = timePixels(qw, segB[0]);
-                printf("B %s: Header shown after %7.1f ms, Image after %7.1f ms\n", how, header, image);
-            }
-        }
+        measure("B (Quick Look) ", qw, hduB, segB);
         screenshot(qw, @"ql-end.png");
         [pv close];
     }

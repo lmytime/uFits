@@ -259,6 +259,72 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
 
 @end
 
+#pragma mark - Click probe (CI diagnostics)
+
+#ifdef FQ_CLICKPROBE
+#include <os/log.h>
+
+static os_log_t gProbe;
+
+static double FQUptime(void)
+{
+    return NSProcessInfo.processInfo.systemUptime;
+}
+
+/// Logs when clicks reach this process and how late, when the window
+/// server sees the mouse button change (and what is under the pointer
+/// then), and when menus open (make PROBE=1; read with log show).
+static void FQStartClickProbe(NSView *root)
+{
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        gProbe = os_log_create("io.github.lmytime.uFits", "probe");
+        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown | NSEventMaskLeftMouseUp |
+                                                      NSEventMaskLeftMouseDragged | NSEventMaskMouseMoved
+                                              handler:^NSEvent *(NSEvent *e) {
+                                                  double now = FQUptime();
+                                                  const char *type = e.type == NSEventTypeLeftMouseDown   ? "down"
+                                                                     : e.type == NSEventTypeLeftMouseUp   ? "up"
+                                                                     : e.type == NSEventTypeMouseMoved    ? "moved"
+                                                                                                          : "dragged";
+                                                  os_log(gProbe, "probe %.3f: %{public}s of %.3f, %.1f ms late, clicks %ld, at %{public}s",
+                                                         now, type, e.timestamp, (now - e.timestamp) * 1000,
+                                                         (long)(e.type == NSEventTypeMouseMoved ? 0 : e.clickCount),
+                                                         NSStringFromPoint(e.locationInWindow).UTF8String);
+                                                  return e;
+                                              }];
+        __block NSUInteger last = 0;
+        __weak NSView *weakRoot = root;
+        NSTimer *t = [NSTimer timerWithTimeInterval:0.004
+                                            repeats:YES
+                                              block:^(NSTimer *timer) {
+                                                  NSUInteger b = NSEvent.pressedMouseButtons;
+                                                  if (b == last)
+                                                      return;
+                                                  last = b;
+                                                  NSWindow *w = weakRoot.window;
+                                                  NSPoint m = NSEvent.mouseLocation;
+                                                  NSPoint p = w ? [w convertPointFromScreen:m] : NSZeroPoint;
+                                                  NSView *hit = [w.contentView.superview hitTest:p];
+                                                  os_log(gProbe, "probe %.3f: buttons %lu, mouse %{public}s on screen, %{public}s in window %{public}s, over %{public}s",
+                                                         FQUptime(), (unsigned long)b, NSStringFromPoint(m).UTF8String,
+                                                         NSStringFromPoint(p).UTF8String, NSStringFromRect(w.frame).UTF8String,
+                                                         hit ? NSStringFromClass(hit.class).UTF8String : "nothing");
+                                              }];
+        [NSRunLoop.mainRunLoop addTimer:t forMode:NSRunLoopCommonModes];
+        [NSNotificationCenter.defaultCenter addObserverForName:NSMenuDidBeginTrackingNotification
+                                                        object:nil
+                                                         queue:nil
+                                                    usingBlock:^(NSNotification *note) {
+                                                        os_log(gProbe, "probe %.3f: menu opens", FQUptime());
+                                                    }];
+    });
+}
+#define FQ_PROBE(...) os_log(gProbe, __VA_ARGS__)
+#else
+#define FQ_PROBE(...) ((void)0)
+#endif
+
 #pragma mark - Root view
 
 /// The segments of the mode switch.
@@ -517,6 +583,9 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 
     self.view = root;
     [self layoutBar];
+#ifdef FQ_CLICKPROBE
+    FQStartClickProbe(root);
+#endif
 }
 
 - (NSSize)fittingContentSize
@@ -1130,6 +1199,7 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
 - (void)modeChanged:(id)sender
 {
     (void)sender;
+    FQ_PROBE("probe %.3f: mode switch action", FQUptime());
     _focusOnReady = YES;
     [self showMode:_mode.selectedSegment];
 }
@@ -1153,6 +1223,7 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
 - (void)hduChanged:(id)sender
 {
     (void)sender;
+    FQ_PROBE("probe %.3f: HDU menu action", FQUptime());
     NSNumber *n = _hduMenu.selectedItem.representedObject;
     if (!n)
         return;
