@@ -45,7 +45,7 @@ CODESIGN := /usr/bin/codesign
 unexport CODESIGN_ALLOCATE
 ARCHF   := $(foreach a,$(ARCHS),-arch $(a))
 WARN    := -Wall -Wextra -Wno-unused-parameter
-COMMON  := $(ARCHF) -mmacosx-version-min=$(MINOS) -O2 $(WARN) -Icore -Imacos/Shared
+COMMON  := $(ARCHF) -mmacosx-version-min=$(MINOS) -O2 $(WARN) -Icore -Ithird_party/zstd -Imacos/Shared
 CFLAGS_ := -std=c11 $(COMMON)
 OBJC_   := -fobjc-arc $(COMMON)
 EXT     := -fapplication-extension
@@ -69,9 +69,10 @@ else
 SIGNFLAGS := --options runtime --timestamp
 endif
 
-CORE_H   := core/fq.h core/fq_internal.h
-CORE_SRC := core/fq.c core/fq_image.c core/fq_table.c core/fq_codec.c
-CORE_OBJ := $(patsubst core/%.c,$(B)/obj/core/%.o,$(CORE_SRC))
+CORE_H   := core/fq.h core/fq_internal.h third_party/zstd/zstd.h third_party/zstd/zstd_errors.h
+CORE_SRC := core/fq.c core/fq_image.c core/fq_table.c core/fq_codec.c core/fq_xisf.c
+ZSTD_SRC := third_party/zstd/zstddeclib.c
+CORE_OBJ := $(patsubst core/%.c,$(B)/obj/core/%.o,$(CORE_SRC)) $(B)/obj/zstddeclib.o
 SHARED_H := macos/Shared/FQRender.h macos/Shared/FQPreviewController.h macos/Shared/FQUpdate.h
 
 APP_OBJ     := $(B)/obj/app/main.o $(B)/obj/app/FQRender.o $(B)/obj/app/FQPreviewController.o \
@@ -91,6 +92,11 @@ app: $(APPDIR)/Contents/_CodeSignature/CodeResources
 $(B)/obj/core/%.o: core/%.c $(CORE_H)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_) -c $< -o $@
+
+$(B)/obj/zstddeclib.o: $(ZSTD_SRC) Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_) -Os -DZSTD_NO_INLINE -DHUF_FORCE_DECOMPRESS_X1 \
+	    -DZSTD_FORCE_DECOMPRESS_SEQUENCES_SHORT -c $< -o $@
 
 $(B)/obj/app/%.o: macos/App/%.m $(SHARED_H) $(CORE_H)
 	@mkdir -p $(dir $@)
@@ -117,16 +123,16 @@ $(B)/obj/ext/%.o: macos/Thumbnail/%.m $(SHARED_H) $(CORE_H)
 $(APPDIR)/Contents/MacOS/$(APP): $(APP_OBJ) $(CORE_OBJ)
 	@mkdir -p $(dir $@)
 	$(CC) $(LDF) -o $@ $^ -framework Cocoa -framework QuartzCore -framework CoreGraphics \
-	    -framework UniformTypeIdentifiers -lz
+	    -framework UniformTypeIdentifiers -lz -lexpat
 
 $(PREVIEW)/Contents/MacOS/uFitsPreview: $(PREVIEW_OBJ) $(CORE_OBJ)
 	@mkdir -p $(dir $@)
 	$(CC) $(LDF) $(EXT) -Wl,-e,_NSExtensionMain -o $@ $^ -framework Cocoa -framework Quartz \
-	    -framework QuartzCore -framework CoreGraphics -lz
+	    -framework QuartzCore -framework CoreGraphics -lz -lexpat
 
 $(THUMB)/Contents/MacOS/uFitsThumbnail: $(THUMB_OBJ) $(CORE_OBJ)
 	@mkdir -p $(dir $@)
-	$(CC) $(LDF) $(EXT) -Wl,-e,_NSExtensionMain -o $@ $^ -framework Foundation -framework CoreGraphics -framework QuickLookThumbnailing -lz
+	$(CC) $(LDF) $(EXT) -Wl,-e,_NSExtensionMain -o $@ $^ -framework Foundation -framework CoreGraphics -framework QuickLookThumbnailing -lz -lexpat
 
 # --- bundle metadata -------------------------------------------------------
 
@@ -155,11 +161,20 @@ $(APPDIR)/Contents/Resources/AppIcon.icns: macos/App/AppIcon.icns
 	@mkdir -p $(dir $@)
 	cp $< $@
 
+$(APPDIR)/Contents/Resources/LICENSE: LICENSE
+	@mkdir -p $(dir $@)
+	cp $< $@
+
+$(APPDIR)/Contents/Resources/zstd-LICENSE: third_party/zstd/LICENSE
+	@mkdir -p $(dir $@)
+	cp $< $@
+
 # --- signing ---------------------------------------------------------------
 # Extensions must be signed (sandboxed) before the app that contains them.
 
 BUNDLE_PARTS := $(APPDIR)/Contents/MacOS/$(APP) $(APPDIR)/Contents/Info.plist \
-	$(APPDIR)/Contents/Resources/AppIcon.icns \
+	$(APPDIR)/Contents/Resources/AppIcon.icns $(APPDIR)/Contents/Resources/LICENSE \
+	$(APPDIR)/Contents/Resources/zstd-LICENSE \
 	$(PREVIEW)/Contents/MacOS/uFitsPreview $(PREVIEW)/Contents/Info.plist \
 	$(THUMB)/Contents/MacOS/uFitsThumbnail $(THUMB)/Contents/Info.plist
 
@@ -236,13 +251,14 @@ notarize: zip
 
 fqtool: $(B)/fqtool
 
-$(B)/fqtool: tools/fqtool.c $(CORE_SRC) $(CORE_H)
+$(B)/fqtool: tools/fqtool.c $(CORE_SRC) $(CORE_H) $(ZSTD_SRC) third_party/zstd/zstd.h
 	@mkdir -p $(B)
-	$(HOSTCC) -std=c99 -O2 $(WARN) -Icore -o $@ tools/fqtool.c $(CORE_SRC) -lz -lm -lpthread
+	$(HOSTCC) -std=c99 -O2 $(WARN) -Icore -Ithird_party/zstd -o $@ tools/fqtool.c $(CORE_SRC) $(ZSTD_SRC) -lz -lexpat -lm -lpthread
 
 test: $(B)/fqtool
 	python3 tests/make_test_files.py $(B)/testdata
 	python3 tests/test_core.py $(B)/fqtool $(B)/testdata
+	python3 tests/test_xisf.py $(B)/fqtool $(B)/testdata
 
 # Checks used by CI: thumbnails through QLThumbnailGenerator and previews
 # through QLPreviewView, both served by the installed extensions, the
@@ -262,13 +278,13 @@ $(B)/qlpreview: tests/macos/qlpreview.m
 $(B)/uitest: tests/macos/uitest.m $(B)/obj/app/FQPreviewController.o $(B)/obj/app/FQRender.o $(B)/obj/app/FQUpdate.o \
 	$(CORE_OBJ)
 	@mkdir -p $(B)
-	$(CC) $(OBJC_) -o $@ $^ -framework Cocoa -framework QuartzCore -framework CoreGraphics -lz
+	$(CC) $(OBJC_) -o $@ $^ -framework Cocoa -framework QuartzCore -framework CoreGraphics -lz -lexpat
 
 $(B)/clicklag: tests/macos/clicklag.m $(B)/obj/app/FQPreviewController.o $(B)/obj/app/FQRender.o $(B)/obj/app/FQUpdate.o \
 	$(CORE_OBJ)
 	@mkdir -p $(B)
 	$(CC) $(OBJC_) -o $@ $^ -framework Cocoa -framework Quartz -framework QuartzCore -framework CoreGraphics \
-	    -framework ApplicationServices -lz
+	    -framework ApplicationServices -lz -lexpat
 
 clean:
 	rm -rf $(B)

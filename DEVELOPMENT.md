@@ -6,13 +6,16 @@ How uFits is built, tested and released. To install it, see the [README](README.
 
 uFits is built to be small and fast:
 
-- **No frameworks, no Python, no cfitsio.** A ~4,000 line C core (zlib is the only
-  dependency) plus thin Objective-C Quick Look extensions. The whole app, universal
-  (Apple Silicon + Intel), is 1.4 MB, a third of which is its icon.
+- **No Python or cfitsio at runtime.** A portable C core plus thin Objective-C Quick
+  Look extensions. It uses system zlib and Expat, and includes the upstream Zstandard
+  decompressor under its BSD license in `third_party/zstd`. Both Apple Silicon and
+  Intel builds need only Xcode command line tools.
 - **Reads only what it shows.** Files are memory mapped; images are binned straight from
   the mapping, sampling a few pixels per output pixel when shrinking a lot, so a
   thumbnail of a 256 MB image touches a small fraction of the file. For tile-compressed
-  files only the tiles under the sampled rows are decompressed.
+  files only the tiles under the sampled rows are decompressed. XISF compression is
+  block based: the selected image is decompressed in full and cached until another
+  image is selected or the file is closed.
 - **Uses every core.** Binning, tile decompression and the final mapping run in parallel
   (Grand Central Dispatch).
 
@@ -80,6 +83,32 @@ Time spent in the core alone, measured on a 4-core Linux VM:
   pixels, the part on view is read again at full resolution in the background
   (`fq_render_detail`: a region, mapped with the stretch of the whole image) and laid
   over it.
+
+## XISF
+
+The reader supports monolithic XISF 1.0 files containing 2D Gray/RGB images or
+2×2 Bayer mosaics. UInt8/16/32/64 and Float32/64 samples, little/big endian and
+planar/interleaved storage feed the same renderer as FITS. Pixels may be attached
+or embedded as base64/hex; zlib, LZ4/LZ4HC and Zstandard compression, byte shuffling
+and mixed compressed/raw subblocks are supported. Each image's attributes, FITS
+keywords and scalar properties are available in Header.
+
+Raw attachments are sampled directly from the mapped file. Compressed XISF images
+must be decompressed in full before sampling, so large compressed files take longer.
+Only the selected decoded image is cached. Byte unshuffling temporarily needs a
+second image-sized buffer. XML headers are limited to 16 MiB and decoded
+compressed/embedded images to 512 MiB.
+
+Complex samples, alpha channels, other color spaces, higher-dimensional images and
+explicit non-default orientation transforms are not rendered. Other CFA patterns
+are shown as raw grayscale. Stored display functions and ICC profiles are not
+applied; the preview uses uFits' stretch controls. Checksums are not verified.
+See the [XISF specification](https://pixinsight.com/doc/docs/XISF-1.0-spec/XISF-1.0-spec.html)
+for the file format.
+
+The app bundles uFits' BSD 3-Clause license as `Contents/Resources/LICENSE` and
+the Zstandard notice as `Contents/Resources/zstd-LICENSE`. The macOS Zstandard
+decoder is compiled with upstream size options to keep the three binaries small.
 
 ## Updates
 
@@ -158,7 +187,8 @@ release, from the disk image just built, and to uninstall. The installer also ta
 ## Code and tests
 
 ```
-core/       C core: parsing, decompression, binning, stretch (portable, zlib only)
+core/       C core: parsing, decompression, binning, stretch (portable C)
+third_party/zstd/  upstream single-file Zstandard decompressor and license
 tools/      fqtool command line front end, icon generator
 macos/      Objective-C: app, Quick Look preview and thumbnail extensions
 tests/      astropy-based test file generator, comparisons, fuzzer, Quick Look smoke test
@@ -169,7 +199,7 @@ Makefile    builds everything with clang; no Xcode project
 The core builds and runs anywhere, which keeps it easy to test:
 
 ```sh
-make test                                     # needs python3 with numpy + astropy
+make test                                     # needs numpy, astropy, lz4, zstandard
 make fqtool && build/fqtool render image.fits out.png --max 1024
 build/fqtool info image.fits                  # HDU list and what Quick Look would show
 build/fqtool header image.fits 1              # header cards in columns (--raw: as in the file)
@@ -181,6 +211,10 @@ cubes, RGB, Bayer, spectra, light curves and spectra in tables, every supported
 compression, gzip and damaged files, and checks the decoded and binned values and the
 plotted envelopes against astropy and numpy, plus the stretch itself, the table
 listings and every header card as split into keyword, value and comment.
+`tests/test_xisf.py` generates XISF fixtures independently with NumPy and the Python
+compression libraries, checking sample values, byte order, storage order, compression
+and shuffling, multiple images, display orientation, metadata, and malformed inputs.
+On Linux install the zlib and Expat development packages before building the core.
 `tests/fuzz.py` feeds damaged files to an AddressSanitizer/UBSan build. CI runs both
 on Linux and on macOS, then installs the app on the macOS runner, requests
 thumbnails through `QLThumbnailGenerator` and previews through `QLPreviewView` (the

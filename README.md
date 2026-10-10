@@ -1,8 +1,8 @@
 # uFits
 
-Quick Look for FITS files on macOS. Select a FITS file in Finder and press Space to see
-it, and get real thumbnails in Finder windows. Files named `.fits`, `.fit`, `.fts` and
-`.fz` work, and so do the FITS files of X-ray missions: `.pha`, `.pi`, `.arf`, `.rmf`,
+Quick Look for FITS and XISF files on macOS. Select a file in Finder and press Space to
+see it, and get real thumbnails in Finder windows. Files named `.fits`, `.fit`, `.fts`,
+`.fz` and `.xisf` work, and so do the FITS files of X-ray missions: `.pha`, `.pi`, `.arf`, `.rmf`,
 `.rsp`, `.rsp2`, `.evt`, `.lc`, `.hk`, `.mkf`, `.dph` and `.img` (which macOS takes for
 a disk image: Space shows it, but Finder icons stay plain).
 
@@ -14,7 +14,7 @@ Homepage: **[lmytime.github.io/uFits](https://lmytime.github.io/uFits/)**
 curl -fsSL https://github.com/lmytime/uFits/releases/latest/download/install.sh | sh
 ```
 
-That's all: select a FITS file in Finder and press Space. Works on macOS 11 or later,
+That's all: select a FITS or XISF file in Finder and press Space. Works on macOS 11 or later,
 Apple silicon and Intel.
 
 To uninstall:
@@ -34,20 +34,23 @@ by Apple), then open uFits once.
   stretch that brings out faint detail. Cubes get a slider to step through their planes;
   RGB cubes and colour camera frames (Bayer) are shown in colour; tile-compressed `.fz`
   files work too.
+- **XISF images**: 2D grayscale, RGB and Bayer images, with automatic stretch, zoom
+  and an image menu for files containing multiple images. Compressed images work too.
 - **Plots** of spectra and light curves (TESS, Kepler, SDSS, HST and JWST spectra, X-ray
   light curves and spectra, ...) and **sky maps** of catalogs with RA and Dec.
 - **Table**: the rows of any table, even millions of them. ⌘C copies the selected rows.
 - **Header**: every keyword, with values and comments lined up. ⌘F searches it.
 
-Previews are fast even for huge files: uFits reads only the part of the file it shows.
+FITS and uncompressed XISF previews are fast even for huge files: uFits reads only
+the part of the file it shows.
 
 ## Using the preview
 
 The bar at the bottom of the preview has:
 
 - **Image** (or **Plot**), **Table**, **Header**: what to show.
-- A menu of the file's HDUs (extensions such as `SCI`, `ERR`, `DQ`, or tables), when it
-  has more than one.
+- A menu of the file's HDUs (extensions such as `SCI`, `ERR`, `DQ`, or tables), or XISF
+  images, when it has more than one.
 - A slider for the planes of a cube.
 - The stretch: automatic, linear (0.5–99.5 %) or min–max. Your choice is remembered.
 
@@ -59,7 +62,7 @@ When a new version of uFits is out, **Update available** appears in the bar; ope
 uFits app and it updates itself in a few seconds. uFits looks for new versions on GitHub
 at most once a day, in the background; turn this off in the uFits app.
 
-You can also open FITS files in the uFits app (File › Open, or drop them on its icon).
+You can also open FITS and XISF files in the uFits app (File › Open, or drop them on its icon).
 
 ## Troubleshooting
 
@@ -73,6 +76,7 @@ You can also open FITS files in the uFits app (File › Open, or drop them on it
 - **`.fits.gz` files are not previewed.** macOS treats them as gzip archives.
 - **Not supported:** `HCOMPRESS_1` compressed images (their header is still shown) and
   random-groups files.
+- **Some XISF variants are not supported.** See [XISF support and limits](DEVELOPMENT.md#xisf).
 
 Building from source and how uFits works: [DEVELOPMENT.md](DEVELOPMENT.md).
 
