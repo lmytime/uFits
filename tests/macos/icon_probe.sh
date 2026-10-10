@@ -5,15 +5,41 @@ set -u
 X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
 export DEVELOPER_DIR=$X/Contents/Developer
 echo "Xcode: $X"
-xcrun actool --version | grep -A1 bundle-version | tail -1
-xcrun actool --help 2>&1 | grep -E '^\s*--' | sort -u
 
-echo "== strings about fallbacks and appearances"
-for f in $(find "$X/Contents" -maxdepth 8 -type f \( -name AssetCatalogFoundation -o -name actool \
-    -o -name 'IconComposer*' -o -name 'IconRendering*' -o -name 'CoreThemeDefinition' \) 2>/dev/null | head -12); do
+echo "== actool's options"
+xcrun actool --help 2>&1 | head -5
+xcrun actool 2>&1 | head -5
+timeout 150 grep -rl -a 'standalone-icon-behavior' "$X/Contents/Developer/usr" "$X/Contents/Frameworks" \
+  "$X/Contents/SharedFrameworks" "$X/Contents/PlugIns" 2>/dev/null | head -5 | while IFS= read -r f; do
   echo "-- $f"
-  strings -a "$f" | grep -E -i 'fallback|flatten|icon.?stack|specializ|appearance|legacy' | sort -u | head -60
+  strings -a "$f" | grep -E '^[a-z][a-z0-9]*(-[a-z0-9]+)+$' | sort -u | tr '\n' ' '
+  echo
 done
+echo "== Info.plist keys for icons, in the system's frameworks"
+LC_ALL=C timeout 120 grep -a -o -h -E '(CFBundle[A-Za-z]*Icon[A-Za-z~]*|CFBundlePrimaryIcon)' \
+  /System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_arm64e* 2>/dev/null | sort | uniq -c | sort -rn | head -40
+echo
+
+echo "== CoreUI's asset storage"
+cat > /tmp/cui.m <<'EOF'
+#import <Foundation/Foundation.h>
+#import <objc/runtime.h>
+#include <dlfcn.h>
+int main(int argc, char **argv) {
+    dlopen("/System/Library/PrivateFrameworks/CoreUI.framework/CoreUI", RTLD_NOW);
+    for (int i = 1; i < argc; i++) {
+        Class c = objc_getClass(argv[i]);
+        printf("%s : %s\n", argv[i], c ? class_getName(class_getSuperclass(c)) : "(none)");
+        unsigned n = 0;
+        Method *m = class_copyMethodList(c, &n);
+        for (unsigned k = 0; k < n; k++)
+            printf("  - %s %s\n", sel_getName(method_getName(m[k])), method_getTypeEncoding(m[k]));
+        free(m);
+    }
+    return 0;
+}
+EOF
+xcrun clang -fobjc-arc -framework Foundation /tmp/cui.m -o /tmp/cui && /tmp/cui CUICommonAssetStorage CUIMutableCommonAssetStorage
 
 W=/tmp/iv
 rm -rf $W
@@ -28,11 +54,13 @@ for (name, kind, look), px in icons.items():
     if not name.startswith(("AppIcon_Assets", "ZZZZ")):
         print("    ", name, "|", kind, "|", look, "|", " ".join(px))'
 }
-mkapp() {  # name [icon name]
+mkapp() {  # app car icon-name [primary icon name, in CFBundleIcons]
   app=$W/apps/$1.app
   mkdir -p $app/Contents/MacOS $app/Contents/Resources
   cp macos/App/AppIcon.icns $app/Contents/Resources/AppIcon.icns
-  [ -f $W/$1/Assets.car ] && cp $W/$1/Assets.car $app/Contents/Resources/Assets.car
+  cp $W/$2/Assets.car $app/Contents/Resources/Assets.car
+  icons=
+  [ -n "${4:-}" ] && icons="<key>CFBundleIcons</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconName</key><string>$4</string></dict></dict>"
   cat > $app/Contents/Info.plist <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -42,7 +70,8 @@ mkapp() {  # name [icon name]
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleExecutable</key><string>probe</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
-<key>CFBundleIconName</key><string>${2:-AppIcon}</string>
+<key>CFBundleIconName</key><string>$3</string>
+$icons
 </dict></plist>
 EOF
   printf '#!/bin/sh\n' > $app/Contents/MacOS/probe
@@ -59,32 +88,26 @@ variant() {  # name actool-arguments...
   plutil -p $W/$name/partial.plist 2>/dev/null | grep -v -E '^\{|^\}'
   echo "   files: $(ls $W/$name | tr '\n' ' ')"
   [ -f $W/$name/Assets.car ] && summary $W/$name/Assets.car
-  mkapp $name
 }
 
-# The icon, its light layer shown only for a "light" appearance, if there is one.
-cp -R macos/App/AppIcon.icon $W/src/LightSpec.icon
-python3 - $W/src/LightSpec.icon/icon.json <<'EOF'
-import json, sys
-p = sys.argv[1]
-icon = json.load(open(p))
-light = icon["groups"][0]["layers"][0]
-light["hidden"] = True
-light["hidden-specializations"] = [{"appearance": "light", "value": False}]
-json.dump(icon, open(p, "w"), indent=2)
-EOF
-mkdir -p $W/src/LightSpec
-cp -R $W/src/LightSpec.icon $W/src/LightSpec/AppIcon.icon
+# The catalog's Dusk, named AppIconDusk.
+mkdir -p $W/src/Dusk.xcassets
+cp macos/App/Assets.xcassets/Contents.json $W/src/Dusk.xcassets/
+cp -R macos/App/Assets.xcassets/AppIcon.appiconset $W/src/Dusk.xcassets/AppIconDusk.appiconset
 
-variant icon11 macos/App/AppIcon.icon --app-icon AppIcon --minimum-deployment-target 11.0
-variant icon26 macos/App/AppIcon.icon --app-icon AppIcon --minimum-deployment-target 26.0
-variant noappicon macos/App/AppIcon.icon --minimum-deployment-target 26.0
-variant standalone macos/App/AppIcon.icon --app-icon AppIcon --minimum-deployment-target 26.0 \
-  --standalone-icon-behavior none
-variant both26 macos/App/AppIcon.icon macos/App/Assets.xcassets --app-icon AppIcon --minimum-deployment-target 26.0
-variant catalog macos/App/Assets.xcassets --app-icon AppIcon --minimum-deployment-target 11.0
-variant lightspec $W/src/LightSpec/AppIcon.icon --app-icon AppIcon --minimum-deployment-target 11.0
-mkapp icns-only NoSuchIcon
+variant all macos/App/AppIcon.icon $W/src/Dusk.xcassets --app-icon AppIcon --include-all-app-icons \
+  --minimum-deployment-target 11.0
+variant alt macos/App/AppIcon.icon $W/src/Dusk.xcassets --app-icon AppIcon --alternate-app-icon AppIconDusk \
+  --minimum-deployment-target 11.0
+variant duskprimary macos/App/AppIcon.icon $W/src/Dusk.xcassets --app-icon AppIconDusk --alternate-app-icon AppIcon \
+  --minimum-deployment-target 11.0
+for v in all alt duskprimary; do
+  [ -f $W/$v/Assets.car ] || continue
+  mkapp $v-name-dusk-icons-icon $v AppIconDusk AppIcon
+  mkapp $v-name-icon-icons-dusk $v AppIcon AppIconDusk
+  mkapp $v-name-dusk $v AppIconDusk
+  mkapp $v-name-icon $v AppIcon
+done
 
 make build/iconsize >/dev/null
 echo "== the icons drawn (mean r g b; Dusk is dark)"
