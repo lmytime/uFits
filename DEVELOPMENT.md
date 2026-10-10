@@ -117,7 +117,7 @@ make install          # builds build/uFits.app, copies it to /Applications, regi
 make                   # build/uFits.app only
 make ARCHS=arm64       # native-only build (default is universal)
 make GZIP=1 install    # also preview .gz files (claims every gzip file, see below)
-make dmg               # build/uFits-0.0.2.dmg: the app and a link to Applications
+make dmg               # build/uFits-0.0.3.dmg: the app and a link to Applications
 make SIGN="Developer ID Application: Your Name (TEAMID)" zip   # hardened runtime, ready to notarize
 make SIGN="Developer ID Application: Your Name (TEAMID)" notarize   # notarize and staple (see below)
 make uninstall
@@ -152,7 +152,8 @@ running the build workflow by hand (Actions › build › Run workflow) with a r
 publishes release X.Y.Z with the disk image and the installer (`install.sh`, with its
 version filled in) once all tests pass. CI runs the installer too: from the latest
 release, from the disk image just built, and to uninstall. The installer also takes
-`UFITS_VERSION`, `UFITS_DEST` and `UFITS_DMG` (see the top of `install.sh`).
+`UFITS_VERSION`, `UFITS_DEST`, `UFITS_DMG` and `UFITS_FROM_APP` (see the top of
+`install.sh`).
 
 ## Code and tests
 
