@@ -265,12 +265,16 @@ test: $(B)/fqtool
 # through QLPreviewView, both served by the installed extensions, the
 # preview UI driven directly (HDU menu, plane slider, find bar), and clicks
 # on the preview in Quick Look answered at once.
-qltools: $(B)/qlthumb $(B)/qlpreview $(B)/uitest $(B)/clicklag
+qltools: $(B)/qlthumb $(B)/qlpreview $(B)/uitest $(B)/clicklag $(B)/iconsize
 
 $(B)/qlthumb: tests/macos/qlthumb.m
 	@mkdir -p $(B)
 	$(CC) -fobjc-arc -O2 -o $@ $< -framework Foundation -framework CoreGraphics \
 	    -framework QuickLookThumbnailing -framework ImageIO -framework UniformTypeIdentifiers
+
+$(B)/iconsize: tests/macos/iconsize.m
+	@mkdir -p $(B)
+	$(CC) -fobjc-arc -O2 -o $@ $< -framework Cocoa
 
 $(B)/qlpreview: tests/macos/qlpreview.m
 	@mkdir -p $(B)

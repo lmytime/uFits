@@ -136,6 +136,18 @@ jobs:
           pluginkit -m -A -D -v -i io.github.lmytime.uFits.Thumbnail || true
           /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
             | grep -B2 -A8 "gov.nasa.gsfc.fits" | head -40 || true
+      - name: Icon size beside other apps' (best effort)
+        if: always()
+        timeout-minutes: 3
+        run: |
+          # The share of its square each icon fills, as Finder and the Dock
+          # draw it: uFits' should be as big as other apps'.
+          make build/iconsize
+          xcode=$(ls -d /Applications/Xcode*.app 2>/dev/null | tail -1)
+          build/iconsize build/ql/app-icons.png /Applications/uFits.app /System/Applications/Calculator.app \
+            /System/Applications/TextEdit.app /System/Applications/Preview.app /Applications/Safari.app \
+            "/System/Applications/System Settings.app" "/Applications/Google Chrome.app" /Applications/Firefox.app \
+            ${xcode:+"$xcode"} || true
       - name: Quick Look thumbnails (QLThumbnailGenerator)
         timeout-minutes: 4
         run: |
