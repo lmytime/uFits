@@ -304,16 +304,13 @@ canvas.fill { width: 100%; height: 100%; display: block; }
 .ql-info { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--win-dim); }
 .pop-up { position: relative; flex: 0 1 auto; min-width: 0; max-width: 40%; }
 .pop-up[hidden], .plane[hidden] { display: none; }
-.pop-up select {
-  appearance: none; -webkit-appearance: none; width: 100%; max-width: 100%;
-  border: 0; border-radius: 6px; padding: 3px 22px 3px 8px; background: var(--seg); color: var(--win-text);
-  font: 11.5px/1.3 var(--font-ui); text-overflow: ellipsis; cursor: pointer;
-}
 .pop-up::after { content: "⌄"; position: absolute; right: 8px; top: 1px; font-size: 11px; color: var(--win-dim); pointer-events: none; }
-/* The HDU menu says which HDU is shown; opened, what each holds (as uFits). */
+/* A pop-up shows its choice as text, which fits its box in any browser (a
+   menu's own text can run past it in Safari); the menu, unseen over it,
+   opens on a click. The HDU menu then says what each HDU holds (as uFits). */
 .pop-label { display: block; overflow: hidden; padding: 3px 22px 3px 8px; border-radius: 6px; background: var(--seg); color: var(--win-text); font: 11.5px/1.3 var(--font-ui); white-space: nowrap; text-overflow: ellipsis; }
-.pop-up.hdu select { position: absolute; inset: 0; height: 100%; opacity: 0; }
-.pop-up.hdu:has(select:focus-visible) .pop-label { outline: 2px solid var(--gold); outline-offset: 2px; }
+.pop-up select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; font: 11.5px var(--font-ui); cursor: pointer; }
+.pop-up:has(select:focus-visible) .pop-label { outline: 2px solid var(--gold); outline-offset: 2px; }
 .plane { flex: 1 1 150px; min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--win-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .plane input { flex: 1; min-width: 40px; margin: 0; accent-color: var(--accent); }
 .seg { flex: none; display: inline-flex; padding: 2px; gap: 2px; border-radius: 7px; background: var(--seg); }
@@ -539,9 +536,9 @@ canvas.fill { width: 100%; height: 100%; display: block; }
           </div>
           <div class="ql-bar">
             <span class="ql-info" id="qlInfo"></span>
-            <span class="pop-up hdu" id="hduBox"><span class="pop-label" id="hduLabel" aria-hidden="true"></span><select id="hduMenu" aria-label="HDU"></select></span>
+            <span class="pop-up" id="hduBox"><span class="pop-label" id="hduLabel" aria-hidden="true"></span><select id="hduMenu" aria-label="HDU"></select></span>
             <span class="plane" id="planeBox" hidden><input type="range" id="plane" min="0" max="31" value="16" aria-label="Plane"><span id="planeLabel"></span></span>
-            <span class="pop-up" id="stretchBox"><select id="stretchMenu" aria-label="Stretch">
+            <span class="pop-up" id="stretchBox"><span class="pop-label" id="stretchName" aria-hidden="true">Auto stretch</span><select id="stretchMenu" aria-label="Stretch">
               <option value="auto">Auto stretch</option>
               <option value="linear">Linear 0.5–99.5%</option>
               <option value="minmax">Min – max</option>
@@ -1726,7 +1723,12 @@ canvas.fill { width: 100%; height: 100%; display: block; }
   segPicture.addEventListener("click", () => { takeOver(); show(hdu, "picture"); });
   segTable.addEventListener("click", () => { takeOver(); show(hdu, "table"); });
   segHeader.addEventListener("click", () => { takeOver(); show(hdu, "header"); });
-  $("stretchMenu").addEventListener("change", (e) => { takeOver(); stretch = e.target.value; drawPicture(); });
+  $("stretchMenu").addEventListener("change", (e) => {
+    takeOver();
+    stretch = e.target.value;
+    $("stretchName").textContent = e.target.selectedOptions[0].text;
+    drawPicture();
+  });
   planeInput.addEventListener("input", () => { takeOver(); setPlane(+planeInput.value); });
 
   // ---- The tiles --------------------------------------------------------------
