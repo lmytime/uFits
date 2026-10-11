@@ -212,6 +212,13 @@ a:hover { text-decoration-thickness: 2px; }
   .hero { grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr); gap: 56px; padding-block: 100px 48px; }
 }
 .pitch { min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+/* The icon, coming together out of stars as the page opens. The canvas
+   reaches past its place, 32px above and below and 64px to the left, for
+   the stars to start from and its glow to fade out in. */
+.hero-mark { display: block; width: calc(100% + 64px); height: 160px; margin: -32px 0 -32px -64px; pointer-events: none; }
+@media (max-width: 640px), (max-height: 760px) {
+  .hero-mark { height: 128px; }
+}
 h1 {
   margin: 0;
   font: 500 clamp(2.3rem, 1.1rem + 3.4vw, 4rem)/1.04 var(--font-display);
@@ -487,6 +494,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
   <canvas class="sky" id="sky" aria-hidden="true"></canvas>
   <div class="wrap hero">
     <div class="pitch">
+      <canvas class="hero-mark" id="heroMark" aria-hidden="true"></canvas>
       <h1 id="title">See FITS in your Finder.</h1>
       <p class="lead">Select a file, press Space. Images, plots, tables and headers, at once.</p>
       <div class="install">
@@ -704,7 +712,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
   // The theme's colours, read once a theme.
   const C = {};
   function readColors() {
-    for (const n of ["win-content", "win-line", "win-dim", "win-text", "win-bar", "plot-ink", "accent", "img-ground", "doc", "doc-fold", "finder-dim", "star", "star-dim", "pink"])
+    for (const n of ["win-content", "win-line", "win-dim", "win-text", "win-bar", "plot-ink", "accent", "img-ground", "doc", "doc-fold", "finder-dim", "star", "star-dim", "pink", "glow", "icon-rim"])
       C[n] = token("--" + n);
   }
   readColors();
@@ -816,7 +824,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
           tint: kind < 0.02 ? "pink" : kind < 0.045 ? "accent" : kind < 0.2 ? "star-dim" : "star" };
       });
       // None behind the words, where a star would read as a stray dot.
-      const clear = [...document.querySelectorAll(".top .wrap > *, .pitch > *, .steps")].map((el) => {
+      const clear = [...document.querySelectorAll(".top .wrap > *, .pitch > :not(.hero-mark), .steps")].map((el) => {
         const b = el.getBoundingClientRect();
         return { x0: b.left - box.left - 8, x1: b.right - box.left + 8, y0: b.top - box.top - 6, y1: b.bottom - box.top + 6 };
       });
@@ -2139,9 +2147,11 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     }, { fps: 30, still: 6000 });
   }
 
-  // ---- The icon at the bottom: a galaxy coming together out of stars --------
-  {
-    const canvas = $("mark");
+  // ---- The icon, a galaxy coming together out of stars ---------------------
+  // At the top as the page opens, and again at the bottom. place(w, h) says
+  // where the icon goes, {x, y, size}, and where its stars start: around
+  // (cx, cy), as far as (rx, ry); glow puts the page's glow behind it.
+  function assemble(canvas, place, { glow = false } = {}) {
     const r = random(77), cells = [];
     for (let i = 0; i < 32; i++)
       for (let j = 0; j < 32; j++) {
@@ -2153,21 +2163,33 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     play(canvas, (t) => {
       const { ctx, w, h } = fit(canvas);
       ctx.clearRect(0, 0, w, h);
-      const size = Math.min(150, h * 0.8), x0 = (w - size) / 2, y0 = (h - size) / 2, c = size / 32;
-      const pal = PALETTES[isDark() ? "dusk" : "light"];
-      const T = t / 1000;
-      // The night of the icon fades in, then its galaxy flies home.
+      const { x: x0, y: y0, size, cx, cy, rx, ry } = place(w, h), c = size / 32;
+      const dark = isDark(), pal = PALETTES[dark ? "dusk" : "light"];
+      const T = t / 1000, fade = smooth(T / 0.8);
+      ctx.globalAlpha = fade;
+      if (glow) {
+        const mx = x0 + size / 2, my = y0 + size / 2;
+        const g = ctx.createRadialGradient(mx, my, 0, mx, my, Math.min(size * 0.85, my, h - my));
+        g.addColorStop(0, C.glow);
+        g.addColorStop(1, C.glow.replace(/[\d.]+\)$/, "0)"));
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+      }
+      // The night of the icon fades in, with its rim, then its galaxy flies home.
       ctx.save();
       iconShape(ctx, x0, y0, size);
       ctx.clip();
-      ctx.globalAlpha = smooth(T / 0.8);
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(plateImage(isDark() ? "dusk" : "light"), x0, y0, size, size);
+      ctx.drawImage(plateImage(dark ? "dusk" : "light"), x0, y0, size, size);
       ctx.restore();
+      iconShape(ctx, x0, y0, size);
+      ctx.strokeStyle = C["icon-rim"];
+      ctx.lineWidth = 1;
+      ctx.stroke();
       for (const p of cells) {
         const q = outCubic((T - 0.2 - p.delay) / 1.3);
         const tx = x0 + p.j * c, ty = y0 + p.i * c;
-        const sx = w / 2 + Math.cos(p.a) * p.d * w * 0.5, sy = h / 2 + Math.sin(p.a) * p.d * h * 0.6;
+        const sx = cx + Math.cos(p.a) * p.d * rx, sy = cy + Math.sin(p.a) * p.d * ry;
         const twinkle = T > 2.4 && "sS*".includes(p.c) ? 0.7 + 0.3 * Math.sin(T * 2.2 + p.tw) : 1;
         ctx.globalAlpha = (0.25 + 0.75 * q) * twinkle;
         ctx.fillStyle = pal[p.c];
@@ -2177,6 +2199,16 @@ canvas.fill { width: 100%; height: 100%; display: block; }
       ctx.globalAlpha = 1;
     }, { fps: 30, still: 6000 });
   }
+  // Above the headline, its edge in line with the words (the icon's square
+  // is inset in its 32 cells); its stars come from all along the line.
+  assemble($("heroMark"), (w, h) => {
+    const size = h - 64;
+    return { x: 64 - (size * (1 - SHAPE)) / 2, y: 32, size, cx: w * 0.5, cy: h / 2, rx: w * 0.5, ry: h * 0.45 };
+  }, { glow: true });
+  assemble($("mark"), (w, h) => {
+    const size = Math.min(150, h * 0.8);
+    return { x: (w - size) / 2, y: (h - size) / 2, size, cx: w / 2, cy: h / 2, rx: w * 0.5, ry: h * 0.6 };
+  });
 
   // ---- Making the example files, after the first paint ----------------------
   (async () => {
