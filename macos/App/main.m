@@ -97,6 +97,17 @@ static BOOL FQApplyIcon(NSString *choice)
     return ok;
 }
 
+/// The icon uFits shows of itself: the one of choice, else the one macOS draws
+/// for the app (on macOS 26, light or Dusk as icons are).
+static NSImage *FQCurrentIcon(void)
+{
+    NSImage *icon = FQIconImage(FQIconChoice())
+                        ?: [NSWorkspace.sharedWorkspace iconForFile:NSBundle.mainBundle.bundlePath];
+    icon = [icon copy];
+    icon.size = NSMakeSize(512, 512);   // whatever size it says, drawn from its best image
+    return icon;
+}
+
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate>
 @end
 
@@ -105,6 +116,7 @@ static BOOL FQApplyIcon(NSString *choice)
     NSTextField *_status;
     NSButton *_autoCheck, *_thumbnails, *_removeCopies;
     NSPopUpButton *_stretch, *_appIcon;
+    NSImageView *_icon;
     NSMutableArray<NSWindow *> *_viewers;
     NSPoint _cascade;
     BOOL _openedFiles, _launched;
@@ -128,9 +140,13 @@ static BOOL FQApplyIcon(NSString *choice)
     if (!_openedFiles)
         [self showWelcome:nil];
     FQScheduleChecks(FQUpdate.enabled);   // in case uFits moved
-    // An update replaces the app, and its custom icon with it.
-    if (![FQIconChoice() isEqualToString:@"auto"] && !FQHasCustomIcon())
-        FQApplyIcon(FQIconChoice());
+    // The icon of choice: on the app again when an update replaced it, and in
+    // the Dock, which shows the app's own icon while it runs.
+    if (![FQIconChoice() isEqualToString:@"auto"]) {
+        if (!FQHasCustomIcon())
+            FQApplyIcon(FQIconChoice());
+        NSApp.applicationIconImage = FQIconImage(FQIconChoice());
+    }
     if (_updateAsked) {
         [self offerUpdate:_updateAsked.length ? _updateAsked : nil];
         _updateAsked = nil;
@@ -314,7 +330,7 @@ static NSStackView *FQRow(NSArray<NSView *> *views, CGFloat spacing)
     (void)sender;
     if (!_welcome) {
         const CGFloat width = 500;
-        NSImageView *icon = [NSImageView imageViewWithImage:NSApp.applicationIconImage];
+        NSImageView *icon = _icon = [NSImageView imageViewWithImage:FQCurrentIcon()];
         [icon.widthAnchor constraintEqualToConstant:72].active = YES;
         [icon.heightAnchor constraintEqualToConstant:72].active = YES;
         NSTextField *title = [NSTextField labelWithString:@"uFits"];
@@ -637,6 +653,7 @@ static BOOL FQInApplications(void)
         return;
     }
     [FQSettings() setObject:choice forKey:kIconKey];
+    _icon.image = FQCurrentIcon();
 }
 
 /// Moves the other copies of uFits that macOS knows to the Trash, once
@@ -710,6 +727,7 @@ static BOOL FQInApplications(void)
                                                                     attributes:link]];
     // "Version 0.0.6", without the build number after it ("(1)").
     [NSApp orderFrontStandardAboutPanelWithOptions:@{
+        NSAboutPanelOptionApplicationIcon : FQCurrentIcon(),
         NSAboutPanelOptionApplicationVersion : [@"Version " stringByAppendingString:FQUpdate.currentVersion],
         NSAboutPanelOptionVersion : @"",
         NSAboutPanelOptionCredits : credits
