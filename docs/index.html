@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>uFits · Quick Look for FITS files</title>
-<meta name="description" content="uFits adds Quick Look for FITS files to macOS: select a file in Finder, press Space, and see the image, spectrum, light curve, catalog, table or header at once.">
+<meta name="description" content="uFits adds Quick Look for FITS and XISF files to macOS: select a file in Finder, press Space, and see its image, plot, table or header at once.">
 <meta property="og:title" content="uFits · Quick Look for FITS files">
-<meta property="og:description" content="Select a FITS file in Finder and press Space. Images, spectra, light curves, catalogs, tables and headers, at once.">
+<meta property="og:description" content="Select a FITS file in Finder and press Space. Images, spectra, light curves, catalogs, cubes, tables and headers, at once.">
 <meta property="og:image" content="https://lmytime.github.io/uFits/icon.png">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#070a14" media="(prefers-color-scheme: dark)">
@@ -19,9 +19,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Martian+Mono:wght@400;500;700&display=swap">
 <style>
-/* One screen: the pitch (left) and a live Quick Look window (right) under
-   a night sky. Dark first; the light theme is a photographic plate: dark
-   stars on pale glass. */
+/* A night sky. At the top, what uFits does, played out in a Finder window;
+   below, what its previews show, each as a moving picture; words kept few.
+   Dark first; the light theme is a photographic plate: dark stars on pale
+   glass. */
 :root {
   --sky: #070a14;
   --sky-raised: #0e1427;
@@ -30,10 +31,15 @@
   --line: #1c2440;
   --gold: #f2b65c;
   --on-gold: #1a1204;
+  --accent: #f2b65c;
+  --accent-soft: rgba(242, 182, 92, 0.24);
   --blue: #93b6ff;
   --star: #ffffff;
   --glow: rgba(110, 140, 255, 0.16);
   --shadow: rgba(0, 0, 0, 0.6);
+  --card: rgba(14, 20, 40, 0.74);
+  --card-line: rgba(147, 170, 255, 0.13);
+  --card-sheen: rgba(147, 170, 255, 0.07);
   --win: #1e2027;
   --win-bar: #25272e;
   --win-text: #e7e8ec;
@@ -45,6 +51,18 @@
   --seg-on: #61656f;
   --plot-ink: #dfe2ea;
   --img-ground: #08090c;
+  --finder: #1e1f24;
+  --finder-bar: #2a2b31;
+  --finder-side: #232429;
+  --finder-line: #3a3c44;
+  --finder-text: #e6e7ea;
+  --finder-dim: #9a9ea8;
+  --select: #2b67d8;
+  --select-soft: rgba(255, 255, 255, 0.12);
+  --doc: #eef0f4;
+  --doc-fold: #c3c8d2;
+  --key: #121931;
+  --key-line: #2b3456;
   --tl-red: #ff5f57;
   --tl-yellow: #febc2e;
   --tl-green: #28c840;
@@ -53,6 +71,7 @@
   --font-display: "Martian Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font-body: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --font-ui: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
@@ -64,10 +83,15 @@
     --line: #dce1ee;
     --gold: #a65a00;
     --on-gold: #fffaf2;
+    --accent: #d9861a;
+    --accent-soft: rgba(217, 134, 26, 0.2);
     --blue: #2853c4;
     --star: #0b1122;
     --glow: rgba(70, 100, 220, 0.10);
     --shadow: rgba(20, 30, 60, 0.28);
+    --card: rgba(255, 255, 255, 0.84);
+    --card-line: rgba(20, 40, 110, 0.09);
+    --card-sheen: rgba(255, 255, 255, 0.9);
     --win: #ececee;
     --win-bar: #f5f5f7;
     --win-text: #1d1d1f;
@@ -79,6 +103,18 @@
     --seg-on: #ffffff;
     --plot-ink: #1d1d1f;
     --img-ground: #f0f0f2;
+    --finder: #ffffff;
+    --finder-bar: #f4f4f6;
+    --finder-side: #f0f0f3;
+    --finder-line: #dedee3;
+    --finder-text: #1d1d1f;
+    --finder-dim: #6e6e73;
+    --select: #1f6feb;
+    --select-soft: rgba(0, 0, 0, 0.07);
+    --doc: #ffffff;
+    --doc-fold: #d5d9e2;
+    --key: #ffffff;
+    --key-line: #cfd5e4;
     --icon-rim: transparent;
     --brand-icon: url("favicon-light.png");
     color-scheme: light;
@@ -92,10 +128,15 @@
   --line: #dce1ee;
   --gold: #a65a00;
   --on-gold: #fffaf2;
+  --accent: #d9861a;
+  --accent-soft: rgba(217, 134, 26, 0.2);
   --blue: #2853c4;
   --star: #0b1122;
   --glow: rgba(70, 100, 220, 0.10);
   --shadow: rgba(20, 30, 60, 0.28);
+  --card: rgba(255, 255, 255, 0.84);
+  --card-line: rgba(20, 40, 110, 0.09);
+  --card-sheen: rgba(255, 255, 255, 0.9);
   --win: #ececee;
   --win-bar: #f5f5f7;
   --win-text: #1d1d1f;
@@ -107,13 +148,25 @@
   --seg-on: #ffffff;
   --plot-ink: #1d1d1f;
   --img-ground: #f0f0f2;
+  --finder: #ffffff;
+  --finder-bar: #f4f4f6;
+  --finder-side: #f0f0f3;
+  --finder-line: #dedee3;
+  --finder-text: #1d1d1f;
+  --finder-dim: #6e6e73;
+  --select: #1f6feb;
+  --select-soft: rgba(0, 0, 0, 0.07);
+  --doc: #ffffff;
+  --doc-fold: #d5d9e2;
+  --key: #ffffff;
+  --key-line: #cfd5e4;
   --icon-rim: transparent;
   --brand-icon: url("favicon-light.png");
   color-scheme: light;
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
 body {
   margin: 0;
   background: var(--sky);
@@ -124,95 +177,126 @@ body {
 a { color: var(--blue); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 a:hover { text-decoration-thickness: 2px; }
 :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
-img { max-width: 100%; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .wrap { width: 100%; max-width: 1240px; margin-inline: auto; padding-inline: clamp(16px, 4vw, 40px); }
 
-/* The night sky fills the screen; the hero sits in its middle. */
-.page {
-  position: relative; overflow: hidden; display: flex; flex-direction: column;
-  min-height: 100vh; min-height: 100svh;
-  background: radial-gradient(60% 70% at 76% 46%, var(--glow), transparent 72%);
-}
-.sky { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-
-.top { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 22px; }
+/* ---- Top ------------------------------------------------------------------ */
+.top { position: absolute; z-index: 10; inset: 0 0 auto 0; }
+.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 22px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; font: 700 1.05rem/1 var(--font-display); letter-spacing: -0.02em; }
 /* The pixel galaxy at 32 px: two pixels a cell of its 64 px image on a Retina screen. */
 .brand-icon { width: 32px; height: 32px; margin: -1px 0; background: var(--brand-icon) center / 32px 32px no-repeat; image-rendering: pixelated; filter: drop-shadow(0 0 0.6px var(--icon-rim)); }
-.top nav { display: flex; gap: 22px; font-size: 0.95rem; }
+.top nav { display: flex; gap: clamp(14px, 3vw, 26px); font-size: 0.95rem; }
 .top nav a { color: var(--ink-dim); text-decoration: none; }
 .top nav a:hover { color: var(--ink); }
 
-.hero { position: relative; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); align-content: center; gap: 44px; padding-block: 20px 56px; }
-@media (min-width: 980px) {
-  .hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 64px; padding-block: 24px 80px; }
+/* ---- Hero: the pitch, and Finder playing out what uFits does ----------- */
+.hero-wrap {
+  position: relative; overflow: hidden;
+  background: radial-gradient(55% 65% at 74% 46%, var(--glow), transparent 72%);
+}
+.sky { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
+.hero {
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 44px;
+  min-height: min(100vh, 920px); min-height: min(100svh, 920px); padding-block: 96px 40px;
+}
+@media (min-width: 1000px) {
+  .hero { grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr); gap: 56px; padding-block: 100px 48px; }
 }
 .pitch { min-width: 0; display: flex; flex-direction: column; gap: 22px; }
 h1 {
   margin: 0;
-  font: 500 clamp(2.2rem, 1.1rem + 3vw, 3.7rem)/1.06 var(--font-display);
-  letter-spacing: -0.045em;
+  font: 500 clamp(2.3rem, 1.1rem + 3.4vw, 4rem)/1.04 var(--font-display);
+  letter-spacing: -0.05em;
   text-wrap: balance;
 }
-.lead { margin: 0; max-width: 34em; font-size: 1.14rem; line-height: 1.62; color: var(--ink-dim); text-wrap: pretty; }
-.lead strong { color: var(--ink); font-weight: 600; }
+.lead { margin: 0; max-width: 30em; font-size: 1.16rem; line-height: 1.6; color: var(--ink-dim); text-wrap: pretty; }
 
-.install { border: 1px solid var(--line); border-radius: 12px; background: var(--sky-raised); overflow: hidden; }
+.install { border: 1px solid var(--line); border-radius: 12px; background: var(--sky-raised); overflow: hidden; text-align: left; }
 .install-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 7px 7px 16px; border-bottom: 1px solid var(--line); font-size: 0.88rem; color: var(--ink-dim); }
 .copy { flex: none; border: 0; border-radius: 7px; padding: 8px 16px; background: var(--gold); color: var(--on-gold); font: 600 0.88rem/1 var(--font-body); cursor: pointer; }
 .copy:hover { filter: brightness(1.08); }
 .install-cmd { margin: 0; padding: 13px 16px 15px; font: 400 0.82rem/1.75 var(--font-display); color: var(--ink); }
 .install-cmd .sigil { color: var(--gold); user-select: none; }
 .nobr { white-space: nowrap; }
-.key {
-  display: inline-flex; align-items: center; justify-content: center; vertical-align: 0.1em;
-  min-width: 5.6em; padding: 0.12em 0.9em 0.2em; margin-inline: 0.1em;
-  border: 1px solid var(--line); border-bottom-width: 3px; border-radius: 7px;
-  background: var(--sky-raised); color: var(--ink);
-  font: 500 0.72em/1.3 var(--font-display); cursor: pointer;
-  transition: transform 0.08s ease, border-bottom-width 0.08s ease;
-}
-.key:active { transform: translateY(2px); border-bottom-width: 1px; }
 .meta { margin: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.9rem; color: var(--ink-dim); }
 
-/* The Quick Look window, drawn live. */
-.demo { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
-.win {
-  border-radius: 12px; overflow: hidden; background: var(--win);
-  box-shadow: 0 40px 90px -30px var(--shadow), 0 0 0 1px var(--win-line);
-  font-family: var(--font-ui); color: var(--win-text);
-  animation: open 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+.stage { margin: 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 20px; }
+.scene { position: relative; width: 100%; max-width: 700px; aspect-ratio: 70 / 47; user-select: none; -webkit-user-select: none; }
+
+/* Finder, in its icon view. */
+.finder {
+  position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 14px; background: var(--finder); color: var(--finder-text);
+  box-shadow: 0 40px 90px -34px var(--shadow), 0 0 0 1px var(--finder-line);
+  font-family: var(--font-ui);
 }
-.win.pop { animation: pop 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
-@keyframes open { from { transform: translateY(10px) scale(0.97); opacity: 0.4; } to { transform: none; opacity: 1; } }
-@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(0.985); } 100% { transform: scale(1); } }
-.win-title { position: relative; display: flex; align-items: center; justify-content: center; height: 30px; border-bottom: 1px solid var(--win-line); font-size: 12.5px; font-weight: 600; color: var(--win-dim); }
-.lights { position: absolute; left: 12px; top: 9px; display: flex; gap: 8px; }
+.finder-bar { position: relative; flex: none; display: flex; align-items: center; gap: 16px; height: 42px; padding: 0 14px; border-bottom: 1px solid var(--finder-line); background: var(--finder-bar); }
+.lights { display: flex; gap: 8px; }
 .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
 .lights i:nth-child(1) { background: var(--tl-red); }
 .lights i:nth-child(2) { background: var(--tl-yellow); }
 .lights i:nth-child(3) { background: var(--tl-green); }
-.win-body { position: relative; aspect-ratio: 3 / 2; max-width: 100%; background: var(--win-content); }
+.finder-nav { display: flex; gap: 14px; color: var(--finder-dim); font-size: 18px; line-height: 1; }
+.finder-title { font-size: 13px; font-weight: 600; }
+.finder-view { margin-left: auto; display: flex; gap: 2px; padding: 2px; border-radius: 7px; background: var(--select-soft); }
+.finder-view i { width: 26px; height: 20px; border-radius: 5px; display: grid; place-items: center; color: var(--finder-dim); }
+.finder-view i.on { background: var(--finder); color: var(--finder-text); box-shadow: 0 1px 2px var(--shadow); }
+.finder-view svg { width: 12px; height: 12px; }
+.finder-main { flex: 1; min-height: 0; display: flex; }
+.finder-side { flex: none; width: 21%; padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; background: var(--finder-side); border-right: 1px solid var(--finder-line); font-size: 12px; color: var(--finder-text); }
+.finder-side b { margin: 2px 8px 6px; font-size: 10.5px; font-weight: 600; color: var(--finder-dim); }
+.finder-side span { padding: 5px 8px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.finder-side span.on { background: var(--select-soft); }
+.finder-grid { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; gap: 12px 6px; padding: 18px 14px; outline: none; }
+.file { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; cursor: default; }
+.thumb-box { width: 100%; max-width: 172px; aspect-ratio: 4 / 3; padding: 5px; border-radius: 8px; }
+.thumb { width: 100%; height: 100%; display: block; border-radius: 2px; }
+.thumb-box.dev .thumb { box-shadow: 0 0 0 1px var(--finder-line), 0 2px 6px -2px var(--shadow); }
+.fname { max-width: 100%; padding: 1px 6px; border-radius: 4px; font-size: 11.5px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file[aria-selected="true"] .thumb-box { background: var(--select-soft); }
+.file[aria-selected="true"] .fname { background: var(--select); color: #fff; }
+.finder-grid:focus-visible .file[aria-selected="true"] .fname { outline: 2px solid var(--gold); outline-offset: 1px; }
+
+/* The pointer, played by the page. */
+.cursor { position: absolute; left: 0; top: 0; z-index: 8; width: 20px; height: 26px; pointer-events: none; opacity: 0; transition: opacity 0.3s, transform 0.7s cubic-bezier(0.3, 0.7, 0.2, 1); filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.4)); }
+.cursor.on { opacity: 1; }
+.cursor.click path { animation: click 0.22s ease; transform-origin: 2px 2px; }
+@keyframes click { 40% { transform: scale(0.82); } }
+
+/* Quick Look: the preview, drawn live. */
+.ql {
+  position: absolute; z-index: 6; left: 11.5%; right: 11.5%; top: 5.5%;
+  border-radius: 12px; overflow: hidden; background: var(--win);
+  box-shadow: 0 50px 100px -30px var(--shadow), 0 0 0 1px var(--win-line);
+  font-family: var(--font-ui); color: var(--win-text);
+  transform-origin: 0 0;
+}
+.ql[hidden] { display: none; }
+.ql-title { position: relative; display: flex; align-items: center; justify-content: center; height: 30px; border-bottom: 1px solid var(--win-line); font-size: 12.5px; font-weight: 600; color: var(--win-dim); }
+.ql-title .lights { position: absolute; left: 12px; top: 9px; }
+.ql-title .lights button { width: 12px; height: 12px; padding: 0; border: 0; border-radius: 50%; background: var(--tl-red); cursor: pointer; }
+.ql-body { position: relative; aspect-ratio: 3 / 2; background: var(--win-content); }
 .view { position: absolute; inset: 0; transition: opacity 0.18s ease; }
 .view[hidden] { display: block !important; opacity: 0; pointer-events: none; visibility: hidden; }
 #imageView { background: var(--img-ground); }
 canvas.fill { width: 100%; height: 100%; display: block; }
-.rows { overflow: auto; font: 11.5px/1.25 ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+.rows { overflow: auto; font: 11.5px/1.25 var(--font-mono); font-variant-numeric: tabular-nums; }
 .rows table { border-collapse: collapse; min-width: 100%; }
 .rows th, .rows td { padding: 3px 10px; white-space: nowrap; text-align: right; border-right: 1px solid var(--win-line); }
 .rows th { position: sticky; top: 0; z-index: 1; background: var(--win-bar); color: var(--win-text); font: 500 11px/1.3 var(--font-ui); border-bottom: 1px solid var(--win-line); }
 .rows td:first-child { color: var(--win-dim); }
-.rows td.text, .rows th.text { text-align: left; }
 .rows tbody tr:nth-child(even) { background: var(--win-stripe); }
-.hdr { margin: 0; overflow: auto; padding: 10px 12px; font: 11.5px/1.45 ui-monospace, "SF Mono", Menlo, monospace; color: var(--win-text); white-space: pre; tab-size: 8; }
+.hdr { margin: 0; overflow: auto; padding: 10px 12px; font: 11.5px/1.45 var(--font-mono); color: var(--win-text); white-space: pre; tab-size: 8; }
 .hdr .k { font-weight: 700; }
 .hdr .m { color: var(--win-dim); opacity: 0.7; }
 .hdr .c { color: var(--win-dim); }
 .hdr .h { font-weight: 700; }
-.win-bar { display: flex; align-items: center; gap: 8px; height: 36px; padding-inline: 10px; border-top: 1px solid var(--win-line); background: var(--win-bar); font-size: 11.5px; }
-.win-info { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--win-dim); }
-.pop-up { position: relative; flex: 0 1 auto; min-width: 0; max-width: 46%; }
+.ql-bar { display: flex; align-items: center; gap: 8px; height: 36px; padding-inline: 10px; border-top: 1px solid var(--win-line); background: var(--win-bar); font-size: 11.5px; }
+.ql-info { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--win-dim); }
+.pop-up { position: relative; flex: 0 1 auto; min-width: 0; max-width: 40%; }
+.pop-up[hidden], .plane[hidden] { display: none; }
 .pop-up select {
   appearance: none; -webkit-appearance: none; width: 100%; max-width: 100%;
   border: 0; border-radius: 6px; padding: 3px 22px 3px 8px; background: var(--seg); color: var(--win-text);
@@ -220,37 +304,187 @@ canvas.fill { width: 100%; height: 100%; display: block; }
 }
 .pop-up::after { content: "⌄"; position: absolute; right: 8px; top: 1px; font-size: 11px; color: var(--win-dim); pointer-events: none; }
 /* The HDU menu says which HDU is shown; opened, what each holds (as uFits). */
-.pop-up.hdu { display: inline-block; }
 .pop-label { display: block; overflow: hidden; padding: 3px 22px 3px 8px; border-radius: 6px; background: var(--seg); color: var(--win-text); font: 11.5px/1.3 var(--font-ui); white-space: nowrap; text-overflow: ellipsis; }
 .pop-up.hdu select { position: absolute; inset: 0; height: 100%; opacity: 0; }
 .pop-up.hdu:has(select:focus-visible) .pop-label { outline: 2px solid var(--gold); outline-offset: 2px; }
+.plane { flex: 1 1 150px; min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--win-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.plane input { flex: 1; min-width: 40px; margin: 0; accent-color: var(--accent); }
 .seg { flex: none; display: inline-flex; padding: 2px; gap: 2px; border-radius: 7px; background: var(--seg); }
-.seg button { border: 0; border-radius: 5px; padding: 3px 9px; background: transparent; color: var(--win-text); font: 11.5px/1.3 var(--font-ui); cursor: pointer; }
-.seg button[aria-pressed="true"] { background: var(--seg-on); box-shadow: 0 1px 2px var(--shadow); }
+.seg button, .seg b { border: 0; border-radius: 5px; padding: 3px 9px; background: transparent; color: var(--win-text); font: 400 11.5px/1.3 var(--font-ui); cursor: pointer; }
+.seg button[aria-pressed="true"], .seg b.on { background: var(--seg-on); box-shadow: 0 1px 2px var(--shadow); }
 .seg button:disabled { color: var(--win-dim); opacity: 0.55; cursor: default; }
-@media (max-width: 600px) { .win-info { display: none; } .pop-up { flex: 1; max-width: none; } #stretchBox { display: none; } }
+
+/* Select → Space → See: the keycap is a key, too. */
+.steps { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.step { display: inline-flex; align-items: center; gap: 8px; font: 500 0.8rem/1 var(--font-display); letter-spacing: -0.02em; color: var(--ink-dim); transition: color 0.25s; }
+.step svg { width: 17px; height: 17px; transition: color 0.25s; }
+.step.on { color: var(--ink); }
+.step.on svg { color: var(--accent); }
+.sep { width: 26px; height: 1px; background: var(--line); }
+.keycap {
+  width: 136px; height: 38px; border: 1px solid var(--key-line); border-bottom-width: 4px; border-radius: 9px;
+  background: var(--key); color: var(--ink-dim); font: 500 0.78rem/1 var(--font-display); letter-spacing: 0.06em;
+  cursor: pointer; transition: transform 0.08s ease, border-bottom-width 0.08s ease, box-shadow 0.25s, color 0.25s;
+}
+.keycap.on { color: var(--ink); box-shadow: 0 0 0 3px var(--accent-soft); }
+.keycap.down { transform: translateY(3px); border-bottom-width: 1px; }
+
+@media (max-width: 640px) {
+  .scene { aspect-ratio: 6 / 5; }
+  .finder-side, .finder-view, .finder-nav { display: none; }
+  .finder-grid { padding: 14px 8px; gap: 10px 4px; }
+  .fname { font-size: 10.5px; }
+  .ql { left: 3%; right: 3%; top: 3.5%; }
+  .ql-title { height: 26px; font-size: 11.5px; }
+  .ql-title .lights { top: 7px; }
+  .ql-bar { height: 32px; gap: 6px; padding-inline: 8px; }
+  .ql-info, #stretchBox { display: none; }
+  .pop-up { flex: 1; max-width: none; }
+  .seg button { padding: 3px 7px; }
+}
+
+/* ---- What the previews show: moving pictures ------------------------------- */
+.features { position: relative; padding-block: clamp(36px, 5vw, 72px) clamp(40px, 6vw, 80px); }
+.section-title { margin: 0 0 clamp(26px, 4vw, 44px); font: 500 clamp(1.75rem, 1rem + 2.4vw, 2.8rem)/1.08 var(--font-display); letter-spacing: -0.045em; text-wrap: balance; }
+.bento { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
+.tile {
+  position: relative; grid-column: span var(--span, 4); min-width: 0; min-height: 380px;
+  display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid var(--card-line); border-radius: 24px;
+  background: radial-gradient(120% 70% at 50% 0%, var(--card-sheen), transparent 62%), var(--card);
+}
+.art { position: relative; flex: 1; min-height: 250px; display: flex; padding: 22px 22px 0; }
+.cap { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 16px 22px 20px; }
+.cap h3 { margin: 0; font: 600 1.05rem/1.3 var(--font-body); letter-spacing: -0.01em; }
+.kicker { font: 400 0.75rem/1.4 var(--font-display); letter-spacing: -0.02em; color: var(--ink-dim); }
+@media (max-width: 1000px) {
+  .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tile { grid-column: span 1; }
+  .tile.wide { grid-column: span 2; }
+}
+@media (max-width: 640px) {
+  .bento { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .tile, .tile.wide { grid-column: span 1; min-height: 0; }
+  .art { aspect-ratio: 4 / 3; min-height: 0; padding: 16px 16px 0; }
+  .cap { padding: 14px 18px 18px; }
+}
+
+/* A small preview window, as in the tiles. */
+.mini {
+  position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 12px; background: var(--win); color: var(--win-text); font-family: var(--font-ui);
+  box-shadow: 0 26px 50px -26px var(--shadow), 0 0 0 1px var(--win-line);
+}
+.mini-title { position: relative; flex: none; display: flex; align-items: center; justify-content: center; height: 24px; border-bottom: 1px solid var(--win-line); font-size: 10.5px; font-weight: 600; color: var(--win-dim); }
+.mini-title .lights { position: absolute; left: 9px; top: 7px; gap: 6px; }
+.mini-title .lights i { width: 9px; height: 9px; }
+.mini-body { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--win-content); }
+.mini-body > canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.mini-bar { flex: none; display: flex; align-items: center; gap: 6px; height: 30px; padding-inline: 8px; border-top: 1px solid var(--win-line); background: var(--win-bar); font-size: 10.5px; white-space: nowrap; }
+.mini-bar .info { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--win-dim); font-variant-numeric: tabular-nums; }
+.mini-bar .seg b { padding: 2px 7px; font-size: 10.5px; cursor: default; }
+.chip-pop { position: relative; padding: 2px 18px 2px 7px; border-radius: 5px; background: var(--seg); }
+.chip-pop::after { content: "⌄"; position: absolute; right: 6px; top: 0; color: var(--win-dim); }
+.track { position: relative; flex: 0 1 110px; height: 4px; margin-inline: 6px 4px; border-radius: 2px; background: var(--seg); }
+.track i { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.35); }
+.track b { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--accent); }
+
+/* A million rows. */
+.rows-tile { position: absolute; inset: 0; overflow: hidden; font: 10.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.rows-tile .rh, .rows-tile .r { display: grid; grid-template-columns: 1.25fr 1fr 1fr 0.7fr; align-items: center; }
+.rows-tile .rh { position: relative; z-index: 1; height: 22px; background: var(--win-bar); border-bottom: 1px solid var(--win-line); font: 500 10px/1 var(--font-ui); color: var(--win-text); }
+.rows-tile .r { height: 21px; }
+.rows-tile .r.odd { background: var(--win-stripe); }
+.rows-tile .r.hi { background: var(--accent-soft); }
+.rows-tile span { padding: 0 9px; text-align: right; overflow: hidden; white-space: nowrap; border-right: 1px solid var(--win-line); line-height: 21px; }
+.rows-tile .rh span { line-height: 22px; }
+.rows-tile span:first-child { color: var(--win-dim); }
+.rows-tile .r.hi span:first-child { color: var(--win-text); font-weight: 700; }
+
+/* Every header card, written out. */
+.hdr-tile { position: absolute; inset: 0; margin: 0; padding: 10px 12px; overflow: hidden; font: 10.5px/1.55 var(--font-mono); color: var(--win-text); white-space: pre; }
+.hdr-tile .ln { display: block; opacity: 0; transform: translateY(3px); transition: opacity 0.2s, transform 0.2s; }
+.hdr-tile .ln.on { opacity: 1; transform: none; }
+.hdr-tile .k, .hdr-tile .h { font-weight: 700; }
+.hdr-tile .m { color: var(--win-dim); opacity: 0.7; }
+.hdr-tile .c { color: var(--win-dim); }
+.caret { display: inline-block; width: 6px; height: 12px; margin-left: 2px; vertical-align: -2px; background: var(--accent); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* Every kind of file, going by. */
+.tile.formats { min-height: 0; }
+.tile.formats .art { min-height: 0; aspect-ratio: auto; padding: 26px 0 4px; }
+.marquee { flex: 1; min-width: 0; display: grid; gap: 12px; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent); mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent); }
+.lane { display: flex; gap: 12px; width: max-content; animation: lane 52s linear infinite; }
+.lane + .lane { animation-duration: 64s; animation-direction: reverse; }
+.marquee:hover .lane { animation-play-state: paused; }
+@keyframes lane { to { transform: translateX(-50%); } }
+.chip { display: inline-flex; align-items: center; gap: 10px; padding: 9px 15px 9px 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--sky-raised); font: 500 0.8rem/1 var(--font-display); letter-spacing: -0.02em; white-space: nowrap; }
+.chip i { position: relative; width: 16px; height: 20px; border-radius: 2px 6px 2px 2px; background: var(--doc); box-shadow: inset 0 -7px 0 var(--fam, #4c7dff), 0 0 0 1px rgba(0, 0, 0, 0.12); }
+.chip.fits { --fam: #4c7dff; }
+.chip.fz { --fam: #22b3a5; }
+.chip.xisf { --fam: #a46bff; }
+.chip.xray { --fam: #f08a3c; }
+
+/* Light by day, Dusk by night. */
+.day { position: relative; flex: 1; border-radius: 16px; overflow: hidden; }
+.day canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* It updates itself. */
+.upd-btn { flex: none; border: 0; border-radius: 5px; padding: 3px 8px; background: var(--gold); color: var(--on-gold); font: 600 10.5px/1.3 var(--font-ui); transition: opacity 0.3s, transform 0.12s; }
+.upd-btn.press { transform: scale(0.94); }
+.upd-btn.gone { opacity: 0; }
+.mini .cursor { width: 15px; height: 20px; transition: opacity 0.3s, transform 0.9s cubic-bezier(0.3, 0.7, 0.2, 1); }
+.toast {
+  position: absolute; z-index: 3; left: 50%; top: 50%; width: min(78%, 260px); padding: 14px 16px;
+  display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 12px;
+  border-radius: 14px; background: var(--win); box-shadow: 0 20px 40px -12px var(--shadow), 0 0 0 1px var(--win-line);
+  transform: translate(-50%, -50%) scale(0.92); opacity: 0; transition: opacity 0.3s, transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+.toast.on { opacity: 1; transform: translate(-50%, -50%); }
+.toast canvas { grid-row: span 2; width: 38px; height: 38px; }
+.toast b { font-size: 12px; font-weight: 600; }
+.toast .bar { position: relative; height: 5px; border-radius: 3px; background: var(--seg); overflow: hidden; }
+.toast .bar i { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 3px; background: var(--accent); }
+.toast .done { color: var(--win-dim); font-size: 11px; line-height: 5px; }
+
+/* ---- Get it ----------------------------------------------------------------- */
+.get { position: relative; padding-block: clamp(56px, 9vw, 120px) clamp(56px, 8vw, 100px); text-align: center; background: radial-gradient(45% 55% at 50% 32%, var(--glow), transparent 70%); }
+.mark { display: block; width: 260px; height: 190px; margin: 0 auto 6px; }
+.get .install { max-width: 660px; margin: 0 auto; }
+.get .meta { justify-content: center; margin-top: 18px; }
+.foot { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 22px; padding-block: 26px 40px; border-top: 1px solid var(--line); font-size: 0.85rem; color: var(--ink-dim); }
+.foot a { color: var(--ink-dim); }
 
 @media (prefers-reduced-motion: reduce) {
-  .win, .win.pop { animation: none; }
-  .view { transition: none; }
+  html { scroll-behavior: auto; }
+  .cursor, .view, .hdr-tile .ln, .toast, .keycap { transition: none; }
+  .lane { animation: none; flex-wrap: wrap; width: auto; justify-content: center; padding-inline: 16px; }
+  .lane [aria-hidden="true"], .lane + .lane { display: none; }
+  .marquee { -webkit-mask-image: none; mask-image: none; }
+  .caret { animation: none; }
 }
 </style>
 </head>
 <body>
-<div class="page">
-  <canvas class="sky" id="sky" aria-hidden="true"></canvas>
-  <header class="wrap top">
-    <a class="brand" href="https://github.com/lmytime/uFits"><span class="brand-icon" aria-hidden="true"></span>uFits</a>
-    <nav aria-label="Project">
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><span class="brand-icon" aria-hidden="true"></span>uFits</a>
+    <nav aria-label="Site">
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
       <a href="https://github.com/lmytime/uFits">GitHub</a>
-      <a href="https://github.com/lmytime/uFits/releases/latest">Releases</a>
     </nav>
-  </header>
+  </div>
+</header>
 
-  <main class="wrap hero">
+<main>
+<section class="hero-wrap" aria-labelledby="title">
+  <canvas class="sky" id="sky" aria-hidden="true"></canvas>
+  <div class="wrap hero">
     <div class="pitch">
-      <h1>See FITS in your Finder.</h1>
-      <p class="lead">Select a FITS file and press <button class="key" id="space" type="button" aria-label="Space (shows the next example in the window)">space</button> to see its image, plot, table or header.</p>
+      <h1 id="title">See FITS in your Finder.</h1>
+      <p class="lead">Select a file, press Space. Images, plots, tables and headers, at once.</p>
       <div class="install">
         <div class="install-head"><span>Install: paste this in Terminal</span><button class="copy" type="button" data-copy="cmd">Copy</button></div>
         <div class="install-cmd"><span class="sigil" aria-hidden="true">$ </span><code id="cmd">curl -fsSL https://github.com/<wbr>lmytime/<wbr>uFits/<wbr>releases/<wbr>latest/<wbr>download/<wbr><span class="nobr">install.sh | sh</span></code></div>
@@ -263,44 +497,216 @@ canvas.fill { width: 100%; height: 100%; display: block; }
       </p>
     </div>
 
-    <figure class="demo">
-      <div class="win" id="win">
-        <div class="win-title"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>example.fits</div>
-        <div class="win-body" id="winBody">
-          <div class="view" id="imageView"><canvas class="fill" id="imageCanvas" aria-label="A spiral galaxy in a field of stars"></canvas></div>
-          <div class="view" id="plotView" hidden><canvas class="fill" id="plotCanvas" aria-label="A plot of the table"></canvas></div>
-          <div class="view rows" id="tableView" hidden></div>
-          <pre class="view hdr" id="headerView" hidden></pre>
+    <figure class="stage">
+      <p class="visually-hidden" id="sceneHelp">A Finder window of FITS files: uFits draws their thumbnails, and with a file selected, Space opens its preview. Click a file and press Space to try it.</p>
+      <div class="scene" id="scene" aria-describedby="sceneHelp">
+        <div class="finder">
+          <div class="finder-bar">
+            <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="finder-nav" aria-hidden="true"><span>‹</span><span>›</span></span>
+            <span class="finder-title">Observations</span>
+            <span class="finder-view" aria-hidden="true">
+              <i class="on"><svg viewBox="0 0 12 12"><path fill="currentColor" d="M0 0h5v5H0zM7 0h5v5H7zM0 7h5v5H0zM7 7h5v5H7z"/></svg></i>
+              <i><svg viewBox="0 0 12 12"><path fill="currentColor" d="M0 1h12v2H0zM0 5h12v2H0zM0 9h12v2H0z"/></svg></i>
+            </span>
+          </div>
+          <div class="finder-main">
+            <div class="finder-side" aria-hidden="true">
+              <b>Favorites</b>
+              <span>Desktop</span>
+              <span>Documents</span>
+              <span class="on">Observations</span>
+              <span>Downloads</span>
+            </div>
+            <div class="finder-grid" id="grid" role="listbox" tabindex="0" aria-label="FITS files"></div>
+          </div>
         </div>
-        <div class="win-bar">
-          <span class="win-info" id="winInfo"></span>
-          <span class="pop-up hdu"><span class="pop-label" id="hduLabel" aria-hidden="true"></span><select id="hduMenu" aria-label="HDU"></select></span>
-          <span class="pop-up" id="stretchBox"><select id="stretchMenu" aria-label="Stretch">
-            <option value="auto">Auto stretch</option>
-            <option value="linear">Linear 0.5–99.5%</option>
-            <option value="minmax">Min – max</option>
-          </select></span>
-          <span class="seg" role="group" aria-label="Show">
-            <button type="button" id="segPicture" aria-pressed="true">Image</button><button type="button" id="segTable" aria-pressed="false">Table</button><button type="button" id="segHeader" aria-pressed="false">Header</button>
-          </span>
+
+        <div class="ql" id="ql" hidden>
+          <div class="ql-title"><span class="lights"><button type="button" id="qlClose" aria-label="Close the preview"></button></span><span id="qlName"></span></div>
+          <div class="ql-body" id="qlBody">
+            <div class="view" id="imageView"><canvas class="fill" id="imageCanvas" aria-hidden="true"></canvas></div>
+            <div class="view" id="plotView" hidden><canvas class="fill" id="plotCanvas" aria-hidden="true"></canvas></div>
+            <div class="view rows" id="tableView" hidden></div>
+            <pre class="view hdr" id="headerView" hidden></pre>
+          </div>
+          <div class="ql-bar">
+            <span class="ql-info" id="qlInfo"></span>
+            <span class="pop-up hdu" id="hduBox"><span class="pop-label" id="hduLabel" aria-hidden="true"></span><select id="hduMenu" aria-label="HDU"></select></span>
+            <span class="plane" id="planeBox" hidden><input type="range" id="plane" min="0" max="31" value="16" aria-label="Plane"><span id="planeLabel"></span></span>
+            <span class="pop-up" id="stretchBox"><select id="stretchMenu" aria-label="Stretch">
+              <option value="auto">Auto stretch</option>
+              <option value="linear">Linear 0.5–99.5%</option>
+              <option value="minmax">Min – max</option>
+            </select></span>
+            <span class="seg" role="group" aria-label="Show">
+              <button type="button" id="segPicture" aria-pressed="true">Image</button><button type="button" id="segTable" aria-pressed="false">Table</button><button type="button" id="segHeader" aria-pressed="false">Header</button>
+            </span>
+          </div>
         </div>
+
+        <svg class="cursor" id="cursor" viewBox="0 0 20 26" aria-hidden="true"><path d="M2 1.6v19.6l4.7-4.5 3.1 7.1 3.3-1.4-3.1-7h6.6z" fill="#111" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      </div>
+
+      <div class="steps" id="steps">
+        <span class="step" data-step="select"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5v13l3.3-3.1 2.2 5 2.3-1-2.2-4.9h4.6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>Select</span>
+        <span class="sep" aria-hidden="true"></span>
+        <button class="keycap" id="keycap" type="button" aria-label="Space: preview the selected file">space</button>
+        <span class="sep" aria-hidden="true"></span>
+        <span class="step" data-step="see"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M1.8 10S5 4.2 10 4.2 18.2 10 18.2 10 15 15.8 10 15.8 1.8 10 1.8 10z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="2.6" fill="currentColor"/></svg>See it</span>
       </div>
     </figure>
-  </main>
-</div>
+  </div>
+</section>
+
+<section class="features" id="features" aria-labelledby="features-title">
+  <div class="wrap">
+    <h2 class="section-title" id="features-title">Everything inside, at a glance.</h2>
+    <div class="bento">
+      <article class="tile wide" style="--span: 7">
+        <div class="art"><div class="mini">
+          <div class="mini-title"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>ngc4535.fits</div>
+          <div class="mini-body"><canvas id="stretchArt" aria-hidden="true"></canvas></div>
+          <div class="mini-bar"><span class="info">3072 × 2048 · float32</span><span class="chip-pop" id="stretchLabel">Auto stretch</span><span class="seg"><b class="on">Image</b><b>Header</b></span></div>
+        </div></div>
+        <div class="cap"><h3>Auto stretch</h3><span class="kicker">linear and min–max, a click away</span></div>
+      </article>
+
+      <article class="tile" style="--span: 5">
+        <div class="art"><div class="mini">
+          <div class="mini-title"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>ngc4535.fits</div>
+          <div class="mini-body"><canvas id="zoomArt" aria-hidden="true"></canvas></div>
+          <div class="mini-bar"><span class="info" id="zoomLabel">100%</span><span class="seg"><b class="on">Image</b><b>Header</b></span></div>
+        </div></div>
+        <div class="cap"><h3>Zoom to the pixel</h3><span class="kicker">pinch · ⌥-click · ⌘-scroll</span></div>
+      </article>
+
+      <article class="tile" style="--span: 4">
+        <div class="art"><div class="mini">
+          <div class="mini-title"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span id="plotsName">tess-lc.fits</span></div>
+          <div class="mini-body"><canvas id="plotsArt" aria-hidden="true"></canvas></div>
+          <div class="mini-bar"><span class="info" id="plotsInfo">3600 rows</span><span class="seg"><b class="on">Plot</b><b>Table</b></span></div>
+        </div></div>
+        <div class="cap"><h3>Spectra and light curves</h3></div>
+      </article>
+
+      <article class="tile" style="--span: 4">
+        <div class="art"><div class="mini">
+          <div class="mini-title"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>gaia-cluster.fits</div>
+          <div class="mini-body"><canvas id="skyArt" aria-hidden="true"></canvas></div>
+          <div class="mini-bar"><span class="info">2500 rows</span><span class="seg"><b class="on">Plot</b><b>Table</b></span></div>
+        </div></div>
+        <div class="cap"><h3>Catalogs on the sky</h3><span class="kicker">RA and Dec</span></div>
+      </article>
+
+      <article class="tile" style="--span: 4">
+        <div class="art"><div class="mini">
+          <div class="mini-title"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>ngc2403-hi.fits</div>
+          <div class="mini-body"><canvas id="cubeArt" aria-hidden="true"></canvas></div>
+          <div class="mini-bar"><span class="track" aria-hidden="true"><b id="cubeFill"></b><i id="cubeThumb"></i></span><span class="info" id="cubeLabel">1 / 32</span></div>
+        </div></div>
+        <div class="cap"><h3>Step through cubes</h3></div>
+      </article>
+
+      <article class="tile" style="--span: 6">
+        <div class="art"><div class="mini">
+          <div class="mini-title"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>survey.fits</div>
+          <div class="mini-body"><div class="rows-tile" id="rowsArt" aria-hidden="true"></div></div>
+          <div class="mini-bar"><span class="info">1,000,000 rows × 4 columns</span><span class="seg"><b>Plot</b><b class="on">Table</b><b>Header</b></span></div>
+        </div></div>
+        <div class="cap"><h3>A million rows</h3><span class="kicker">no wait · ⌘C copies</span></div>
+      </article>
+
+      <article class="tile" style="--span: 6">
+        <div class="art"><div class="mini">
+          <div class="mini-title"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span id="hdrName">ngc4535.fits</span></div>
+          <div class="mini-body"><pre class="hdr-tile" id="hdrArt" aria-hidden="true"></pre></div>
+          <div class="mini-bar"><span class="info"></span><span class="seg"><b>Image</b><b>Table</b><b class="on">Header</b></span></div>
+        </div></div>
+        <div class="cap"><h3>Every header card</h3><span class="kicker">lined up · ⌘F finds</span></div>
+      </article>
+
+      <article class="tile wide formats" style="--span: 12">
+        <div class="art"><div class="marquee" id="formats"></div></div>
+        <div class="cap"><h3>FITS, XISF and X-ray files</h3><span class="kicker">compressed ones too</span></div>
+      </article>
+
+      <article class="tile" style="--span: 6">
+        <div class="art"><div class="day"><canvas id="dayArt" aria-hidden="true"></canvas></div></div>
+        <div class="cap"><h3>Light by day, Dusk by night</h3><span class="kicker">the icon follows macOS 26</span></div>
+      </article>
+
+      <article class="tile" style="--span: 6">
+        <div class="art"><div class="mini" id="updMini">
+          <div class="mini-title"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>ngc4535.fits</div>
+          <div class="mini-body"><canvas id="updArt" aria-hidden="true"></canvas>
+            <div class="toast" id="updToast" aria-hidden="true"><canvas id="updIcon"></canvas><b id="updText">uFits 0.0.7</b><span class="bar"><i id="updBar"></i></span></div>
+          </div>
+          <div class="mini-bar"><span class="info" id="updInfo">3072 × 2048 · float32</span><span class="upd-btn" id="updBtn">Update available</span><span class="seg"><b class="on">Image</b><b>Header</b></span></div>
+          <svg class="cursor" id="updCursor" viewBox="0 0 20 26" aria-hidden="true"><path d="M2 1.6v19.6l4.7-4.5 3.1 7.1 3.3-1.4-3.1-7h6.6z" fill="#111" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        </div></div>
+        <div class="cap"><h3>Updates itself</h3><span class="kicker">in a few seconds</span></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="get" id="install" aria-labelledby="get-title">
+  <div class="wrap">
+    <canvas class="mark" id="mark" aria-hidden="true"></canvas>
+    <h2 class="section-title" id="get-title">Get uFits</h2>
+    <div class="install">
+      <div class="install-head"><span>Paste this in Terminal</span><button class="copy" type="button" data-copy="cmd2">Copy</button></div>
+      <div class="install-cmd"><span class="sigil" aria-hidden="true">$ </span><code id="cmd2">curl -fsSL https://github.com/<wbr>lmytime/<wbr>uFits/<wbr>releases/<wbr>latest/<wbr>download/<wbr><span class="nobr">install.sh | sh</span></code></div>
+    </div>
+    <p class="meta">
+      <a href="https://github.com/lmytime/uFits/releases/latest">uFits.dmg</a>
+      <span>macOS 11 or later</span>
+      <span>Apple silicon and Intel</span>
+      <span>Free and open source</span>
+    </p>
+  </div>
+</section>
+</main>
+
+<footer class="wrap foot">
+  <span>uFits</span>
+  <a href="https://github.com/lmytime/uFits">GitHub</a>
+  <a href="https://github.com/lmytime/uFits/releases">Releases</a>
+  <a href="https://github.com/lmytime/uFits/blob/main/LICENSE">BSD 3-Clause License</a>
+</footer>
 
 <script>
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
+  const root = document.documentElement;
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const token = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const listeners = [];
-  const onTheme = (fn) => listeners.push(fn);
-  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => listeners.forEach((f) => f()));
-  new MutationObserver(() => listeners.forEach((f) => f())).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  const isDark = () => (root.dataset.theme ? root.dataset.theme === "dark" : darkQuery.matches);
+  const token = (name) => getComputedStyle(root).getPropertyValue(name).trim();
+  const themeHooks = [];
+  const onTheme = (fn) => themeHooks.push(fn);
+  const themeChanged = () => themeHooks.forEach((fn) => fn());
+  darkQuery.addEventListener("change", themeChanged);
+  new MutationObserver(themeChanged).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
 
-  // ---- Copy the install command -------------------------------------------
+  const clamp = (x, lo = 0, hi = 1) => (x < lo ? lo : x > hi ? hi : x);
+  const lerp = (a, b, t) => a + (b - a) * t;
+  function smooth(x) { x = clamp(x); return x * x * (3 - 2 * x); }
+  function inOut(x) { x = clamp(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+  function outCubic(x) { return 1 - Math.pow(1 - clamp(x), 3); }
+
+  // The theme's colours, read once a theme.
+  const C = {};
+  function readColors() {
+    for (const n of ["win-content", "win-line", "win-dim", "win-text", "win-bar", "plot-ink", "accent", "img-ground", "doc", "doc-fold", "finder-dim", "star"])
+      C[n] = token("--" + n);
+  }
+  readColors();
+  onTheme(readColors);
+
+  // ---- Copy the install command ---------------------------------------------
   for (const button of document.querySelectorAll("[data-copy]")) {
     button.addEventListener("click", () => {
       const code = $(button.dataset.copy);
@@ -325,7 +731,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     });
   }
 
-  // ---- Seeded random numbers, so the example looks the same every time ----
+  // ---- Seeded random numbers, so the examples look the same every time -----
   function random(seed) {
     return () => {
       seed = (seed + 0x6d2b79f5) | 0;
@@ -337,87 +743,195 @@ canvas.fill { width: 100%; height: 100%; display: block; }
   const rand = random(4535);
   const gauss = () => (rand() + rand() + rand() + rand() + rand() + rand() - 3) * 1.4142;
 
-  // ---- Night sky (dark stars on the light theme: a photographic plate) ----
-  const sky = $("sky");
-  const skyCtx = sky.getContext("2d");
-  let stars = [], skyW = 0, skyH = 0, skyDpr = 1, skyColor = "#fff", skyLast = 0, skyVisible = true;
-  function sizeSky() {
-    const box = sky.getBoundingClientRect();
-    skyDpr = Math.min(window.devicePixelRatio || 1, 2);
-    skyW = box.width;
-    skyH = box.height;
-    sky.width = Math.round(skyW * skyDpr);
-    sky.height = Math.round(skyH * skyDpr);
-    const r = random(7);
-    const n = Math.min(420, Math.round((skyW * skyH) / 4200));
-    stars = Array.from({ length: n }, () => ({
-      x: r() * skyW, y: r() * skyH, size: 0.35 + Math.pow(r(), 4) * 1.6, phase: r() * 6.283, speed: 0.3 + r() * 1.1,
-    }));
-    // None behind the words, where a star would read as a stray dot.
-    const clear = [...document.querySelectorAll(".top > *, .pitch > *")].map((el) => {
-      const b = el.getBoundingClientRect();
-      return { x0: b.left - box.left - 8, x1: b.right - box.left + 8, y0: b.top - box.top - 6, y1: b.bottom - box.top + 6 };
-    });
-    stars = stars.filter((s) => !clear.some((c) => s.x > c.x0 && s.x < c.x1 && s.y > c.y0 && s.y < c.y1));
-    skyColor = token("--star");
-    drawSky(performance.now());
-  }
-  function drawSky(t) {
-    skyCtx.setTransform(skyDpr, 0, 0, skyDpr, 0, 0);
-    skyCtx.clearRect(0, 0, skyW, skyH);
-    skyCtx.fillStyle = skyColor;
-    for (const s of stars) {
-      const twinkle = reduceMotion ? 0.75 : 0.45 + 0.55 * (0.5 + 0.5 * Math.sin((t / 1000) * s.speed + s.phase));
-      skyCtx.globalAlpha = twinkle * (0.35 + 0.65 * Math.min(1, s.size));
-      skyCtx.beginPath();
-      skyCtx.arc(s.x, s.y, s.size, 0, 6.2832);
-      skyCtx.fill();
+  // A canvas at the screen's resolution (2x at most), drawn in CSS pixels.
+  function fit(canvas) {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const pw = Math.max(1, Math.round(w * dpr)), ph = Math.max(1, Math.round(h * dpr));
+    if (canvas.width !== pw || canvas.height !== ph) {
+      canvas.width = pw;
+      canvas.height = ph;
     }
-    skyCtx.globalAlpha = 1;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    return { ctx, w, h, dpr };
   }
-  function animateSky(t) {
-    requestAnimationFrame(animateSky);
-    if (!skyVisible || document.hidden || t - skyLast < 60) return;
-    skyLast = t;
-    drawSky(t);
-  }
-  sizeSky();
-  new ResizeObserver(sizeSky).observe(sky);
-  if (document.fonts) document.fonts.ready.then(sizeSky);   // the words move once the fonts arrive
-  new IntersectionObserver(([e]) => (skyVisible = e.isIntersecting)).observe(sky);
-  onTheme(() => { skyColor = token("--star"); drawSky(performance.now()); });
-  if (!reduceMotion) requestAnimationFrame(animateSky);
+  const offscreen = (w, h) => Object.assign(document.createElement("canvas"), { width: w, height: h });
 
-  // ---- The example file ------------------------------------------------------
-  // HDU 1: a spiral galaxy in a star field (counts, before any stretch).
-  const IW = 720, IH = 480;
-  const pixels = new Float32Array(IW * IH);
-  function addStar(cx, cy, flux, sigma) {
-    const rad = Math.ceil(sigma * 4);
-    const norm = flux / (6.2832 * sigma * sigma);
-    for (let y = Math.max(0, Math.floor(cy - rad)); y <= Math.min(IH - 1, Math.ceil(cy + rad)); y++)
-      for (let x = Math.max(0, Math.floor(cx - rad)); x <= Math.min(IW - 1, Math.ceil(cx + rad)); x++) {
-        const d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
-        pixels[y * IW + x] += norm * Math.exp(-d2 / (2 * sigma * sigma));
-      }
+  // ---- Moving pictures: each plays only while on screen, on a clock of its own
+  const scenes = [];
+  const watcher = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      const s = scenes.find((x) => x.el === e.target);
+      if (!s) continue;
+      s.visible = e.isIntersecting;
+      if (s.visible && reduceMotion) s.frame(s.still);
+    }
+  }, { rootMargin: "60px 0px" });
+  function play(el, frame, { fps = 30, still = 0 } = {}) {
+    const s = { el, frame, fps, still, visible: false, time: 0, due: 0 };
+    scenes.push(s);
+    watcher.observe(el);
+    new ResizeObserver(() => redraw(s)).observe(el);
+    return s;
   }
-  function makeGalaxy() {
+  function redraw(s) {
+    if (s.visible) s.frame(reduceMotion ? s.still : s.time);
+  }
+  onTheme(() => scenes.forEach(redraw));
+  let lastTick = 0;
+  function tick(now) {
+    requestAnimationFrame(tick);
+    const dt = lastTick ? Math.min(50, now - lastTick) : 0;
+    lastTick = now;
+    if (document.hidden) return;
+    for (const s of scenes) {
+      if (!s.visible) continue;
+      s.time += dt;
+      if (s.time < s.due) continue;
+      s.due = s.time + 1000 / s.fps - 3;
+      s.frame(s.time);
+    }
+  }
+  if (!reduceMotion) requestAnimationFrame(tick);
+
+  // ---- Night sky over the top (dark stars on the light theme) --------------
+  {
+    const sky = $("sky");
+    let stars = [];
+    const place = () => {
+      const box = sky.getBoundingClientRect();
+      const r = random(7);
+      const n = Math.min(420, Math.round((box.width * box.height) / 4200));
+      stars = Array.from({ length: n }, () => ({
+        x: r() * box.width, y: r() * box.height, size: 0.35 + Math.pow(r(), 4) * 1.6, phase: r() * 6.283, speed: 0.3 + r() * 1.1,
+      }));
+      // None behind the words, where a star would read as a stray dot.
+      const clear = [...document.querySelectorAll(".top .wrap > *, .pitch > *, .steps")].map((el) => {
+        const b = el.getBoundingClientRect();
+        return { x0: b.left - box.left - 8, x1: b.right - box.left + 8, y0: b.top - box.top - 6, y1: b.bottom - box.top + 6 };
+      });
+      stars = stars.filter((s) => !clear.some((c) => s.x > c.x0 && s.x < c.x1 && s.y > c.y0 && s.y < c.y1));
+    };
+    const s = play(sky, (t) => {
+      const { ctx, w, h } = fit(sky);
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = C.star;
+      for (const st of stars) {
+        const twinkle = reduceMotion ? 0.75 : 0.45 + 0.55 * (0.5 + 0.5 * Math.sin((t / 1000) * st.speed + st.phase));
+        ctx.globalAlpha = twinkle * (0.35 + 0.65 * Math.min(1, st.size));
+        ctx.beginPath();
+        ctx.arc(st.x, st.y, st.size, 0, 6.2832);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }, { fps: 16 });
+    new ResizeObserver(() => { place(); redraw(s); }).observe(sky);
+    if (document.fonts) document.fonts.ready.then(() => { place(); redraw(s); });   // the words move once the fonts arrive
+  }
+
+  // ---- The example files ----------------------------------------------------
+  // An image (or a cube's planes, or an RGB image's channels) in floats, and
+  // the three stretches of the preview's menu.
+  function source(data, w, h, { planes = 1, rgb = false } = {}) {
+    const sample = new Float32Array(30000);
+    const r = random(11);
+    for (let k = 0; k < sample.length; k++) sample[k] = data[(r() * data.length) | 0];
+    sample.sort();
+    let min = Infinity, max = -Infinity;
+    for (const v of data) { if (v < min) min = v; if (v > max) max = v; }
+    return { data, w, h, planes, rgb, sample, min, max, params: {}, cache: {} };
+  }
+  function stretchParams(src, kind) {
+    const s = src.sample;
+    const pct = (q) => s[Math.min(s.length - 1, Math.floor(q * s.length))];
+    if (kind === "minmax") return { lo: src.min, hi: src.max, curve: (x) => x };
+    if (kind === "linear") return { lo: pct(0.005), hi: pct(0.995), curve: (x) => x };
+    // Midtones balanced so the sky sits at a quarter of full scale.
+    const med = pct(0.5);
+    const dev = Array.from(s, (v) => Math.abs(v - med)).sort((a, b) => a - b);
+    const mad = dev[dev.length >> 1] * 1.4826 || 1;
+    const lo = med - 2.8 * mad, hi = pct(0.9998);
+    const xb = (med - lo) / (hi - lo), t = 0.25;
+    const m = (xb * (1 - t)) / (xb - 2 * t * xb + t);
+    return { lo, hi, curve: (x) => ((m - 1) * x) / ((2 * m - 1) * x - m) };
+  }
+  function level(src, kind) {
+    const p = src.params[kind] || (src.params[kind] = stretchParams(src, kind));
+    const span = p.hi - p.lo || 1;
+    return (v) => {
+      const x = (v - p.lo) / span;
+      return x <= 0 ? 0 : x >= 1 ? 1 : p.curve(x);
+    };
+  }
+  // The image (or one plane), stretched, on a canvas of its own size.
+  function stretched(src, kind, plane = 0) {
+    const key = kind + ":" + plane;
+    if (src.cache[key]) return src.cache[key];
+    const f = level(src, kind), n = src.w * src.h, d = src.data;
+    const img = new ImageData(src.w, src.h), o = img.data;
+    for (let k = 0; k < n; k++) {
+      if (src.rgb) {
+        o[4 * k] = 255 * f(d[k]);
+        o[4 * k + 1] = 255 * f(d[n + k]);
+        o[4 * k + 2] = 255 * f(d[2 * n + k]);
+      } else {
+        o[4 * k] = o[4 * k + 1] = o[4 * k + 2] = 255 * f(d[plane * n + k]);
+      }
+      o[4 * k + 3] = 255;
+    }
+    const c = offscreen(src.w, src.h);
+    c.getContext("2d").putImageData(img, 0, 0);
+    return (src.cache[key] = c);
+  }
+
+  // Runs fn(j) for j = 0 … n-1, letting the page run every few milliseconds.
+  const later = () => new Promise((resolve) => setTimeout(resolve, 0));
+  async function eachRow(n, fn) {
+    let t0 = performance.now();
+    for (let j = 0; j < n; j++) {
+      fn(j);
+      if (performance.now() - t0 > 10) {
+        await later();
+        t0 = performance.now();
+      }
+    }
+  }
+
+  // A spiral galaxy in a star field (counts, before any stretch).
+  const IW = 720, IH = 480, STARS = [];
+  async function makeGalaxy() {
+    const px = new Float32Array(IW * IH);
+    const addStar = (cx, cy, flux, sigma) => {
+      const rad = Math.ceil(sigma * 4), norm = flux / (6.2832 * sigma * sigma);
+      for (let y = Math.max(0, Math.floor(cy - rad)); y <= Math.min(IH - 1, Math.ceil(cy + rad)); y++)
+        for (let x = Math.max(0, Math.floor(cx - rad)); x <= Math.min(IW - 1, Math.ceil(cx + rad)); x++) {
+          const d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+          px[y * IW + x] += norm * Math.exp(-d2 / (2 * sigma * sigma));
+        }
+    };
     const cx = IW * 0.53, cy = IH * 0.5, scale = IH * 0.44;
     const ang = -0.45, ca = Math.cos(ang), sa = Math.sin(ang);
-    for (let j = 0; j < IH; j++)
+    await eachRow(IH, (j) => {
       for (let i = 0; i < IW; i++) {
         const x = (i - cx) / scale, y = (j - cy) / scale;
         const xr = x * ca - y * sa, yr = (x * sa + y * ca) / 0.58;
         const r = Math.sqrt(xr * xr + yr * yr) + 1e-6;
         const phase = Math.atan2(yr, xr) - Math.log(r) / 0.3;
         const c = 0.5 + 0.5 * Math.cos(2 * phase);
-        const arms = c * c * c;
-        let v = Math.exp(-r / 0.23) * (0.22 + 1.6 * arms) + 3.2 * Math.exp(-Math.pow(r / 0.055, 1.1));
+        let v = Math.exp(-r / 0.23) * (0.22 + 1.6 * c * c * c) + 3.2 * Math.exp(-Math.pow(r / 0.055, 1.1));
         const lane = 0.5 + 0.5 * Math.cos(2 * phase - 0.9);
         v *= 1 - 0.4 * Math.pow(lane, 6) * Math.exp(-r / 0.5);
-        pixels[j * IW + i] = 100 + 1600 * v + gauss() * 5;
+        px[j * IW + i] = 100 + 1600 * v + gauss() * 5;
       }
-    for (let k = 0; k < 230; k++) addStar(rand() * IW, rand() * IH, 300 + Math.pow(rand(), 5) * 90000, 0.9 + rand() * 0.6);
+    });
+    for (let k = 0; k < 230; k++) {
+      const s = { x: rand() * IW, y: rand() * IH, flux: 300 + Math.pow(rand(), 5) * 90000 };
+      STARS.push(s);
+      addStar(s.x, s.y, s.flux, 0.9 + rand() * 0.6);
+    }
     for (let k = 0; k < 16; k++) {   // faint galaxies far behind
       const gx = rand() * IW, gy = rand() * IH, a = 2 + rand() * 4, b = a * (0.3 + rand() * 0.6), t = rand() * 3.1416;
       const f = 6 + rand() * 30;
@@ -425,60 +939,122 @@ canvas.fill { width: 100%; height: 100%; display: block; }
         for (let x = Math.max(0, Math.floor(gx - 3 * a)); x < Math.min(IW, gx + 3 * a); x++) {
           const dx = x - gx, dy = y - gy;
           const u = (dx * Math.cos(t) + dy * Math.sin(t)) / a, w = (-dx * Math.sin(t) + dy * Math.cos(t)) / b;
-          pixels[y * IW + x] += f * Math.exp(-(u * u + w * w) / 2);
+          px[y * IW + x] += f * Math.exp(-(u * u + w * w) / 2);
         }
     }
-  }
-  // The three stretches of the preview's menu.
-  function stretched(kind) {
-    const sample = new Float32Array(30000);
-    const r = random(11);
-    for (let k = 0; k < sample.length; k++) sample[k] = pixels[(r() * pixels.length) | 0];
-    sample.sort();
-    const pct = (q) => sample[Math.min(sample.length - 1, Math.floor(q * sample.length))];
-    let lo, hi, curve;
-    if (kind === "minmax") {
-      lo = Infinity; hi = -Infinity;
-      for (const v of pixels) { if (v < lo) lo = v; if (v > hi) hi = v; }
-      curve = (x) => x;
-    } else if (kind === "linear") {
-      lo = pct(0.005); hi = pct(0.995);
-      curve = (x) => x;
-    } else {   // midtones balanced so the sky sits at a quarter of full scale
-      const med = pct(0.5);
-      const dev = Array.from(sample, (v) => Math.abs(v - med)).sort((a, b) => a - b);
-      const mad = dev[dev.length >> 1] * 1.4826 || 1;
-      lo = med - 2.8 * mad; hi = pct(0.9998);
-      const xb = (med - lo) / (hi - lo), t = 0.25;
-      const m = (xb * (1 - t)) / (xb - 2 * t * xb + t);
-      curve = (x) => ((m - 1) * x) / ((2 * m - 1) * x - m);
-    }
-    const out = new ImageData(IW, IH);
-    const span = hi - lo || 1;
-    for (let k = 0; k < pixels.length; k++) {
-      let x = (pixels[k] - lo) / span;
-      x = x <= 0 ? 0 : x >= 1 ? 1 : curve(x);
-      const g = Math.round(x * 255);
-      out.data[4 * k] = out.data[4 * k + 1] = out.data[4 * k + 2] = g;
-      out.data[4 * k + 3] = 255;
-    }
-    return out;
+    return source(px, IW, IH);
   }
 
-  // HDU 2: a TESS-like light curve, two-minute cadence, with transits.
+  // A nebula in colour, as an RGB XISF image: glowing gas, dust, young stars.
+  async function makeNebula() {
+    const W = 480, H = 320, n = W * H, d = new Float32Array(3 * n);
+    const hash = (x, y, s) => {
+      let h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(s, 1442695041);
+      h = Math.imul(h ^ (h >>> 13), 1274126177);
+      return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+    };
+    const noise = (x, y, s) => {
+      const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+      const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+      const a = hash(xi, yi, s), b = hash(xi + 1, yi, s), c = hash(xi, yi + 1, s), e = hash(xi + 1, yi + 1, s);
+      return a + (b - a) * u + (c - a) * v + (a - b - c + e) * u * v;
+    };
+    const fbm = (x, y, s) => {
+      let sum = 0, amp = 0.5;
+      for (let o = 0; o < 5; o++) { sum += amp * noise(x, y, s + o); x *= 2.02; y *= 2.02; amp *= 0.5; }
+      return sum;
+    };
+    const cx = W * 0.47, cy = H * 0.5;
+    await eachRow(H, (j) => {
+      for (let i = 0; i < W; i++) {
+        const x = (i / H) * 3, y = (j / H) * 3;
+        const dx = (i - cx) / H, dy = (j - cy) / H, rr = Math.sqrt(dx * dx + 1.3 * dy * dy);
+        const warp = fbm(x + 3.1, y + 1.7, 9) * 1.5;
+        const gas = fbm(x + warp, y - 0.6 * warp, 1);
+        const glow = Math.exp(-rr / 0.2);
+        const ha = Math.pow(clamp(gas * 1.35 - 0.33), 1.5) * (0.3 + 1.6 * glow) + 1.6 * Math.exp(-rr / 0.05);
+        const o3 = Math.pow(clamp(fbm(1.4 * x - 0.4 * warp, 1.4 * y, 5) * 1.35 - 0.38), 2) * (0.15 + 2.2 * glow);
+        const dust = 1 - 0.85 * smooth((fbm(1.8 * x + 7, 1.8 * y - 3, 3) - 0.47) * 5) * (1 - 0.6 * glow);
+        const k = j * W + i;
+        d[k] = 60 + 1100 * (ha + 0.15 * o3) * dust + 3 * gauss();
+        d[n + k] = 60 + 1100 * (0.3 * ha + 0.9 * o3) * dust + 3 * gauss();
+        d[2 * n + k] = 60 + 1100 * (0.38 * ha + 1.0 * o3 + 0.12 * glow) * dust + 3 * gauss();
+      }
+    });
+    const r = random(29);
+    for (let k = 0; k < 260; k++) {
+      const sx = r() * W, sy = r() * H, flux = 200 + Math.pow(r(), 6) * 60000, sigma = 0.8 + r() * 0.5, hue = r();
+      const tint = hue < 0.5 ? [0.85, 0.92, 1.1] : hue < 0.85 ? [1, 0.98, 0.96] : [1.1, 0.95, 0.8];
+      const rad = Math.ceil(sigma * 4), norm = flux / (6.2832 * sigma * sigma);
+      for (let y = Math.max(0, Math.floor(sy - rad)); y <= Math.min(H - 1, Math.ceil(sy + rad)); y++)
+        for (let x = Math.max(0, Math.floor(sx - rad)); x <= Math.min(W - 1, Math.ceil(sx + rad)); x++) {
+          const v = norm * Math.exp(-((x - sx) ** 2 + (y - sy) ** 2) / (2 * sigma * sigma));
+          for (let c = 0; c < 3; c++) d[c * n + y * W + x] += v * tint[c];
+        }
+    }
+    return source(d, W, H, { rgb: true });
+  }
+
+  // A cube of 21 cm line emission from a rotating disk galaxy, plane by
+  // plane in velocity: each plane shows the gas moving at its speed.
+  const CW = 216, CH = 152, CN = 32;
+  async function makeCube() {
+    const d = new Float32Array(CW * CH * CN), r = random(23);
+    const sinI = Math.sin(1.0), cosI = Math.cos(1.0), cp = Math.cos(0.45), sp = Math.sin(0.45);
+    // Noise: random on a grid four pixels apart, smoothly in between.
+    const NW = Math.ceil(CW / 4) + 2, NH = Math.ceil(CH / 4) + 2;
+    const noise = Array.from({ length: CN }, () => Float32Array.from({ length: NW * NH }, () => (r() + r() + r() + r() - 2) * 1.73));
+    const g = (k, i, j) => {
+      const x = i / 4, y = j / 4, xi = x | 0, yi = y | 0, n = noise[k];
+      const u = smooth(x - xi), v = smooth(y - yi);
+      return (n[yi * NW + xi] * (1 - u) + n[yi * NW + xi + 1] * u) * (1 - v) + (n[(yi + 1) * NW + xi] * (1 - u) + n[(yi + 1) * NW + xi + 1] * u) * v;
+    };
+    await eachRow(CH, (j) => {
+      for (let i = 0; i < CW; i++) {
+        const x = (i - CW / 2) / (CH * 0.42), y = (j - CH / 2) / (CH * 0.42);
+        const xr = x * cp + y * sp, yr = (-x * sp + y * cp) / cosI;
+        const R = Math.hypot(xr, yr) + 1e-6, th = Math.atan2(yr, xr);
+        const arms = 0.6 + 0.4 * Math.cos(2 * th - 4 * Math.log(R + 0.08));
+        const disk = Math.exp(-R / 0.55) * arms * (1 - 0.65 * Math.exp(-R / 0.12)) * (R < 1.25 ? 1 : Math.exp(-(R - 1.25) * 7));
+        const v = Math.tanh(R / 0.2) * Math.cos(th) * sinI;
+        for (let k = 0; k < CN; k++) {
+          const vc = -0.92 + (1.84 * k) / (CN - 1);
+          d[k * CW * CH + j * CW + i] = 1000 * disk * Math.exp(-((v - vc) ** 2) / (2 * 0.06 * 0.06)) + 14 * g(k, i, j);
+        }
+      }
+    });
+    return source(d, CW, CH, { planes: CN });
+  }
+
+  // A TESS-like light curve, two-minute cadence, with transits.
   const LC = { time: [], flux: [], err: [], quality: [] };
   for (let k = 0; k < 3600; k++) {
     const t = 1504 + k / 720;
     const phase = ((((t - 1504.62) / 1.7286) % 1) + 1) % 1;
     const dp = Math.min(phase, 1 - phase) * 1.7286;   // days from mid-transit
     const transit = dp < 0.055 ? 1 : dp < 0.075 ? 1 - (dp - 0.055) / 0.02 : 0;
-    const f = 1000 * (1 + 0.0011 * Math.sin((2 * Math.PI * t) / 2.3) - 0.0062 * transit + 0.00085 * gauss());
     LC.time.push(t);
-    LC.flux.push(f);
+    LC.flux.push(1000 * (1 + 0.0011 * Math.sin((2 * Math.PI * t) / 2.3) - 0.0062 * transit + 0.00085 * gauss()));
     LC.err.push(0.85 + 0.05 * rand());
     LC.quality.push(rand() < 0.01 ? 1024 : 0);
   }
-  // HDU 3: a catalog around a cluster.
+  // A galaxy's spectrum: the 4000 Å break, absorption, and the lines of its gas.
+  const SPEC = { wave: [], flux: [], ivar: [] };
+  {
+    const emit = [[3727, 0.9], [4861, 0.55], [4959, 0.42], [5007, 1.25], [6548, 0.3], [6563, 2.3], [6584, 0.85], [6717, 0.42], [6731, 0.32]];
+    const absorb = [[3934, 0.3], [3969, 0.25], [4304, 0.1], [5175, 0.12], [5893, 0.16]];
+    for (let k = 0; k < 2700; k++) {
+      const w = 3800 + 2 * k;
+      let f = 0.62 + 0.32 / (1 + Math.exp(-(w - 4000) / 60)) + 0.00003 * (w - 4000);
+      for (const [c, a] of emit) f += a * Math.exp(-((w - c) ** 2) / 20.5);
+      for (const [c, a] of absorb) f -= a * Math.exp(-((w - c) ** 2) / 72);
+      const noise = w > 8500 ? 0.07 : 0.035;
+      SPEC.wave.push(w);
+      SPEC.flux.push(1.4 * (f + noise * gauss()));
+      SPEC.ivar.push(1 / (1.96 * noise * noise));
+    }
+  }
+  // A catalog around a cluster.
   const CAT = { ra: [], dec: [], mag: [], cls: [] };
   for (let k = 0; k < 2500; k++) {
     const inCluster = rand() < 0.3;
@@ -489,54 +1065,81 @@ canvas.fill { width: 100%; height: 100%; display: block; }
   }
 
   // Headers, card by card: [keyword, value, comment], or [COMMENT|HISTORY, text], or [END].
-  const HEADERS = [
-    [["SIMPLE", "T", "conforms to FITS standard"], ["BITPIX", "8", "array data type"], ["NAXIS", "0", "number of array dimensions"],
-     ["EXTEND", "T", ""], ["DATE", "'2026-10-09'", "date the file was written"], ["OBJECT", "'NGC 4535'", "target"],
-     ["ORIGIN", "'uFits example'", ""], ["COMMENT", "An example file for the uFits homepage."], ["END"]],
-    [["XTENSION", "'IMAGE'", "image extension"], ["BITPIX", "-32", "array data type"], ["NAXIS", "2", "number of array dimensions"],
-     ["NAXIS1", "2048", ""], ["NAXIS2", "2048", ""], ["PCOUNT", "0", "number of parameters"], ["GCOUNT", "1", "number of groups"],
-     ["EXTNAME", "'SCI'", "extension name"], ["BUNIT", "'ELECTRONS/S'", "brightness unit"], ["EXPTIME", "1200.0", "[s] exposure time"],
-     ["FILTER", "'r'", ""], ["CTYPE1", "'RA---TAN'", ""], ["CTYPE2", "'DEC--TAN'", ""],
-     ["CRVAL1", "188.5845833", "[deg] RA at the reference pixel"], ["CRVAL2", "8.1977778", "[deg] Dec at the reference pixel"],
-     ["CRPIX1", "1024.5", ""], ["CRPIX2", "1024.5", ""], ["CD1_1", "-6.944E-05", "[deg/pixel]"], ["CD2_2", "6.944E-05", "[deg/pixel]"],
-     ["HISTORY", "Bias, dark and flat corrected."], ["END"]],
-    [["XTENSION", "'BINTABLE'", "binary table extension"], ["BITPIX", "8", "array data type"], ["NAXIS", "2", "number of array dimensions"],
-     ["NAXIS1", "20", "length of dimension 1"], ["NAXIS2", "3600", "length of dimension 2"], ["PCOUNT", "0", "number of group parameters"],
-     ["GCOUNT", "1", "number of groups"], ["TFIELDS", "4", "number of table fields"],
-     ["TTYPE1", "'TIME'", "column title"], ["TFORM1", "'D'", ""], ["TUNIT1", "'BTJD'", "BJD - 2457000"],
-     ["TTYPE2", "'PDCSAP_FLUX'", ""], ["TFORM2", "'E'", ""], ["TUNIT2", "'e-/s'", ""],
-     ["TTYPE3", "'PDCSAP_FLUX_ERR'", ""], ["TFORM3", "'E'", ""], ["TUNIT3", "'e-/s'", ""],
-     ["TTYPE4", "'QUALITY'", ""], ["TFORM4", "'J'", ""], ["EXTNAME", "'LIGHTCURVE'", "extension name"], ["END"]],
-    [["XTENSION", "'BINTABLE'", "binary table extension"], ["BITPIX", "8", "array data type"], ["NAXIS", "2", "number of array dimensions"],
-     ["NAXIS1", "36", "length of dimension 1"], ["NAXIS2", "2500", "length of dimension 2"], ["PCOUNT", "0", "number of group parameters"],
-     ["GCOUNT", "1", "number of groups"], ["TFIELDS", "5", "number of table fields"],
-     ["TTYPE1", "'ID'", ""], ["TFORM1", "'K'", ""], ["TTYPE2", "'RA'", ""], ["TFORM2", "'D'", ""], ["TUNIT2", "'deg'", ""],
-     ["TTYPE3", "'DEC'", ""], ["TFORM3", "'D'", ""], ["TUNIT3", "'deg'", ""], ["TTYPE4", "'MAG'", ""], ["TFORM4", "'E'", ""],
-     ["TTYPE5", "'CLASS'", ""], ["TFORM5", "'J'", ""], ["EXTNAME", "'CATALOG'", "extension name"], ["END"]],
-  ];
-  const HDUS = [
-    { title: "HDU 0 — no data", name: "HDU 0", picture: null, table: false, info: "" },
-    { title: "HDU 1  SCI — 2048 × 2048 float32", name: "HDU 1 SCI", picture: "image", table: false,
-      info: "2048 × 2048  ·  float32" },
-    { title: "HDU 2  LIGHTCURVE — PDCSAP_FLUX vs TIME", name: "HDU 2 LIGHTCURVE", picture: "lc", table: true,
-      info: "3600 rows", rows: "3600 rows × 4 columns" },
-    { title: "HDU 3  CATALOG — DEC vs RA", name: "HDU 3 CATALOG", picture: "sky", table: true,
-      info: "2500 rows", rows: "2500 rows × 5 columns" },
-  ];
+  const primary = (cards) => [["SIMPLE", "T", "conforms to FITS standard"], ["BITPIX", "8", "array data type"],
+    ["NAXIS", "0", "number of array dimensions"], ["EXTEND", "T", ""], ...cards, ["END"]];
+  const table = (rows, fields, cards) => [["XTENSION", "'BINTABLE'", "binary table extension"], ["BITPIX", "8", "array data type"],
+    ["NAXIS", "2", "number of array dimensions"], ["NAXIS2", String(rows), "number of rows"], ["PCOUNT", "0", "number of group parameters"],
+    ["GCOUNT", "1", "number of groups"], ["TFIELDS", String(fields), "number of table fields"], ...cards, ["END"]];
+  const H = {
+    gal0: primary([["DATE", "'2026-10-09'", "date the file was written"], ["TELESCOP", "'example'", ""], ["OBJECT", "'NGC 4535'", "target"],
+      ["COMMENT", "An example file for the uFits homepage."]]),
+    sci: [["XTENSION", "'IMAGE'", "image extension"], ["BITPIX", "-32", "array data type"], ["NAXIS", "2", "number of array dimensions"],
+      ["NAXIS1", "3072", ""], ["NAXIS2", "2048", ""], ["PCOUNT", "0", "number of parameters"], ["GCOUNT", "1", "number of groups"],
+      ["EXTNAME", "'SCI'", "extension name"], ["BUNIT", "'ELECTRONS/S'", "brightness unit"], ["EXPTIME", "1200.0", "[s] exposure time"],
+      ["FILTER", "'r'", ""], ["CTYPE1", "'RA---TAN'", ""], ["CTYPE2", "'DEC--TAN'", ""],
+      ["CRVAL1", "188.5845833", "[deg] RA at the reference pixel"], ["CRVAL2", "8.1977778", "[deg] Dec at the reference pixel"],
+      ["CRPIX1", "1536.5", ""], ["CRPIX2", "1024.5", ""], ["CD1_1", "-6.944E-05", "[deg/pixel]"], ["CD2_2", "6.944E-05", "[deg/pixel]"],
+      ["HISTORY", "Bias, dark and flat corrected."], ["END"]],
+    tess0: primary([["TELESCOP", "'TESS'", "telescope"], ["OBJECT", "'TIC 4535'", "target"], ["SECTOR", "21", "observing sector"],
+      ["TESSMAG", "9.812", "[mag] TESS magnitude"], ["TEFF", "5732.0", "[K] effective temperature"]]),
+    lc: table(3600, 4, [["TTYPE1", "'TIME'", "column title"], ["TFORM1", "'D'", ""], ["TUNIT1", "'BTJD'", "BJD - 2457000"],
+      ["TTYPE2", "'PDCSAP_FLUX'", ""], ["TFORM2", "'E'", ""], ["TUNIT2", "'e-/s'", ""],
+      ["TTYPE3", "'PDCSAP_FLUX_ERR'", ""], ["TFORM3", "'E'", ""], ["TUNIT3", "'e-/s'", ""],
+      ["TTYPE4", "'QUALITY'", ""], ["TFORM4", "'J'", ""], ["EXTNAME", "'LIGHTCURVE'", "extension name"]]),
+    sdss0: primary([["TELESCOP", "'SDSS 2.5-M'", ""], ["OBJECT", "'NGC 4535 HII'", "target"], ["PLATE", "4535", ""],
+      ["Z", "0.00653", "redshift"]]),
+    coadd: table(2700, 3, [["TTYPE1", "'FLUX'", ""], ["TFORM1", "'E'", ""], ["TUNIT1", "'1E-17 erg/s/cm2/A'", ""],
+      ["TTYPE2", "'LOGLAM'", "log10 of wavelength"], ["TFORM2", "'E'", ""], ["TTYPE3", "'IVAR'", "inverse variance"],
+      ["TFORM3", "'E'", ""], ["EXTNAME", "'COADD'", "extension name"]]),
+    gaia0: primary([["ORIGIN", "'example'", ""], ["OBJECT", "'Virgo field'", "target"]]),
+    cat: table(2500, 5, [["TTYPE1", "'ID'", ""], ["TFORM1", "'K'", ""], ["TTYPE2", "'RA'", ""], ["TFORM2", "'D'", ""], ["TUNIT2", "'deg'", ""],
+      ["TTYPE3", "'DEC'", ""], ["TFORM3", "'D'", ""], ["TUNIT3", "'deg'", ""], ["TTYPE4", "'MAG'", ""], ["TFORM4", "'E'", ""],
+      ["TTYPE5", "'CLASS'", ""], ["TFORM5", "'J'", ""], ["EXTNAME", "'CATALOG'", "extension name"]]),
+    cube: [["SIMPLE", "T", "conforms to FITS standard"], ["BITPIX", "-32", "array data type"], ["NAXIS", "3", "number of array dimensions"],
+      ["NAXIS1", String(CW), ""], ["NAXIS2", String(CH), ""], ["NAXIS3", String(CN), ""], ["OBJECT", "'NGC 2403'", "target"],
+      ["BUNIT", "'JY/BEAM'", ""], ["CTYPE3", "'VRAD'", "radio velocity"], ["CRVAL3", "132000.0", "[m/s]"], ["CDELT3", "-5200.0", "[m/s]"],
+      ["RESTFRQ", "1.420405752E+09", "[Hz] HI 21 cm"], ["END"]],
+    m42: [["geometry", "'2400:1600:3'", "width:height:channels"], ["sampleFormat", "'Float32'", ""], ["colorSpace", "'RGB'", ""],
+      ["bounds", "'0:1'", ""], ["OBJECT", "'M42'", "Orion Nebula"], ["EXPTIME", "300.0", "[s] exposure time"],
+      ["FILTER", "'L-eNhance'", ""], ["CREATOR", "'PixInsight'", ""], ["END"]],
+  };
 
-  // ---- Views -----------------------------------------------------------------
+  // The files in the Finder window, and what the preview shows of each.
+  const FILES = [
+    { name: "ngc4535.fits", ext: "FITS", thumb: "image", start: 1, hdus: [
+      { title: "HDU 0 — no data", name: "HDU 0", header: H.gal0 },
+      { title: "HDU 1  SCI — 3072 × 2048 float32", name: "HDU 1 SCI", picture: "image", info: "3072 × 2048  ·  float32", header: H.sci }] },
+    { name: "tess-lc.fits", ext: "FITS", thumb: "lc", start: 1, hdus: [
+      { title: "HDU 0 — no data", name: "HDU 0", header: H.tess0 },
+      { title: "HDU 1  LIGHTCURVE — PDCSAP_FLUX vs TIME", name: "HDU 1 LIGHTCURVE", picture: "lc", table: "lc",
+        info: "3600 rows", rows: "3600 rows × 4 columns", header: H.lc }] },
+    { name: "sdss-spec.fits", ext: "FITS", thumb: "spec", start: 1, hdus: [
+      { title: "HDU 0 — no data", name: "HDU 0", header: H.sdss0 },
+      { title: "HDU 1  COADD — FLUX vs WAVELENGTH", name: "HDU 1 COADD", picture: "spec", table: "spec",
+        info: "2700 rows", rows: "2700 rows × 3 columns", header: H.coadd }] },
+    { name: "gaia-cluster.fits", ext: "FITS", thumb: "sky", start: 1, hdus: [
+      { title: "HDU 0 — no data", name: "HDU 0", header: H.gaia0 },
+      { title: "HDU 1  CATALOG — DEC vs RA", name: "HDU 1 CATALOG", picture: "sky", table: "sky",
+        info: "2500 rows", rows: "2500 rows × 5 columns", header: H.cat }] },
+    { name: "ngc2403-hi.fits", ext: "FITS", thumb: "cube", start: 0, hdus: [
+      { title: `HDU 0 — ${CW} × ${CH} × ${CN} float32`, name: "HDU 0", picture: "cube", info: `${CW} × ${CH} × ${CN}  ·  float32`, header: H.cube }] },
+    { name: "m42.xisf", ext: "XISF", thumb: "rgb", start: 0, hdus: [
+      { title: "Image 1 — 2400 × 1600 × 3 Float32", name: "Image 1", picture: "rgb", info: "2400 × 1600 × 3  ·  float32  ·  RGB", header: H.m42 }] },
+  ];
+  let GALAXY = null, NEBULA = null, CUBE = null, ready = false;
+  const imageOf = (kind) => (kind === "rgb" ? NEBULA : kind === "cube" ? CUBE : GALAXY);
+
+  // ---- Drawing what the preview shows ---------------------------------------
   const escape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
   // Keys in a column, values and comments lined up, as uFits lays them out.
-  function headerHTML(h) {
-    const cards = HEADERS[h];
+  function headerLines(title, cards) {
     let kw = 8, vw = 0;
-    for (const c of cards) {
+    for (const c of cards)
       if (c.length === 3) {
         kw = Math.max(kw, c[0].length);
         if (c[2]) vw = Math.max(vw, c[1].length);
       }
-    }
-    const lines = [`<span class="h">——— ${escape(HDUS[h].title.split(" — ")[0])} ———</span>`];
+    const lines = [`<span class="h">——— ${escape(title)} ———</span>`];
     for (const c of cards) {
       if (c.length === 1) lines.push(`<span class="k">END</span>`);
       else if (c.length === 2) lines.push(`<span class="k">${c[0]}</span>${" ".repeat(kw - c[0].length + 3)}<span class="c">${escape(c[1])}</span>`);
@@ -546,23 +1149,24 @@ canvas.fill { width: 100%; height: 100%; display: block; }
         lines.push(line);
       }
     }
-    return lines.join("\n");
+    return lines;
   }
-  function tableHTML(h) {
-    const n = 80;
-    let head, rows = [];
-    if (h === 2) {
-      head = ["#", "TIME", "PDCSAP_FLUX", "PDCSAP_FLUX_ERR", "QUALITY"];
-      for (let k = 0; k < n; k++)
-        rows.push([k + 1, LC.time[k].toPrecision(11), LC.flux[k].toPrecision(7), LC.err[k].toPrecision(4), LC.quality[k]]);
-    } else {
-      head = ["#", "ID", "RA", "DEC", "MAG", "CLASS"];
-      for (let k = 0; k < n; k++)
-        rows.push([k + 1, 100001 + k, CAT.ra[k].toPrecision(10), CAT.dec[k].toPrecision(9), CAT.mag[k].toPrecision(5), CAT.cls[k]]);
-    }
+  function rowsOf(kind, n) {
+    if (kind === "lc")
+      return { head: ["#", "TIME", "PDCSAP_FLUX", "PDCSAP_FLUX_ERR", "QUALITY"],
+        rows: Array.from({ length: n }, (_, k) => [k + 1, LC.time[k].toPrecision(11), LC.flux[k].toPrecision(7), LC.err[k].toPrecision(4), LC.quality[k]]) };
+    if (kind === "spec")
+      return { head: ["#", "FLUX", "LOGLAM", "IVAR"],
+        rows: Array.from({ length: n }, (_, k) => [k + 1, SPEC.flux[k].toPrecision(5), Math.log10(SPEC.wave[k]).toPrecision(6), SPEC.ivar[k].toPrecision(4)]) };
+    return { head: ["#", "ID", "RA", "DEC", "MAG", "CLASS"],
+      rows: Array.from({ length: n }, (_, k) => [k + 1, 100001 + k, CAT.ra[k].toPrecision(10), CAT.dec[k].toPrecision(9), CAT.mag[k].toPrecision(5), CAT.cls[k]]) };
+  }
+  function tableHTML(kind) {
+    const { head, rows } = rowsOf(kind, 80);
     return `<table><thead><tr>${head.map((t) => `<th>${t}</th>`).join("")}</tr></thead><tbody>` +
       rows.map((r) => `<tr>${r.map((v) => `<td>${v}</td>`).join("")}</tr>`).join("") + "</tbody></table>";
   }
+
   function niceTicks(lo, hi, target) {
     const raw = (hi - lo) / target, p = Math.pow(10, Math.floor(Math.log10(raw)));
     const step = [1, 2, 5, 10].map((m) => m * p).find((s) => s >= raw) || 10 * p;
@@ -570,161 +1174,1023 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(+v.toPrecision(12));
     return out;
   }
-  function drawPlot(kind) {
-    const canvas = $("plotCanvas");
-    const box = canvas.getBoundingClientRect();
-    if (!box.width) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(box.width * dpr);
-    canvas.height = Math.round(box.height * dpr);
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const W = box.width, H = box.height;
-    ctx.fillStyle = token("--win-content");
+  const PLOTS = {
+    lc: { x: LC.time, y: LC.flux, x0: 1504, x1: 1509, y0: 988, y1: 1006, xTitle: "TIME [BTJD]", yTitle: "PDCSAP_FLUX [e-/s]", ticks: 6 },
+    spec: { x: SPEC.wave, y: SPEC.flux, x0: 3800, x1: 9200, y0: 0, y1: 5, xTitle: "WAVELENGTH [Å]", yTitle: "FLUX [1E-17 erg/s/cm2/A]", ticks: 6, line: true },
+    sky: { x: CAT.ra, y: CAT.dec, x0: 188.33, x1: 188.84, y0: 7.93, y1: 8.47, xTitle: "RA [deg]", yTitle: "DEC [deg]", ticks: 5, flipX: true },
+  };
+  // Where a plot's data goes in a W × H box.
+  function plotFrame(W, H, small) {
+    if (small) return { left: 4, top: 4, pw: W - 8, ph: H - 8 };
+    const left = W < 360 ? 44 : 60, right = 14, top = 24, bottom = 32;
+    return { left, top, pw: W - left - right, ph: H - top - bottom };
+  }
+  function plotMap(kind, f) {
+    const p = PLOTS[kind];
+    return {
+      px: (x) => (p.flipX ? f.left + f.pw - ((x - p.x0) / (p.x1 - p.x0)) * f.pw : f.left + ((x - p.x0) / (p.x1 - p.x0)) * f.pw),
+      py: (y) => f.top + f.ph - ((y - p.y0) / (p.y1 - p.y0)) * f.ph,
+    };
+  }
+  // A plot as the preview draws it: its axes, then its data (`small` leaves
+  // out the labels; `upto` draws the first points only, for a catalog).
+  function drawAxes(ctx, W, H, kind, small) {
+    const p = PLOTS[kind], f = plotFrame(W, H, small), { px, py } = plotMap(kind, f);
+    ctx.fillStyle = C["win-content"];
     ctx.fillRect(0, 0, W, H);
-    const left = 62, right = 16, top = 26, bottom = 34;
-    const pw = W - left - right, ph = H - top - bottom;
-    let xs, ys, x0, x1, y0, y1, xTitle, yTitle, flipX = false;
-    if (kind === "lc") {
-      xs = LC.time; ys = LC.flux; x0 = 1504; x1 = 1509; y0 = 988; y1 = 1006;
-      xTitle = "TIME [BTJD]"; yTitle = "PDCSAP_FLUX [e-/s]";
-    } else {
-      xs = CAT.ra; ys = CAT.dec; x0 = 188.33; x1 = 188.84; y0 = 7.93; y1 = 8.47;
-      xTitle = "RA [deg]"; yTitle = "DEC [deg]"; flipX = true;   // RA grows to the left
-    }
-    const px = (x) => (flipX ? left + pw - ((x - x0) / (x1 - x0)) * pw : left + ((x - x0) / (x1 - x0)) * pw);
-    const py = (y) => top + ph - ((y - y0) / (y1 - y0)) * ph;
-    ctx.strokeStyle = token("--win-line");
+    ctx.strokeStyle = C["win-line"];
     ctx.lineWidth = 1;
-    ctx.strokeRect(left - 0.5, top - 0.5, pw + 1, ph + 1);
-    ctx.fillStyle = token("--win-dim");
-    ctx.font = "10px ui-monospace, Menlo, monospace";
+    ctx.strokeRect(f.left - 0.5, f.top - 0.5, f.pw + 1, f.ph + 1);
+    if (small) return;
+    const fs = W < 360 ? 9 : 10;
+    ctx.fillStyle = C["win-dim"];
+    ctx.font = `${fs}px ui-monospace, Menlo, monospace`;
     ctx.textBaseline = "middle";
     ctx.textAlign = "right";
-    for (const t of niceTicks(y0, y1, 5)) {
+    for (const t of niceTicks(p.y0, p.y1, 5)) {
       const y = py(t);
-      ctx.fillText(String(+t.toPrecision(4)), left - 7, y);
-      ctx.fillRect(left - 4, Math.round(y) - 0.5, 4, 1);
+      ctx.fillText(String(+t.toPrecision(4)), f.left - 6, y);
+      ctx.fillRect(f.left - 4, Math.round(y) - 0.5, 4, 1);
     }
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    for (const t of niceTicks(x0, x1, kind === "lc" ? 6 : 5)) {
+    for (const t of niceTicks(p.x0, p.x1, W < 360 ? p.ticks - 2 : p.ticks)) {
       const x = px(t);
-      ctx.fillText(String(+t.toPrecision(6)), x, top + ph + 7);
-      ctx.fillRect(Math.round(x) - 0.5, top + ph, 1, 4);
+      ctx.fillText(String(+t.toPrecision(6)), x, f.top + f.ph + 6);
+      ctx.fillRect(Math.round(x) - 0.5, f.top + f.ph, 1, 4);
     }
     ctx.textAlign = "right";
-    ctx.fillText(xTitle, left + pw, top + ph + 20);
+    ctx.fillText(p.xTitle, f.left + f.pw, f.top + f.ph + 19);
     ctx.textAlign = "left";
     ctx.textBaseline = "bottom";
-    ctx.fillText(yTitle, 6, top - 8);
+    ctx.fillText(p.yTitle, 4, f.top - 7);
+  }
+  function drawData(ctx, W, H, kind, { small = false, upto = Infinity, ink = C["plot-ink"] } = {}) {
+    const p = PLOTS[kind], f = plotFrame(W, H, small), { px, py } = plotMap(kind, f);
     ctx.save();
     ctx.beginPath();
-    ctx.rect(left, top, pw, ph);
+    ctx.rect(f.left, f.top, f.pw, f.ph);
     ctx.clip();
-    ctx.fillStyle = token("--plot-ink");
-    const size = kind === "lc" ? 1.6 : 2;
-    ctx.globalAlpha = kind === "lc" ? 0.8 : 0.75;
-    for (let k = 0; k < xs.length; k++) {
-      if (kind === "sky") {
+    ctx.fillStyle = ctx.strokeStyle = ink;
+    if (p.line) {
+      ctx.lineWidth = small ? 1 : 1.2;
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      for (let k = 0; k < p.x.length; k++) k ? ctx.lineTo(px(p.x[k]), py(p.y[k])) : ctx.moveTo(px(p.x[k]), py(p.y[k]));
+      ctx.stroke();
+    } else if (kind === "sky") {
+      ctx.globalAlpha = 0.75;
+      const scale = small ? 0.16 : f.pw < 300 ? 0.2 : 0.28;
+      for (let k = 0, n = Math.min(upto, p.x.length); k < n; k++) {
+        const i = SKY_ORDER[k];
         ctx.beginPath();
-        ctx.arc(px(xs[k]), py(ys[k]), (26 - CAT.mag[k]) * 0.28, 0, 6.2832);
+        ctx.arc(px(p.x[i]), py(p.y[i]), Math.max(0.5, (26 - CAT.mag[i]) * scale), 0, 6.2832);
         ctx.fill();
-      } else {
-        ctx.fillRect(px(xs[k]) - size / 2, py(ys[k]) - size / 2, size, size);
       }
+    } else {
+      ctx.globalAlpha = 0.8;
+      const size = small ? 1 : 1.6;
+      for (let k = 0; k < p.x.length; k++) ctx.fillRect(px(p.x[k]) - size / 2, py(p.y[k]) - size / 2, size, size);
     }
     ctx.restore();
   }
-  let stretch = "auto", imageReady = false;
-  const sourceCanvas = document.createElement("canvas");
-  sourceCanvas.width = IW;
-  sourceCanvas.height = IH;
-  function drawImage() {
-    const canvas = $("imageCanvas");
-    const box = canvas.getBoundingClientRect();
-    if (!box.width || !imageReady) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(box.width * dpr);
-    canvas.height = Math.round(box.height * dpr);
-    const ctx = canvas.getContext("2d");
-    const s = Math.min(canvas.width / IW, canvas.height / IH);
-    const w = IW * s, h = IH * s;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(sourceCanvas, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+  // A catalog's stars, in the order they appear.
+  const SKY_ORDER = Array.from(CAT.ra, (_, i) => i);
+  {
+    const r = random(5);
+    for (let i = SKY_ORDER.length - 1; i > 0; i--) {
+      const j = Math.floor(r() * (i + 1));
+      [SKY_ORDER[i], SKY_ORDER[j]] = [SKY_ORDER[j], SKY_ORDER[i]];
+    }
   }
-  function restretch() {
-    sourceCanvas.getContext("2d").putImageData(stretched(stretch), 0, 0);
-    drawImage();
+  // An image drawn whole in a box (as the preview does), or filling it.
+  function drawImage(ctx, img, W, H, cover = false) {
+    const s = cover ? Math.max(W / img.width, H / img.height) : Math.min(W / img.width, H / img.height);
+    const w = img.width * s, h = img.height * s;
+    ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
   }
 
-  // ---- The window: HDU menu, mode switch, stretch ----------------------------
-  const menu = $("hduMenu");
-  HDUS.forEach((h, i) => menu.add(new Option(h.title, String(i))));
-  const segPicture = $("segPicture"), segTable = $("segTable"), segHeader = $("segHeader");
-  let hdu = 1, mode = "picture";
+  // ---- The pixel galaxy (the app's icon, cell by cell) -----------------------
+  const ART = ["................................", "................................", "................................",
+    "................................", ".......................s........", "......................sSs.......",
+    "..........,,,,,,,......s........", "........,000000000,,............", ".......,000000,,,,,,,,,.........",
+    "......,0100,,......,,,,,,.......", "......0110,............,,,s.....", "......0*10...,,,.........,,.....",
+    "......0110,,0122110.............", "......,110,0232111210...........", ".......011,022ACA11110..........",
+    "........011,1ACWWA2,111,........", "........,111,2AWWCA1,110........", "..........01111ACA220,110.......",
+    "...........0121112320,011,......", ".............0112210,,0110......", ".....s,.........,,,...01*0......",
+    "......,,,............,0110......", ".......,,,,,,......,,0010,......", ".........,,,,,,,,,000000,.......",
+    "............,,000000000,........", "........S......,,,,,,,..........", "................................",
+    "...................s............", "................................", "................................",
+    "................................", "................................"];
+  const PALETTES = {
+    dusk: { ".": "#161825", F: "#232740", ",": "#1e2133", 0: "#32375a", 1: "#525a89", 2: "#8890be", 3: "#c3c8e6",
+      A: "#d8b886", C: "#efdcb8", W: "#fff8ea", "*": "#e39ab0", s: "#6c74a2", S: "#eceef8" },
+    light: { ".": "#f0eff6", F: "#dedcea", ",": "#e1dfec", 0: "#bbb9d6", 1: "#8988ba", 2: "#5a5d98", 3: "#363a71",
+      A: "#b07a2c", C: "#d49d3a", W: "#f0c457", "*": "#cc7093", s: "#a5a4c8", S: "#33376b" },
+  };
+  const SHAPE = 824 / 1024, RADIUS = 185.4 / 1024;
+  // The cells, with the lighter ring along the icon's edge (as tools/make_icon.py).
+  const CELLS = ART.map((row, i) => [...row].map((c, j) => {
+    const g = 32, half = (SHAPE * g) / 2, rad = RADIUS * g;
+    const dx = Math.max(Math.abs(j + 0.5 - g / 2) - (half - rad), 0);
+    const dy = Math.max(Math.abs(i + 0.5 - g / 2) - (half - rad), 0);
+    return c === "." && rad - Math.hypot(dx, dy) < 1 ? "F" : c;
+  }));
+  const FRONT = "0123ACW*sS";   // the galaxy and its stars; the rest is night
+  function iconShape(ctx, x, y, size) {
+    const s = SHAPE * size, r = RADIUS * size, x0 = x + (size - s) / 2, y0 = y + (size - s) / 2;
+    ctx.beginPath();
+    ctx.moveTo(x0 + r, y0);
+    ctx.arcTo(x0 + s, y0, x0 + s, y0 + s, r);
+    ctx.arcTo(x0 + s, y0 + s, x0, y0 + s, r);
+    ctx.arcTo(x0, y0 + s, x0, y0, r);
+    ctx.arcTo(x0, y0, x0 + s, y0, r);
+    ctx.closePath();
+  }
+  // The icon, one pixel a cell, to be drawn big without smoothing.
+  const iconImages = {};
+  function iconImage(palette) {
+    if (iconImages[palette]) return iconImages[palette];
+    const c = offscreen(32, 32), ctx = c.getContext("2d"), pal = PALETTES[palette];
+    for (let i = 0; i < 32; i++)
+      for (let j = 0; j < 32; j++) {
+        ctx.fillStyle = pal[CELLS[i][j]];
+        ctx.fillRect(j, i, 1, 1);
+      }
+    return (iconImages[palette] = c);
+  }
+  // The icon's night alone, without its galaxy.
+  const plates = {};
+  function plateImage(palette) {
+    if (plates[palette]) return plates[palette];
+    const c = offscreen(32, 32), ctx = c.getContext("2d"), pal = PALETTES[palette];
+    for (let i = 0; i < 32; i++)
+      for (let j = 0; j < 32; j++) {
+        ctx.fillStyle = pal[FRONT.includes(CELLS[i][j]) ? "." : CELLS[i][j]];
+        ctx.fillRect(j, i, 1, 1);
+      }
+    return (plates[palette] = c);
+  }
+  function drawIcon(ctx, x, y, size, palette) {
+    ctx.save();
+    iconShape(ctx, x, y, size);
+    ctx.clip();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(iconImage(palette), x, y, size, size);
+    ctx.restore();
+  }
+
+  // ---- The top: Finder, a file selected, Space, its preview ---------------
+  const sceneEl = $("scene"), grid = $("grid"), cursor = $("cursor"), keycap = $("keycap"), ql = $("ql");
+  const items = FILES.map((f, i) => {
+    const el = document.createElement("div");
+    el.className = "file";
+    el.id = "file" + i;
+    el.setAttribute("role", "option");
+    el.setAttribute("aria-selected", "false");
+    el.innerHTML = `<div class="thumb-box"><canvas class="thumb" aria-hidden="true"></canvas></div><span class="fname">${f.name}</span>`;
+    grid.append(el);
+    return { el, box: el.querySelector(".thumb-box"), canvas: el.querySelector("canvas"), dev: 0, devAt: -1, full: null };
+  });
+
+  // Each file's thumbnail, as uFits makes it.
+  function thumbnail(i, pw, ph) {
+    const it = items[i], key = `${pw}x${ph}:${isDark()}`;
+    if (it.full && it.fullKey === key) return it.full;
+    const c = offscreen(pw, ph), ctx = c.getContext("2d"), f = FILES[i], dpr = pw / items[i].canvas.clientWidth || 2;
+    ctx.imageSmoothingQuality = "high";
+    if (f.thumb === "image" || f.thumb === "rgb") drawImage(ctx, stretched(imageOf(f.thumb), "auto"), pw, ph, true);
+    else if (f.thumb === "cube") drawImage(ctx, stretched(CUBE, "auto", 9), pw, ph, true);
+    else {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawAxes(ctx, pw / dpr, ph / dpr, f.thumb, true);
+      drawData(ctx, pw / dpr, ph / dpr, f.thumb, { small: true });
+    }
+    it.fullKey = key;
+    return (it.full = c);
+  }
+  // A plain document icon, as Finder shows a file it has no thumbnail for.
+  function drawDocument(ctx, w, h, ext) {
+    const ph = h * 0.94, pw = ph * 0.76, x = (w - pw) / 2, y = (h - ph) / 2, fold = pw * 0.26;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + pw - fold, y);
+    ctx.lineTo(x + pw, y + fold);
+    ctx.lineTo(x + pw, y + ph);
+    ctx.lineTo(x, y + ph);
+    ctx.closePath();
+    ctx.fillStyle = C.doc;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.16)";
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + pw - fold, y);
+    ctx.lineTo(x + pw - fold, y + fold);
+    ctx.lineTo(x + pw, y + fold);
+    ctx.closePath();
+    ctx.fillStyle = C["doc-fold"];
+    ctx.fill();
+    ctx.fillStyle = "#8a909e";
+    ctx.font = `600 ${Math.max(7, Math.round(ph * 0.12))}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(ext, x + pw / 2, y + ph * 0.72);
+  }
+  // Developing: a thumbnail comes in square by square, coarse to fine.
+  const scratch = offscreen(1, 1);
+  function drawThumb(i) {
+    const it = items[i];
+    const { ctx, w, h, dpr } = fit(it.canvas);
+    ctx.clearRect(0, 0, w, h);
+    it.box.classList.toggle("dev", ready && it.dev > 0);
+    if (!ready || it.dev <= 0) return drawDocument(ctx, w, h, FILES[i].ext);
+    const full = thumbnail(i, Math.round(w * dpr), Math.round(h * dpr));
+    if (it.dev >= 1) return ctx.drawImage(full, 0, 0, w, h);
+    const block = [24, 12, 6, 3][Math.min(3, Math.floor(it.dev * 4))];
+    const tw = Math.max(1, Math.round(full.width / block)), th = Math.max(1, Math.round(full.height / block));
+    scratch.width = tw;
+    scratch.height = th;
+    scratch.getContext("2d").drawImage(full, 0, 0, tw, th);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(scratch, 0, 0, tw, th, 0, 0, w, h);
+  }
+  const drawThumbs = () => items.forEach((_, i) => drawThumb(i));
+  new ResizeObserver(drawThumbs).observe(grid);
+  onTheme(drawThumbs);
+
+  // The preview.
+  const menu = $("hduMenu"), segPicture = $("segPicture"), segTable = $("segTable"), segHeader = $("segHeader");
+  const planeInput = $("plane");
+  let file = 0, hdu = 1, mode = "picture", stretch = "auto", plane = 16, openFile = -1, selected = -1;
+  function drawPicture() {
+    const h = FILES[file].hdus[hdu];
+    if (!ready || !h.picture) return;
+    if (h.picture === "image" || h.picture === "rgb" || h.picture === "cube") {
+      const { ctx, w, h: H } = fit($("imageCanvas"));
+      ctx.clearRect(0, 0, w, H);
+      drawImage(ctx, stretched(imageOf(h.picture), stretch, h.picture === "cube" ? plane : 0), w, H);
+    } else {
+      const { ctx, w, h: H } = fit($("plotCanvas"));
+      drawAxes(ctx, w, H, h.picture, false);
+      drawData(ctx, w, H, h.picture);
+    }
+  }
+  function configure(i) {
+    file = i;
+    const f = FILES[i];
+    $("qlName").textContent = f.name;
+    menu.length = 0;
+    f.hdus.forEach((h, k) => menu.add(new Option(h.title, String(k))));
+    $("hduBox").hidden = f.hdus.length < 2;
+    show(f.start, "picture");
+  }
   function show(nextHdu, nextMode) {
     hdu = nextHdu;
-    const h = HDUS[hdu];
+    const h = FILES[file].hdus[hdu];
     // The mode asked for if this HDU has it; else its picture, its rows, its header.
-    const has = { picture: !!h.picture, table: h.table, header: true };
+    const has = { picture: !!h.picture, table: !!h.table, header: true };
     mode = has[nextMode] ? nextMode : has.picture ? "picture" : has.table ? "table" : "header";
+    const image = h.picture === "image" || h.picture === "rgb" || h.picture === "cube";
     menu.value = String(hdu);
     $("hduLabel").textContent = h.name;
-    segPicture.textContent = h.picture === "image" || !h.picture ? "Image" : "Plot";
+    segPicture.textContent = image || !h.picture ? "Image" : "Plot";
     segPicture.disabled = !has.picture;
     segTable.disabled = !has.table;
     segPicture.setAttribute("aria-pressed", String(mode === "picture"));
     segTable.setAttribute("aria-pressed", String(mode === "table"));
     segHeader.setAttribute("aria-pressed", String(mode === "header"));
-    $("stretchBox").hidden = !(mode === "picture" && h.picture === "image");
+    $("stretchBox").hidden = !(mode === "picture" && image);
+    $("planeBox").hidden = !(mode === "picture" && h.picture === "cube");
+    $("planeLabel").textContent = `${plane + 1} / ${CN}`;
     // The bar says only what nothing else does: the size and type of the
-    // image, how many rows (and columns) a table has.
-    $("winInfo").textContent = mode === "table" ? h.rows : mode === "picture" ? h.info : "";
-    $("imageView").hidden = !(mode === "picture" && h.picture === "image");
-    $("plotView").hidden = !(mode === "picture" && h.picture && h.picture !== "image");
+    // image, how many rows (and columns) a table has; a cube's slider takes
+    // its place.
+    $("qlInfo").textContent = mode === "table" ? h.rows : mode === "picture" && h.picture !== "cube" ? h.info : "";
+    $("qlInfo").hidden = mode === "picture" && h.picture === "cube";
+    $("imageView").hidden = !(mode === "picture" && image);
+    $("plotView").hidden = !(mode === "picture" && !image && h.picture);
     $("tableView").hidden = mode !== "table";
     $("headerView").hidden = mode !== "header";
-    if (mode === "picture" && h.picture === "image") drawImage();
-    else if (mode === "picture") drawPlot(h.picture);
-    else if (mode === "table") { $("tableView").innerHTML = tableHTML(hdu); $("tableView").scrollTop = 0; }
-    else { $("headerView").innerHTML = headerHTML(hdu); $("headerView").scrollTop = 0; }
+    if (mode === "picture") drawPicture();
+    else if (mode === "table") {
+      $("tableView").innerHTML = tableHTML(h.table);
+      $("tableView").scrollTop = 0;
+    } else {
+      $("headerView").innerHTML = headerLines(h.title.split(" — ")[0], h.header).join("\n");
+      $("headerView").scrollTop = 0;
+    }
   }
-  // A short tour, until the visitor takes over.
-  const tour = [[1, "picture"], [2, "picture"], [2, "table"], [3, "picture"], [1, "header"], [3, "table"]];
-  let step = 0, touring = !reduceMotion, timer = 0;
-  function stopTour() { touring = false; clearInterval(timer); }
-  function next() { step = (step + 1) % tour.length; show(...tour[step]); }
-  menu.addEventListener("change", () => { stopTour(); show(+menu.value, mode); });
-  segPicture.addEventListener("click", () => { stopTour(); show(hdu, "picture"); });
-  segTable.addEventListener("click", () => { stopTour(); show(hdu, "table"); });
-  segHeader.addEventListener("click", () => { stopTour(); show(hdu, "header"); });
-  $("stretchMenu").addEventListener("change", (e) => { stopTour(); stretch = e.target.value; restretch(); });
-  for (const ev of ["pointerdown", "wheel", "keydown"]) $("winBody").addEventListener(ev, stopTour, { passive: true });
-  $("space").addEventListener("click", () => {
-    stopTour();
-    next();
-    const win = $("win");
-    win.classList.remove("pop");
-    void win.offsetWidth;
-    win.classList.add("pop");
+  function setPlane(p) {
+    plane = clamp(Math.round(p), 0, CN - 1);
+    planeInput.value = String(plane);
+    $("planeLabel").textContent = `${plane + 1} / ${CN}`;
+    drawPicture();
+  }
+  new ResizeObserver(() => { if (openFile >= 0 && mode === "picture") drawPicture(); }).observe($("qlBody"));
+  onTheme(() => { if (openFile >= 0 && mode === "picture") drawPicture(); });
+
+  // Opening: the preview grows out of the file's icon, and goes back into it.
+  function rectOf(el) {
+    const s = sceneEl.getBoundingClientRect(), b = el.getBoundingClientRect();
+    return { x: b.left - s.left, y: b.top - s.top, w: b.width, h: b.height };
+  }
+  function zoom(from, to) {
+    const s = from.w / to.w;
+    const dx = from.x + from.w / 2 - (to.x + (to.w * s) / 2), dy = from.y + from.h / 2 - (to.y + (to.h * s) / 2);
+    return `translate(${dx}px, ${dy}px) scale(${s})`;
+  }
+  let closing = 0;
+  function settle() {
+    ql.style.transition = "none";
+    ql.style.transform = "none";
+    ql.style.opacity = "1";
+  }
+  function openQL(i, animate) {
+    if (closing) {   // opened again while closing: done closing at once
+      clearTimeout(closing);
+      closing = 0;
+      ql.hidden = true;
+      settle();
+    }
+    if (openFile !== i || ql.hidden) configure(i);
+    openFile = i;
+    if (!ql.hidden) return;
+    ql.hidden = false;
+    show(hdu, mode);   // drawn again, now that it has a size
+    if (!animate || reduceMotion) return;
+    const to = rectOf(ql), from = rectOf(items[i].box);
+    ql.style.transition = "none";
+    ql.style.transform = zoom(from, to);
+    ql.style.opacity = "0.3";
+    void ql.offsetWidth;
+    ql.style.transition = "transform 0.42s cubic-bezier(0.2, 0.9, 0.25, 1), opacity 0.22s ease";
+    ql.style.transform = "none";
+    ql.style.opacity = "1";
+  }
+  function closeQL(animate) {
+    if (openFile < 0) return;
+    const i = openFile;
+    openFile = -1;
+    if (!animate || reduceMotion) {
+      ql.hidden = true;
+      return;
+    }
+    const to = rectOf(ql), from = rectOf(items[i].box);
+    ql.style.transition = "transform 0.3s cubic-bezier(0.4, 0, 0.8, 0.4), opacity 0.3s ease";
+    ql.style.transform = zoom(from, to);
+    ql.style.opacity = "0";
+    closing = setTimeout(() => {
+      closing = 0;
+      ql.hidden = true;
+      settle();
+    }, 300);
+  }
+  function select(i) {
+    selected = i;
+    items.forEach((it, k) => it.el.setAttribute("aria-selected", String(k === i)));
+    if (i >= 0) grid.setAttribute("aria-activedescendant", items[i].el.id);
+  }
+  function step(name) {
+    for (const el of document.querySelectorAll(".step")) el.classList.toggle("on", el.dataset.step === name);
+    keycap.classList.toggle("on", name === "space");
+  }
+  function press() {
+    keycap.classList.add("down");
+    setTimeout(() => keycap.classList.remove("down"), 170);
+  }
+
+  // The story plays by itself, until the visitor takes over.
+  let auto = !reduceMotion, sweep = null;
+  const waiters = [];
+  const STOP = {};
+  const hero = play(sceneEl, (t) => {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.devAt < 0 || it.dev >= 1) continue;
+      it.dev = clamp((t - it.devAt) / 560);
+      drawThumb(i);
+    }
+    if (sweep) {
+      const p = clamp((t - sweep.t0) / sweep.ms);
+      setPlane(lerp(sweep.from, sweep.to, inOut(p)));
+      aim(planeInput, plane / (CN - 1) - 0.5, 0, 0);
+      if (p >= 1) sweep = null;
+    }
+    for (let k = waiters.length - 1; k >= 0; k--)
+      if (t >= waiters[k].at) waiters.splice(k, 1)[0].go();
+  }, { fps: 60 });
+  const wait = (ms) => new Promise((resolve, reject) => {
+    waiters.push({ at: hero.time + ms, go: () => (auto ? resolve() : reject(STOP)) });
   });
-  // Canvases follow the window's size and the theme; rows and cards need not.
-  function redraw() {
-    const h = HDUS[hdu];
-    if (mode === "picture" && h.picture === "image") drawImage();
-    else if (mode === "picture") drawPlot(h.picture);
+  // The pointer to an element (dx: a fraction of its width off its centre).
+  function aim(el, dx = 0, dy = 0, ms = 700) {
+    const r = rectOf(el);
+    cursor.style.transitionDuration = `0.3s, ${ms}ms`;
+    cursor.style.transform = `translate(${r.x + r.w * (0.5 + dx) - 2}px, ${r.y + r.h / 2 + dy - 1.6}px)`;
   }
-  new ResizeObserver(redraw).observe($("winBody"));
-  onTheme(redraw);
-  show(1, "picture");
-  // Draw the galaxy after the first paint, then start the tour.
-  requestAnimationFrame(() => setTimeout(() => {
-    makeGalaxy();
-    imageReady = true;
-    restretch();
-    if (touring) timer = setInterval(() => { if (touring && !document.hidden) next(); }, 3600);
-  }, 30));
+  async function click() {
+    cursor.classList.remove("click");
+    void cursor.getBoundingClientRect();
+    cursor.classList.add("click");
+    await wait(160);
+  }
+  async function space() {
+    step("space");
+    press();
+    await wait(260);
+  }
+  function takeOver() {
+    if (!auto) return;
+    auto = false;
+    sweep = null;
+    cursor.classList.remove("on");
+    step(null);
+    waiters.splice(0).forEach((w) => w.go());
+  }
+  const VISITS = [
+    { file: 0, views: [["header", 1800]] },
+    { file: 1, views: [["table", 1700]] },
+    { file: 4, views: [["sweep", 2600]] },
+    { file: 5, views: [] },
+    { file: 3, views: [["table", 1600]] },
+    { file: 2, views: [["header", 1600]] },
+  ];
+  async function story() {
+    try {
+      await wait(500);
+      items.forEach((it, i) => (it.devAt = hero.time + 120 + i * 230));
+      await wait(items.length * 230 + 900);
+      cursor.style.transitionDuration = "0s";
+      cursor.style.transform = `translate(${sceneEl.clientWidth * 0.9}px, ${sceneEl.clientHeight * 0.92}px)`;
+      cursor.classList.add("on");
+      for (let k = 0; ; k = (k + 1) % VISITS.length) {
+        const v = VISITS[k];
+        step("select");
+        aim(items[v.file].box, 0.08, 6, 760);
+        await wait(820);
+        await click();
+        select(v.file);
+        await wait(320);
+        await space();
+        step("see");
+        openQL(v.file, true);
+        await wait(2200);
+        for (const [what, ms] of v.views) {
+          if (what === "sweep") {
+            aim(planeInput, -0.5, 0, 600);
+            await wait(700);
+            await click();
+            sweep = { t0: hero.time, ms: ms - 400, from: plane, to: plane < 16 ? 26 : 4 };
+            await wait(ms);
+          } else {
+            const button = what === "table" ? segTable : segHeader;
+            aim(button, 0.1, 2, 600);
+            await wait(680);
+            await click();
+            show(hdu, what);
+            await wait(ms);
+          }
+        }
+        aim(items[v.file].box, 0.08, 6, 500);
+        await wait(300);
+        await space();
+        closeQL(true);
+        step(null);
+        await wait(700);
+      }
+    } catch (e) {
+      if (e !== STOP) throw e;
+    }
+  }
+
+  // The visitor: click a file and press Space (or the key), as in Finder.
+  function toggle() {
+    if (openFile >= 0) return closeQL(true);
+    if (selected < 0) select(0);
+    openQL(selected, true);
+  }
+  grid.addEventListener("pointerdown", (e) => {
+    takeOver();
+    const it = items.findIndex((x) => x.el.contains(e.target));
+    if (it < 0) return;
+    select(it);
+    if (openFile >= 0 && openFile !== it) {
+      openFile = it;
+      configure(it);
+    }
+  });
+  grid.addEventListener("dblclick", () => { if (selected >= 0 && openFile < 0) openQL(selected, true); });
+  sceneEl.addEventListener("keydown", (e) => {
+    if (e.target.closest(".ql") && e.key !== "Escape") return;
+    const cols = getComputedStyle(grid).gridTemplateColumns.split(" ").length;
+    const moves = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -cols, ArrowDown: cols };
+    if (e.key === " ") {
+      e.preventDefault();
+      takeOver();
+      toggle();
+    } else if (e.key === "Escape") {
+      takeOver();
+      closeQL(true);
+      grid.focus();
+    } else if (e.key in moves) {
+      e.preventDefault();
+      takeOver();
+      const next = clamp((selected < 0 ? 0 : selected + moves[e.key]), 0, items.length - 1);
+      select(next);
+      if (openFile >= 0) {
+        openFile = next;
+        configure(next);
+      }
+    }
+  });
+  keycap.addEventListener("click", () => {
+    takeOver();
+    press();
+    toggle();
+  });
+  $("qlClose").addEventListener("click", () => { takeOver(); closeQL(true); });
+  $("qlBody").addEventListener("pointerdown", takeOver);
+  $("qlBody").addEventListener("wheel", takeOver, { passive: true });
+  menu.addEventListener("change", () => { takeOver(); show(+menu.value, mode); });
+  segPicture.addEventListener("click", () => { takeOver(); show(hdu, "picture"); });
+  segTable.addEventListener("click", () => { takeOver(); show(hdu, "table"); });
+  segHeader.addEventListener("click", () => { takeOver(); show(hdu, "header"); });
+  $("stretchMenu").addEventListener("change", (e) => { takeOver(); stretch = e.target.value; drawPicture(); });
+  planeInput.addEventListener("input", () => { takeOver(); setPlane(+planeInput.value); });
+
+  // ---- The tiles --------------------------------------------------------------
+  // Auto stretch, then the two others, the image fading from one to the next,
+  // with the levels: how many pixels are how bright, and where each goes.
+  {
+    const canvas = $("stretchArt"), label = $("stretchLabel");
+    const KINDS = ["auto", "linear", "minmax"], NAMES = { auto: "Auto stretch", linear: "Linear 0.5–99.5%", minmax: "Min – max" };
+    let bins = null;
+    const BINS = 72, LOG0 = Math.log10(80), LOG1 = Math.log10(60000);
+    play(canvas, (t) => {
+      if (!ready) return;
+      const { ctx, w, h } = fit(canvas);
+      const period = 3400, k = Math.floor(t / period) % 3, f = (t % period) / period;
+      const fade = smooth((f - 0.8) / 0.2), a = KINDS[k], b = KINDS[(k + 1) % 3];
+      ctx.fillStyle = C["img-ground"];
+      ctx.fillRect(0, 0, w, h);
+      drawImage(ctx, stretched(GALAXY, a), w, h, true);
+      if (fade > 0) {
+        ctx.globalAlpha = fade;
+        drawImage(ctx, stretched(GALAXY, b), w, h, true);
+        ctx.globalAlpha = 1;
+      }
+      const name = NAMES[fade > 0.5 ? b : a];
+      if (label.textContent !== name) label.textContent = name;
+      // The levels, small, in a corner.
+      if (!bins) {
+        bins = new Float32Array(BINS);
+        for (const v of GALAXY.sample) {
+          const x = (Math.log10(Math.max(v, 80)) - LOG0) / (LOG1 - LOG0);
+          if (x >= 0 && x < 1) bins[(x * BINS) | 0]++;
+        }
+        const top = Math.log10(Math.max(...bins) + 1);
+        for (let i = 0; i < BINS; i++) bins[i] = Math.log10(bins[i] + 1) / top;
+      }
+      const pw = Math.min(190, w * 0.38), ph = Math.min(76, h * 0.3), px = 12, py = h - ph - 12;
+      ctx.fillStyle = "rgba(6, 8, 14, 0.62)";
+      ctx.beginPath();
+      ctx.roundRect ? ctx.roundRect(px, py, pw, ph, 8) : ctx.rect(px, py, pw, ph);
+      ctx.fill();
+      const ix = px + 10, iy = py + 10, iw = pw - 20, ih = ph - 20;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
+      for (let i = 0; i < BINS; i++) {
+        const bh = bins[i] * ih;
+        ctx.fillRect(ix + (i * iw) / BINS, iy + ih - bh, iw / BINS - 0.6, bh);
+      }
+      const fa = level(GALAXY, a), fb = level(GALAXY, b);
+      ctx.strokeStyle = C.accent;
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      for (let i = 0; i <= 60; i++) {
+        const v = Math.pow(10, LOG0 + ((LOG1 - LOG0) * i) / 60);
+        const y = iy + ih - ih * lerp(fa(v), fb(v), fade);
+        i ? ctx.lineTo(ix + (iw * i) / 60, y) : ctx.moveTo(ix, y);
+      }
+      ctx.stroke();
+    }, { fps: 30, still: 1200 });
+  }
+
+  // Zooming into a star until its pixels show, and back out.
+  {
+    const canvas = $("zoomArt"), label = $("zoomLabel");
+    let star = null;
+    const ZMAX = 30;
+    play(canvas, (t) => {
+      if (!ready) return;
+      if (!star) star = STARS.filter((s) => s.x > IW * 0.15 && s.x < IW * 0.85 && s.y > IH * 0.15 && s.y < IH * 0.85)
+        .sort((a, b) => b.flux - a.flux)[0];
+      const { ctx, w, h, dpr } = fit(canvas);
+      const f = (t % 9000) / 9000;
+      const e = f < 0.42 ? inOut(f / 0.42) : f < 0.62 ? 1 : 1 - inOut((f - 0.62) / 0.38);
+      const z = Math.exp(Math.log(ZMAX) * e);
+      const img = stretched(GALAXY, "auto");
+      const s0 = Math.max(w / IW, h / IH), s = s0 * z;
+      const cx = lerp(IW / 2, star.x, Math.min(1, e * 1.6)), cy = lerp(IH / 2, star.y, Math.min(1, e * 1.6));
+      const sw = w / s, sh = h / s;
+      const sx = clamp(cx - sw / 2, 0, IW - sw), sy = clamp(cy - sh / 2, 0, IH - sh);
+      ctx.fillStyle = C["img-ground"];
+      ctx.fillRect(0, 0, w, h);
+      ctx.imageSmoothingEnabled = s * dpr < 5;
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+      if (s > 10) {
+        ctx.strokeStyle = `rgba(128, 140, 170, ${0.28 * clamp((s - 10) / 14)})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = Math.ceil(sx); x < sx + sw; x++) {
+          const X = Math.round((x - sx) * s) + 0.5;
+          ctx.moveTo(X, 0);
+          ctx.lineTo(X, h);
+        }
+        for (let y = Math.ceil(sy); y < sy + sh; y++) {
+          const Y = Math.round((y - sy) * s) + 0.5;
+          ctx.moveTo(0, Y);
+          ctx.lineTo(w, Y);
+        }
+        ctx.stroke();
+      }
+      label.textContent = `${Math.round(z * 100)}%`;
+    }, { fps: 30, still: 3800 });
+  }
+
+  // A light curve, then a spectrum, drawn as if by the pen.
+  {
+    const canvas = $("plotsArt"), name = $("plotsName"), info = $("plotsInfo");
+    const cache = {};
+    const SHOWS = [
+      { kind: "lc", name: "tess-lc.fits", info: "3600 rows" },
+      { kind: "spec", name: "sdss-spec.fits", info: "2700 rows" },
+    ];
+    play(canvas, (t) => {
+      const { ctx, w, h, dpr } = fit(canvas);
+      const period = 6400, show = SHOWS[Math.floor(t / period) % 2], f = (t % period) / period;
+      const key = `${show.kind}:${w}x${h}:${isDark()}`;
+      if (!cache[key]) {
+        if (Object.keys(cache).length > 4) for (const k in cache) delete cache[k];
+        const axes = offscreen(Math.round(w * dpr), Math.round(h * dpr)), data = offscreen(axes.width, axes.height);
+        const a = axes.getContext("2d"), d = data.getContext("2d");
+        a.setTransform(dpr, 0, 0, dpr, 0, 0);
+        d.setTransform(dpr, 0, 0, dpr, 0, 0);
+        drawAxes(a, w, h, show.kind, false);
+        drawData(d, w, h, show.kind);
+        cache[key] = { axes, data };
+      }
+      const { axes, data } = cache[key];
+      if (name.textContent !== show.name) {
+        name.textContent = show.name;
+        info.textContent = show.info;
+      }
+      ctx.drawImage(axes, 0, 0, w, h);
+      const fr = plotFrame(w, h, false);
+      const edge = fr.left + fr.pw * outCubic(f / 0.4);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, edge, h);
+      ctx.clip();
+      ctx.drawImage(data, 0, 0, w, h);
+      ctx.restore();
+      if (f < 0.42) {
+        ctx.fillStyle = C.accent;
+        ctx.globalAlpha = 0.85;
+        ctx.fillRect(edge - 1, fr.top, 2, fr.ph);
+        ctx.globalAlpha = 1;
+      }
+      const out = smooth((f - 0.92) / 0.08);
+      if (out > 0) {
+        ctx.globalAlpha = out;
+        ctx.fillStyle = C["win-content"];
+        ctx.fillRect(fr.left, fr.top, fr.pw, fr.ph);
+        ctx.globalAlpha = 1;
+      }
+    }, { fps: 30, still: 3000 });
+  }
+
+  // A catalog, star by star, and its cluster ringed.
+  {
+    const canvas = $("skyArt");
+    const kept = offscreen(1, 1), keep = kept.getContext("2d");
+    let drawn = 0, keptKey = "";
+    play(canvas, (t) => {
+      const { ctx, w, h, dpr } = fit(canvas);
+      const f = (t % 7600) / 7600;
+      const n = Math.round(CAT.ra.length * outCubic(f / 0.5));
+      const key = `${w}x${h}:${isDark()}`;
+      if (key !== keptKey || n < drawn) {
+        keptKey = key;
+        kept.width = canvas.width;
+        kept.height = canvas.height;
+        keep.setTransform(dpr, 0, 0, dpr, 0, 0);
+        drawAxes(keep, w, h, "sky", false);
+        drawn = 0;
+      }
+      if (n > drawn) {   // the stars new since the last frame
+        const p = PLOTS.sky, fr = plotFrame(w, h, false), { px, py } = plotMap("sky", fr);
+        keep.save();
+        keep.beginPath();
+        keep.rect(fr.left, fr.top, fr.pw, fr.ph);
+        keep.clip();
+        keep.fillStyle = C["plot-ink"];
+        keep.globalAlpha = 0.75;
+        const scale = fr.pw < 300 ? 0.2 : 0.28;
+        for (let k = drawn; k < n; k++) {
+          const i = SKY_ORDER[k];
+          keep.beginPath();
+          keep.arc(px(p.x[i]), py(p.y[i]), Math.max(0.5, (26 - CAT.mag[i]) * scale), 0, 6.2832);
+          keep.fill();
+        }
+        keep.restore();
+        drawn = n;
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(kept, 0, 0);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const fresh = Math.max(0, n - 60);
+      if (f < 0.5) {
+        const fr = plotFrame(w, h, false), { px, py } = plotMap("sky", fr);
+        ctx.fillStyle = C.accent;
+        for (let k = fresh; k < n; k++) {
+          const i = SKY_ORDER[k];
+          ctx.beginPath();
+          ctx.arc(px(CAT.ra[i]), py(CAT.dec[i]), 1.6, 0, 6.2832);
+          ctx.fill();
+        }
+      }
+      const ring = smooth((f - 0.52) / 0.12) * (1 - smooth((f - 0.88) / 0.1));
+      if (ring > 0) {
+        const fr = plotFrame(w, h, false), { px, py } = plotMap("sky", fr);
+        ctx.strokeStyle = C.accent;
+        ctx.globalAlpha = ring;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(px(188.58), py(8.2), (0.085 / 0.51) * fr.pw * (1.25 - 0.25 * ring), 0, 6.2832);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }, { fps: 30, still: 5000 });
+  }
+
+  // A cube's planes, one after another, as the slider moves.
+  {
+    const canvas = $("cubeArt"), label = $("cubeLabel"), thumb = $("cubeThumb"), fill = $("cubeFill");
+    play(canvas, (t) => {
+      if (!ready) return;
+      const { ctx, w, h } = fit(canvas);
+      const f = (t % 7000) / 7000, e = f < 0.5 ? inOut(f * 2) : 1 - inOut(f * 2 - 1);
+      const p = Math.round(e * (CN - 1));
+      ctx.fillStyle = C["img-ground"];
+      ctx.fillRect(0, 0, w, h);
+      drawImage(ctx, stretched(CUBE, "auto", p), w, h, true);
+      label.textContent = `${p + 1} / ${CN}`;
+      thumb.style.left = fill.style.width = `${(p / (CN - 1)) * 100}%`;
+    }, { fps: 30, still: 1700 });
+  }
+
+  // A million rows going by, then a jump to row 900,000.
+  {
+    const el = $("rowsArt"), N = 1000000, SLOTS = 22, ROW = 21;
+    el.innerHTML = `<div class="rh"><span>#</span><span>RA</span><span>DEC</span><span>MAG</span></div>` +
+      `<div class="rb">${'<div class="r"><span></span><span></span><span></span><span></span></div>'.repeat(SLOTS)}</div>`;
+    const body = el.querySelector(".rb"), rows = [...body.children].map((r) => ({ el: r, cells: [...r.children], at: -1 }));
+    const cell = (i) => {
+      const r = random(i * 7919 + 13);
+      r();
+      return [i.toLocaleString("en-US"), (188.35 + 0.47 * r()).toFixed(6), (7.95 + 0.5 * r()).toFixed(6), (24.5 - 7 * Math.pow(r(), 2.2)).toFixed(3)];
+    };
+    play(el, (t) => {
+      const f = (t % 9500) / 9500, T = (f * 9500) / 1000;
+      // Accelerating down the first rows; at 3.4 s, row 900,000; at 8 s, back to the top.
+      let top;
+      if (T < 0.7) top = 0;
+      else if (T < 3.4) top = 260 * Math.pow(T - 0.7, 2.2);
+      else if (T < 8) top = 899990 + 4 * outCubic((T - 3.4) / 0.7);
+      else top = 0;
+      const base = Math.floor(top), frac = top - base;
+      body.style.transform = `translateY(${-frac * ROW}px)`;
+      rows.forEach((r, k) => {
+        const i = base + k + 1;
+        if (r.at !== i) {
+          r.at = i;
+          cell(i).forEach((v, c) => (r.cells[c].textContent = v));
+          r.el.classList.toggle("odd", i % 2 === 1);
+        }
+        r.el.classList.toggle("hi", i === 900000 && T >= 3.4 && T < 8);
+      });
+    }, { fps: 60, still: 5000 });
+  }
+
+  // Header cards written out, one HDU after another.
+  {
+    const el = $("hdrArt"), name = $("hdrName");
+    const SHOWS = [
+      { name: "ngc4535.fits", title: "HDU 1  SCI", cards: H.sci },
+      { name: "tess-lc.fits", title: "HDU 1  LIGHTCURVE", cards: H.lc },
+      { name: "ngc2403-hi.fits", title: "HDU 0", cards: H.cube },
+    ];
+    let shown = -1, lines = [];
+    play(el, (t) => {
+      const period = 6500, k = Math.floor(t / period) % SHOWS.length, f = (t % period) / 1000;
+      if (k !== shown) {
+        shown = k;
+        name.textContent = SHOWS[k].name;
+        el.innerHTML = headerLines(SHOWS[k].title, SHOWS[k].cards).map((l) => `<span class="ln">${l}</span>`).join("");
+        lines = [...el.children];
+      }
+      const n = reduceMotion ? lines.length : Math.min(lines.length, 1 + Math.floor(f / 0.075));
+      const showing = reduceMotion || f < 6.1;
+      lines.forEach((l, i) => l.classList.toggle("on", showing && i < n));
+      let caret = el.querySelector(".caret");
+      const at = showing && n < lines.length ? lines[n - 1] : null;
+      if (caret && caret.parentNode !== at) {
+        caret.remove();
+        caret = null;
+      }
+      if (at && !caret) at.insertAdjacentHTML("beforeend", '<span class="caret"></span>');
+    }, { fps: 30, still: 2000 });
+  }
+
+  // Every kind of file uFits previews, going by.
+  {
+    const lanes = [
+      [["fits", "ngc4535.fits"], ["fits", "m31_r.fit"], ["fz", "survey_tile.fz"], ["xisf", "m42.xisf"], ["fits", "frame_0042.fts"],
+        ["fits", "jw02736_cal.fits"], ["xisf", "flat_Ha.xisf"], ["fits", "tess_s21_lc.fits"], ["fz", "dr10_brick.fits.fz"], ["fits", "spec-4535.fits"]],
+      [["xray", "source.pha"], ["xray", "bkg.pi"], ["xray", "resp.rmf"], ["xray", "area.arf"], ["xray", "xrt.rsp"],
+        ["xray", "nicer_cl.evt"], ["xray", "pn_src.lc"], ["xray", "hk_0001.hk"], ["xray", "filter.mkf"], ["xray", "burst.dph"]],
+    ];
+    const chip = ([fam, name], hidden) => `<span class="chip ${fam}"${hidden ? ' aria-hidden="true"' : ""}><i></i>${name}</span>`;
+    $("formats").innerHTML = lanes.map((l) => `<div class="lane">${l.map((c) => chip(c)).join("")}${l.map((c) => chip(c, true)).join("")}</div>`).join("");
+  }
+
+  // The icon by day and by night, turning over square by square.
+  {
+    const canvas = $("dayArt");
+    const r = random(3), dots = Array.from({ length: 70 }, () => ({ x: r(), y: r() * 0.62, s: 0.4 + r() * 1.1, p: r() * 6.28 }));
+    const mix = (a, b, t) => {
+      const pa = a.match(/\w\w/g).map((x) => parseInt(x, 16)), pb = b.match(/\w\w/g).map((x) => parseInt(x, 16));
+      return `rgb(${pa.map((v, i) => Math.round(lerp(v, pb[i], t))).join(",")})`;
+    };
+    play(canvas, (t) => {
+      const { ctx, w, h } = fit(canvas);
+      const f = (t % 11000) / 11000;
+      const night = f < 0.32 ? 0 : f < 0.47 ? inOut((f - 0.32) / 0.15) : f < 0.82 ? 1 : 1 - inOut((f - 0.82) / 0.15);
+      const sky = ctx.createLinearGradient(0, 0, 0, h);
+      sky.addColorStop(0, mix("#7fb2ff", "#0a0e2a", night));
+      sky.addColorStop(1, mix("#e3eeff", "#1d2252", night));
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#fff";
+      for (const d of dots) {
+        ctx.globalAlpha = night * (0.45 + 0.4 * Math.sin(t / 700 + d.p));
+        ctx.fillRect(d.x * w, d.y * h, d.s, d.s);
+      }
+      ctx.globalAlpha = 1;
+      // The sun sets as the moon rises.
+      const R = Math.min(w, h) * 0.07;
+      ctx.fillStyle = "#ffd36e";
+      ctx.globalAlpha = 1 - night;
+      ctx.beginPath();
+      ctx.arc(w * 0.82, h * 0.2 + night * h * 0.5, R, 0, 6.2832);
+      ctx.fill();
+      const my = h * 0.2 + (1 - night) * h * 0.5;
+      ctx.save();
+      ctx.globalAlpha = night;
+      ctx.beginPath();
+      ctx.rect(0, 0, w, h);
+      ctx.arc(w * 0.18 + R * 0.38, my - R * 0.22, R * 0.72, 0, 6.2832, true);
+      ctx.clip("evenodd");
+      ctx.fillStyle = "#f1ecdc";
+      ctx.beginPath();
+      ctx.arc(w * 0.18, my, R * 0.8, 0, 6.2832);
+      ctx.fill();
+      ctx.restore();
+      // The icon: each cell turns over when the wave reaches it.
+      const size = Math.min(w, h) * 0.62, x0 = (w - size) / 2, y0 = (h - size) / 2 + h * 0.03, c = size / 32;
+      ctx.save();
+      ctx.shadowColor = "rgba(0, 0, 0, 0.35)";
+      ctx.shadowBlur = 24;
+      ctx.shadowOffsetY = 10;
+      iconShape(ctx, x0, y0, size);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
+      ctx.fill();
+      ctx.restore();
+      ctx.save();
+      iconShape(ctx, x0, y0, size);
+      ctx.clip();
+      for (let i = 0; i < 32; i++)
+        for (let j = 0; j < 32; j++) {
+          const q = clamp((night - ((i + j) / 62) * 0.7) / 0.3);
+          const pal = q < 0.5 ? PALETTES.light : PALETTES.dusk;
+          const s = Math.abs(Math.cos(q * Math.PI));
+          ctx.fillStyle = pal[CELLS[i][j]];
+          ctx.fillRect(x0 + j * c, y0 + i * c + (c * (1 - s)) / 2, c + 0.4, c * s + 0.4);
+        }
+      ctx.restore();
+    }, { fps: 30, still: 4000 });
+  }
+
+  // "Update available": a click, and a few seconds later, the new version.
+  {
+    const mini = $("updMini"), canvas = $("updArt"), btn = $("updBtn"), toast = $("updToast"), bar = $("updBar"), text = $("updText");
+    const pointer = $("updCursor"), icon = $("updIcon");
+    let aimed = "";
+    play(mini, (t) => {
+      if (ready) {
+        const { ctx, w, h } = fit(canvas);
+        ctx.fillStyle = C["img-ground"];
+        ctx.fillRect(0, 0, w, h);
+        drawImage(ctx, stretched(GALAXY, "auto"), w, h, true);
+      }
+      const T = (t % 9000) / 1000;
+      const at = T < 1 ? "start" : "button";
+      if (at !== aimed) {
+        aimed = at;
+        const m = mini.getBoundingClientRect(), b = btn.getBoundingClientRect();
+        const [x, y] = at === "start" ? [m.width * 0.8, m.height * 0.55] : [b.left - m.left + b.width * 0.55, b.top - m.top + b.height * 0.6];
+        pointer.style.transitionDuration = at === "start" ? "0s" : "0.3s, 0.9s";
+        pointer.style.transform = `translate(${x}px, ${y}px)`;
+      }
+      pointer.classList.toggle("on", !reduceMotion && T < 2.4);
+      pointer.classList.toggle("click", T >= 2.1 && T < 2.4);
+      btn.classList.toggle("press", T >= 2.1 && T < 2.4);
+      btn.classList.toggle("gone", T >= 2.4 && T < 8.4);
+      toast.classList.toggle("on", T >= 2.4 && T < 7.6);
+      const label = T < 4.8 ? "Updating to 0.0.7…" : "uFits 0.0.7 ✓";
+      if (text.textContent !== label) text.textContent = label;
+      bar.style.width = `${(T < 2.4 ? 0 : outCubic((T - 2.4) / 2.2)) * 100}%`;
+      if (T >= 2.4 && T < 7.6) {
+        const { ctx, w } = fit(icon);
+        ctx.clearRect(0, 0, w, w);
+        drawIcon(ctx, 0, 0, w, isDark() ? "dusk" : "light");
+      }
+    }, { fps: 30, still: 6000 });
+  }
+
+  // ---- The icon at the bottom: a galaxy coming together out of stars --------
+  {
+    const canvas = $("mark");
+    const r = random(77), cells = [];
+    for (let i = 0; i < 32; i++)
+      for (let j = 0; j < 32; j++) {
+        const c = CELLS[i][j];
+        if (!FRONT.includes(c)) continue;
+        const a = r() * 6.2832, d = 0.55 + r() * 0.5;
+        cells.push({ i, j, c, a, d, delay: r() * 0.7, tw: r() * 6.28 });
+      }
+    play(canvas, (t) => {
+      const { ctx, w, h } = fit(canvas);
+      ctx.clearRect(0, 0, w, h);
+      const size = Math.min(150, h * 0.8), x0 = (w - size) / 2, y0 = (h - size) / 2, c = size / 32;
+      const pal = PALETTES[isDark() ? "dusk" : "light"];
+      const T = t / 1000;
+      // The night of the icon fades in, then its galaxy flies home.
+      ctx.save();
+      iconShape(ctx, x0, y0, size);
+      ctx.clip();
+      ctx.globalAlpha = smooth(T / 0.8);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(plateImage(isDark() ? "dusk" : "light"), x0, y0, size, size);
+      ctx.restore();
+      for (const p of cells) {
+        const q = outCubic((T - 0.2 - p.delay) / 1.3);
+        const tx = x0 + p.j * c, ty = y0 + p.i * c;
+        const sx = w / 2 + Math.cos(p.a) * p.d * w * 0.5, sy = h / 2 + Math.sin(p.a) * p.d * h * 0.6;
+        const twinkle = T > 2.4 && "sS*".includes(p.c) ? 0.7 + 0.3 * Math.sin(T * 2.2 + p.tw) : 1;
+        ctx.globalAlpha = (0.25 + 0.75 * q) * twinkle;
+        ctx.fillStyle = pal[p.c];
+        const s = lerp(c * 0.5, c, q);
+        ctx.fillRect(lerp(sx, tx, q), lerp(sy, ty, q), s + 0.4, s + 0.4);
+      }
+      ctx.globalAlpha = 1;
+    }, { fps: 30, still: 6000 });
+  }
+
+  // ---- Making the example files, after the first paint ----------------------
+  (async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 30)));
+    GALAXY = await makeGalaxy();
+    await later();
+    stretched(GALAXY, "auto");
+    NEBULA = await makeNebula();
+    await later();
+    stretched(NEBULA, "auto");
+    CUBE = await makeCube();
+    await later();
+    ready = true;
+    if (reduceMotion) {
+      items.forEach((it) => (it.dev = 1));
+      drawThumbs();
+      select(0);
+      openQL(0, false);
+    } else {
+      drawThumbs();
+      story();
+    }
+    scenes.forEach(redraw);
+  })();
 })();
 </script>
 </body>
