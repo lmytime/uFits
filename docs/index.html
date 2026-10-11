@@ -338,6 +338,18 @@ canvas.fill { width: 100%; height: 100%; display: block; }
   cursor: pointer; transition: transform 0.08s ease, border-bottom-width 0.08s ease, box-shadow 0.25s, color 0.25s;
 }
 .keycap.on { color: var(--ink); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* The tour plays by itself; this pauses it, and once paused (by this or by
+   the visitor's own click), plays it on from where it was. */
+.tour {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; margin-left: 8px; padding: 0 13px 0 11px;
+  border: 1px solid var(--line); border-radius: 15px; background: transparent; color: var(--ink-dim);
+  font: 500 0.75rem/1 var(--font-display); letter-spacing: -0.02em; cursor: pointer;
+  transition: color 0.25s, background 0.25s, border-color 0.25s;
+}
+.tour:hover { color: var(--ink); border-color: var(--ink-dim); }
+.tour svg { width: 11px; height: 11px; fill: currentColor; }
+.tour.paused { border-color: var(--gold); background: var(--gold); color: var(--on-gold); }
+.tour[hidden] { display: none; }
 .keycap.down { transform: translateY(3px); border-bottom-width: 1px; }
 
 @media (max-width: 640px) {
@@ -352,6 +364,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
   .ql-info, #stretchBox { display: none; }
   .pop-up { flex: 1; max-width: none; }
   .seg button { padding: 3px 7px; }
+  .sep { display: none; }   /* the steps take two lines here */
 }
 
 /* ---- What the previews show: moving pictures ------------------------------- */
@@ -566,6 +579,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
         <button class="keycap" id="keycap" type="button" aria-label="Space: preview the selected file">space</button>
         <span class="sep" aria-hidden="true"></span>
         <span class="step" data-step="see"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M1.8 10S5 4.2 10 4.2 18.2 10 18.2 10 15 15.8 10 15.8 1.8 10 1.8 10z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="2.6" fill="currentColor"/></svg>See it</span>
+        <button class="tour" id="tour" type="button" aria-label="Pause the tour"><svg viewBox="0 0 12 12" aria-hidden="true"><path id="tourIcon" d="M2.5 1.5h2.4v9H2.5zM7.1 1.5h2.4v9H7.1z"/></svg><span id="tourText">Pause</span></button>
       </div>
     </figure>
   </div>
@@ -1622,7 +1636,23 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     cursor.classList.remove("on");
     step(null);
     waiters.splice(0).forEach((w) => w.go());
+    tourButton();
   }
+  // The tour's button says what a click on it does: pause, or play on.
+  const tour = $("tour");
+  function tourButton() {
+    tour.classList.toggle("paused", !auto);
+    $("tourText").textContent = auto ? "Pause" : "Play";
+    tour.setAttribute("aria-label", auto ? "Pause the tour" : "Play the tour");
+    $("tourIcon").setAttribute("d", auto ? "M2.5 1.5h2.4v9H2.5zM7.1 1.5h2.4v9H7.1z" : "M3 1.2v9.6L10.8 6z");
+  }
+  tour.hidden = reduceMotion;
+  tour.addEventListener("click", () => {
+    if (auto) return takeOver();
+    auto = true;
+    tourButton();
+    if (ready) story();   // else it starts once the example files are made
+  });
   const VISITS = [
     { file: 0, views: [["header", 1800]] },
     { file: 1, views: [["table", 1700]] },
@@ -1631,16 +1661,23 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     { file: 3, views: [["table", 1600]] },
     { file: 2, views: [["header", 1600]] },
   ];
+  let visit = 0;   // the file the story is at, to go on from after a pause
   async function story() {
     try {
-      await wait(500);
-      items.forEach((it, i) => (it.devAt = hero.time + 120 + i * 230));
-      await wait(items.length * 230 + 900);
-      cursor.style.transitionDuration = "0s";
-      cursor.style.transform = `translate(${sceneEl.clientWidth * 0.9}px, ${sceneEl.clientHeight * 0.92}px)`;
+      // The files' thumbnails develop first; a preview left open closes.
+      const developed = items[items.length - 1].devAt + 1010;
+      if (hero.time < developed) await wait(developed - hero.time);
+      if (openFile >= 0) {
+        closeQL(true);
+        await wait(700);
+      }
+      if (!cursor.style.transform) {
+        cursor.style.transitionDuration = "0s";
+        cursor.style.transform = `translate(${sceneEl.clientWidth * 0.9}px, ${sceneEl.clientHeight * 0.92}px)`;
+      }
       cursor.classList.add("on");
-      for (let k = 0; ; k = (k + 1) % VISITS.length) {
-        const v = VISITS[k];
+      for (;; visit = (visit + 1) % VISITS.length) {
+        const v = VISITS[visit];
         step("select");
         aim(items[v.file].box, 0.08, 6, 760);
         await wait(820);
@@ -2229,7 +2266,8 @@ canvas.fill { width: 100%; height: 100%; display: block; }
       openQL(0, false);
     } else {
       drawThumbs();
-      story();
+      items.forEach((it, i) => (it.devAt = hero.time + 620 + i * 230));
+      if (auto) story();
     }
     scenes.forEach(redraw);
   })();
