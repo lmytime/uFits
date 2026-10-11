@@ -2,22 +2,22 @@ uFits shows FITS and XISF files in Finder: Quick Look previews (select a file, p
 Space) and thumbnails for images, cubes, tile-compressed `.fz` files, spectra, light
 curves, catalogs and tables, with every header.
 
-**New in 0.0.6**
+**New in 0.0.7**
 
-- Thumbnails fill Finder's icons on Retina screens, sharp at any size, in icon and
-  gallery views. List and column views keep the file's own small icon.
-- Settings in the uFits app: thumbnails on or off, the stretch previews open with (one
-  setting for Quick Look and the app), and checking for updates, with **Check Now**.
-- An old copy of uFits elsewhere on your Mac (the first builds were numbered 1.0.0) could
-  make Finder's thumbnails on macOS 15, too small or upside down. The app now lists other
-  copies and moves them to the Trash, and the installer takes them out of Quick Look's use.
-- Uninstalling removes everything: the app, its settings and what it keeps in your Library.
+- A new icon: a galaxy in pixel art, in two looks, Dusk and a light one. On macOS 26
+  uFits shows the light icon, and Dusk when System Settings › Appearance › Icon & widget
+  style is Dark; on macOS 15 and earlier, Dusk.
+- **App icon** in the uFits app: Automatic, or always Dusk, or always the light icon. The
+  Dock and the app's window show the one you choose, and updates keep it.
+- A homepage that shows uFits at work: [lmytime.github.io/uFits](https://lmytime.github.io/uFits/).
 
 From 0.0.3 on, uFits says when a newer version is out (**Update available** in the
 preview's bar) and updates itself when you open it. From 0.0.2 or earlier, update once
-with the command below. See [0.0.5](https://github.com/lmytime/uFits/releases/tag/v0.0.5)
-for XISF images and [0.0.3](https://github.com/lmytime/uFits/releases/tag/v0.0.3) for
-zoom and the FITS files of X-ray missions.
+with the command below. See [0.0.6](https://github.com/lmytime/uFits/releases/tag/v0.0.6)
+for thumbnails that fill Finder's icons and the app's settings,
+[0.0.5](https://github.com/lmytime/uFits/releases/tag/v0.0.5) for XISF images and
+[0.0.3](https://github.com/lmytime/uFits/releases/tag/v0.0.3) for zoom and the FITS files
+of X-ray missions.
 
 **Install** with one command in Terminal:
 
