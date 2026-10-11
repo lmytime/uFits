@@ -2,10 +2,11 @@
 """Draw the uFits icon, a pixel-art spiral galaxy, in its dark (Dusk) and
 light versions, and write
 
-  macos/App/AppIcon.icns          the app's icon: Dusk (macOS 15 and earlier)
+  macos/App/AppIcon.icns          Dusk, for the app's icon setting (and its icon
+                                  if built without Xcode 26)
   macos/App/AppIconLight.icns     the light one, for the app's icon setting
-  macos/App/AppIcon.icon          both, for macOS 26 to follow light and dark
-                                  mode (Icon Composer's format)
+  macos/App/AppIcon.icon          both, the app's icon: macOS 26 follows light and
+                                  dark icons (Icon Composer's format)
   macos/App/Assets.xcassets       Dusk as an icon of its own, whose images the
                                   build gives the icon for macOS 15 and earlier
   docs/icon.png, docs/icon-light.png, docs/favicon.png, docs/favicon-light.png
