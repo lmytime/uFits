@@ -82,9 +82,6 @@ jobs:
           lipo -info build/uFits.app/Contents/MacOS/uFits build/uFits.app/Contents/PlugIns/*.appex/Contents/MacOS/*
           codesign -d --entitlements - build/uFits.app/Contents/PlugIns/uFitsPreview.appex
           du -sh build/uFits.app
-      - name: Probe ways to compile the icon (temporary)
-        timeout-minutes: 9
-        run: bash tests/macos/icon_probe.sh
       - name: Disk image
         run: |
           make dmg
@@ -185,8 +182,11 @@ jobs:
               defaults write -g AppleIconAppearanceTheme -string $theme
               killall Dock || true
               sleep 6
-              echo "     with $theme icons: $(light) of 255"
               screencapture -x $shots/app-icons-$theme.png || true
+              case $theme in
+              *Dark) check "with dark icons, Dusk" '[ "$(light)" -lt 128 ]' ;;
+              *) check "with light icons, the light one" '[ "$(light)" -gt 128 ]' ;;
+              esac
             done
             defaults delete -g AppleIconAppearanceTheme || true
             killall Dock || true
@@ -422,10 +422,44 @@ jobs:
           path: build/uFits-*.dmg
           if-no-files-found: error
 
+  # Releases are built on macOS 15, whose CoreUI gives the icon its images for
+  # macOS 15 and earlier (tools/flat_icon.m): macOS 26 must still draw it light,
+  # and Dusk when icons are dark.
+  icon-on-26:
+    name: The release build's icon on macOS 26
+    needs: macos
+    runs-on: macos-26
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: uFits-dmg
+          path: dmg
+      - name: Light, and Dusk when icons are dark
+        run: |
+          make build/iconsize
+          mkdir -p /tmp/dmg /tmp/release
+          hdiutil attach -nobrowse -readonly -mountpoint /tmp/dmg dmg/uFits-*.dmg
+          ditto /tmp/dmg/uFits.app /tmp/release/uFits.app
+          hdiutil detach /tmp/dmg
+          app=/tmp/release/uFits.app
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f $app
+          fail=0
+          check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+          light() { build/iconsize /tmp/icon.png $app | awk '/^uFits/ { print int(($(NF-2) + $(NF-1) + $NF) / 3) }'; }
+          check "the light icon" '[ "$(light)" -gt 128 ]'
+          defaults write -g AppleIconAppearanceTheme -string RegularDark
+          killall Dock || true
+          sleep 6
+          check "with dark icons, Dusk" '[ "$(light)" -lt 128 ]'
+          defaults delete -g AppleIconAppearanceTheme || true
+          exit $fail
+
   release:
     name: Release
     if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || inputs.release != ''
-    needs: [core, macos]
+    needs: [core, macos, icon-on-26]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

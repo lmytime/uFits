@@ -6,8 +6,8 @@ light versions, and write
   macos/App/AppIconLight.icns     the light one, for the app's icon setting
   macos/App/AppIcon.icon          both, for macOS 26 to follow light and dark
                                   mode (Icon Composer's format)
-  macos/App/Assets.xcassets       Dusk, which macOS 15 and earlier show of the
-                                  two compiled together
+  macos/App/Assets.xcassets       Dusk as an icon of its own, whose images the
+                                  build gives the icon for macOS 15 and earlier
   docs/icon.png, docs/icon-light.png, docs/favicon.png, docs/favicon-light.png
 
 The galaxy is drawn cell by cell from the maps below: 32 cells across the
@@ -206,9 +206,10 @@ def icon_composer(path):
 
 
 def catalog(path):
-    """An asset catalog with Dusk as the app's icon, for the versions of macOS
-    before 26 (actool puts it beside AppIcon.icon, of the same name)."""
-    iconset = os.path.join(path, "AppIcon.appiconset")
+    """An asset catalog with Dusk as an app icon of its own: the build gives
+    AppIcon.icon its images, the ones macOS 15 and earlier show (actool makes
+    them from the light look; tools/flat_icon.m)."""
+    iconset = os.path.join(path, "Dusk.appiconset")
     os.makedirs(iconset, exist_ok=True)
     with open(os.path.join(path, "Contents.json"), "w") as f:
         json.dump({"info": {"author": "xcode", "version": 1}}, f, indent=2)

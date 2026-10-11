@@ -195,22 +195,29 @@ The icon is pixel art, drawn cell by cell by `tools/make_icon.py` from two maps:
 cells across the 1024 x 1024 icon (one cell a pixel at 32 px, exact at every size above)
 and 16 cells for 16 px. It comes in two palettes, Dusk (the app's icon) and a light one,
 and the script writes `macos/App/AppIcon.icns` (Dusk), `AppIconLight.icns`,
-`macos/App/AppIcon.icon` and the homepage's icons and favicons. `AppIcon.icon` is in Icon
-Composer's format, the only one in which a Mac app's icon has a dark look (`actool` drops
-the dark and light app icons of an asset catalog): the light icon over Dusk, hidden when
-icons are dark (System Settings › Appearance › Icon & widget style), flat. The Makefile
-compiles it with the `actool` of Xcode 26 or later, for macOS 26 only: earlier versions
-find nothing they can use in it and show `AppIcon.icns`, Dusk. The app's **App icon** setting, Dusk or
-Light, sets a custom icon on the app (`NSWorkspace setIcon:forFile:`, as
-`uFits --set-icon auto|dusk|light` does); the app, and the installer, set it again after
-an update replaces the app.
+`macos/App/AppIcon.icon`, `macos/App/Assets.xcassets` (Dusk) and the homepage's icons
+and favicons. `AppIcon.icon` is in Icon Composer's format, the only one in which a Mac
+app's icon has a dark look (`actool` drops the dark and light app icons of an asset
+catalog): the light icon over Dusk, hidden when icons are dark (System Settings ›
+Appearance › Icon & widget style), flat. The Makefile compiles it with the `actool` of
+Xcode 26 or later, which also makes flattened images of it, from the light look, for
+macOS 15 and earlier; `tools/flat_icon.m` then gives it Dusk's instead, compiled from
+`Assets.xcassets` beside it, with CoreUI's asset storage (a private part of macOS, as
+actool's own). If that fails, the build goes on and earlier versions show the light
+icon; without Xcode 26, the app has `AppIcon.icns`, Dusk, everywhere. CI checks the
+icon each version draws, and that macOS 26 draws the release build's (made on macOS
+15) light, and Dusk when icons are dark.
+
+The app's **App icon** setting, Dusk or Light, sets a custom icon on the app
+(`NSWorkspace setIcon:forFile:`, as `uFits --set-icon auto|dusk|light` does); the app,
+and the installer, set it again after an update replaces the app.
 
 ## Code and tests
 
 ```
 core/       C core: parsing, decompression, binning, stretch (portable C)
 third_party/zstd/  upstream single-file Zstandard decompressor and license
-tools/      fqtool command line front end, icon generator
+tools/      fqtool command line front end, icon generator and flat_icon (macOS 15's icon)
 macos/      Objective-C: app, Quick Look preview and thumbnail extensions
 tests/      astropy-based test file generator, comparisons, fuzzer, Quick Look smoke test
 docs/       the homepage, one static page (GitHub Pages: branch main, folder /docs)
