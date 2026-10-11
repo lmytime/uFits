@@ -535,6 +535,12 @@ jobs:
           UFITS_VERSION=${prev#v} sh install.sh
           mkdir -p pics
           sh tests/macos/update_check.sh "${TAG#v}" pics
+          # The icon of choice (the light one: macOS 15 shows Dusk otherwise)
+          # stays when the installer replaces the app, as an update does.
+          defaults write io.github.lmytime.uFits FQAppIcon light
+          UFITS_VERSION=${TAG#v} sh install.sh > /dev/null
+          if [ -e "/Applications/uFits.app/Icon"$'\r' ]; then echo "ok   the icon chosen stays"
+          else echo "FAIL the icon chosen is gone"; exit 1; fi
       - name: Uninstall, and nothing is left
         if: ${{ !cancelled() }}
         run: sh tests/macos/uninstall_check.sh
