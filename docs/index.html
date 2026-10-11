@@ -9,8 +9,8 @@
 <meta property="og:description" content="Select a FITS file in Finder and press Space. Images, spectra, light curves, catalogs, cubes, tables and headers, at once.">
 <meta property="og:image" content="https://lmytime.github.io/uFits/icon.png">
 <meta property="og:type" content="website">
-<meta name="theme-color" content="#070a14" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#f2f4f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161825" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f0eff6" media="(prefers-color-scheme: light)">
 <link rel="canonical" href="https://lmytime.github.io/uFits/">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="icon" type="image/png" href="favicon-light.png" media="(prefers-color-scheme: light)">
@@ -21,53 +21,56 @@
 <style>
 /* A night sky. At the top, what uFits does, played out in a Finder window;
    below, what its previews show, each as a moving picture; words kept few.
-   Dark first; the light theme is a photographic plate: dark stars on pale
-   glass. */
+   The colours are the icon's: Dusk's in the dark theme (the page's sky is
+   its night, the words its stars, the gold its core), and in the light theme
+   the light icon's, indigo ink and gold on pale lavender. */
 :root {
-  --sky: #070a14;
-  --sky-raised: #0e1427;
-  --ink: #e9edf7;
-  --ink-dim: #9ba4bb;
-  --line: #1c2440;
-  --gold: #f2b65c;
-  --on-gold: #1a1204;
-  --accent: #f2b65c;
-  --accent-soft: rgba(242, 182, 92, 0.24);
-  --blue: #93b6ff;
-  --star: #ffffff;
-  --glow: rgba(110, 140, 255, 0.16);
-  --shadow: rgba(0, 0, 0, 0.6);
-  --card: rgba(14, 20, 40, 0.74);
-  --card-line: rgba(147, 170, 255, 0.13);
-  --card-sheen: rgba(147, 170, 255, 0.07);
-  --win: #1e2027;
-  --win-bar: #25272e;
-  --win-text: #e7e8ec;
-  --win-dim: #9b9fa9;
-  --win-line: #383b45;
-  --win-content: #15171c;
-  --win-stripe: rgba(255, 255, 255, 0.035);
-  --seg: #3a3d47;
-  --seg-on: #61656f;
-  --plot-ink: #dfe2ea;
-  --img-ground: #08090c;
-  --finder: #1e1f24;
-  --finder-bar: #2a2b31;
-  --finder-side: #232429;
-  --finder-line: #3a3c44;
-  --finder-text: #e6e7ea;
-  --finder-dim: #9a9ea8;
-  --select: #2b67d8;
-  --select-soft: rgba(255, 255, 255, 0.12);
-  --doc: #eef0f4;
-  --doc-fold: #c3c8d2;
-  --key: #121931;
-  --key-line: #2b3456;
+  --sky: #161825;
+  --sky-raised: #1e2133;
+  --ink: #eceef8;
+  --ink-dim: #8890be;
+  --line: #2a2e4a;
+  --gold: #d8b886;
+  --on-gold: #161825;
+  --accent: #d8b886;
+  --accent-soft: rgba(216, 184, 134, 0.22);
+  --pink: #e39ab0;
+  --blue: #c3c8e6;
+  --star: #eceef8;
+  --star-dim: #6c74a2;
+  --glow: rgba(82, 90, 137, 0.3);
+  --shadow: rgba(5, 6, 14, 0.62);
+  --card: rgba(30, 33, 51, 0.7);
+  --card-line: rgba(136, 144, 190, 0.16);
+  --card-sheen: rgba(136, 144, 190, 0.08);
+  --win: #1d1f2d;
+  --win-bar: #24273a;
+  --win-text: #eceef8;
+  --win-dim: #8f95bd;
+  --win-line: #33374f;
+  --win-content: #13141f;
+  --win-stripe: rgba(195, 200, 230, 0.04);
+  --seg: #33374f;
+  --seg-on: #525a89;
+  --plot-ink: #c3c8e6;
+  --img-ground: #0c0d16;
+  --finder: #1c1e2c;
+  --finder-bar: #24273a;
+  --finder-side: #202333;
+  --finder-line: #33374f;
+  --finder-text: #eceef8;
+  --finder-dim: #8f95bd;
+  --select: #5a62a6;
+  --select-soft: rgba(136, 144, 190, 0.16);
+  --doc: #eceef8;
+  --doc-fold: #b9bdd8;
+  --key: #1e2133;
+  --key-line: #32375a;
+  --icon-rim: rgba(136, 144, 190, 0.4);
+  --brand-icon: url("favicon.png");
   --tl-red: #ff5f57;
   --tl-yellow: #febc2e;
   --tl-green: #28c840;
-  --icon-rim: rgba(150, 180, 255, 0.5);
-  --brand-icon: url("favicon.png");
   --font-display: "Martian Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font-body: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --font-ui: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
@@ -76,90 +79,94 @@
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --sky: #f2f4f9;
+    --sky: #f0eff6;
     --sky-raised: #ffffff;
-    --ink: #0b1122;
-    --ink-dim: #4a5470;
-    --line: #dce1ee;
-    --gold: #a65a00;
-    --on-gold: #fffaf2;
-    --accent: #d9861a;
-    --accent-soft: rgba(217, 134, 26, 0.2);
-    --blue: #2853c4;
-    --star: #0b1122;
-    --glow: rgba(70, 100, 220, 0.10);
-    --shadow: rgba(20, 30, 60, 0.28);
-    --card: rgba(255, 255, 255, 0.84);
-    --card-line: rgba(20, 40, 110, 0.09);
+    --ink: #33376b;
+    --ink-dim: #5a5d98;
+    --line: #dedcea;
+    --gold: #98661f;
+    --on-gold: #fffaf0;
+    --accent: #d49d3a;
+    --accent-soft: rgba(212, 157, 58, 0.2);
+    --pink: #cc7093;
+    --blue: #4b4f93;
+    --star: #33376b;
+    --star-dim: #a5a4c8;
+    --glow: rgba(137, 136, 186, 0.22);
+    --shadow: rgba(51, 55, 107, 0.22);
+    --card: rgba(255, 255, 255, 0.8);
+    --card-line: rgba(90, 93, 152, 0.12);
     --card-sheen: rgba(255, 255, 255, 0.9);
-    --win: #ececee;
-    --win-bar: #f5f5f7;
-    --win-text: #1d1d1f;
-    --win-dim: #6e6e73;
-    --win-line: #d6d6db;
+    --win: #ecebf3;
+    --win-bar: #f6f5fa;
+    --win-text: #2a2d55;
+    --win-dim: #6e7099;
+    --win-line: #dcdae8;
     --win-content: #ffffff;
-    --win-stripe: rgba(0, 0, 0, 0.035);
-    --seg: #e1e1e6;
+    --win-stripe: rgba(90, 93, 152, 0.05);
+    --seg: #e2e0ee;
     --seg-on: #ffffff;
-    --plot-ink: #1d1d1f;
-    --img-ground: #f0f0f2;
+    --plot-ink: #363a71;
+    --img-ground: #f0eff6;
     --finder: #ffffff;
-    --finder-bar: #f4f4f6;
-    --finder-side: #f0f0f3;
-    --finder-line: #dedee3;
-    --finder-text: #1d1d1f;
-    --finder-dim: #6e6e73;
-    --select: #1f6feb;
-    --select-soft: rgba(0, 0, 0, 0.07);
+    --finder-bar: #f5f4fa;
+    --finder-side: #f0eff7;
+    --finder-line: #e0deeb;
+    --finder-text: #2a2d55;
+    --finder-dim: #6e7099;
+    --select: #5a5d98;
+    --select-soft: rgba(90, 93, 152, 0.12);
     --doc: #ffffff;
-    --doc-fold: #d5d9e2;
+    --doc-fold: #d9d8e8;
     --key: #ffffff;
-    --key-line: #cfd5e4;
+    --key-line: #d6d4e6;
     --icon-rim: transparent;
     --brand-icon: url("favicon-light.png");
     color-scheme: light;
   }
 }
 :root[data-theme="light"] {
-  --sky: #f2f4f9;
+  --sky: #f0eff6;
   --sky-raised: #ffffff;
-  --ink: #0b1122;
-  --ink-dim: #4a5470;
-  --line: #dce1ee;
-  --gold: #a65a00;
-  --on-gold: #fffaf2;
-  --accent: #d9861a;
-  --accent-soft: rgba(217, 134, 26, 0.2);
-  --blue: #2853c4;
-  --star: #0b1122;
-  --glow: rgba(70, 100, 220, 0.10);
-  --shadow: rgba(20, 30, 60, 0.28);
-  --card: rgba(255, 255, 255, 0.84);
-  --card-line: rgba(20, 40, 110, 0.09);
+  --ink: #33376b;
+  --ink-dim: #5a5d98;
+  --line: #dedcea;
+  --gold: #98661f;
+  --on-gold: #fffaf0;
+  --accent: #d49d3a;
+  --accent-soft: rgba(212, 157, 58, 0.2);
+  --pink: #cc7093;
+  --blue: #4b4f93;
+  --star: #33376b;
+  --star-dim: #a5a4c8;
+  --glow: rgba(137, 136, 186, 0.22);
+  --shadow: rgba(51, 55, 107, 0.22);
+  --card: rgba(255, 255, 255, 0.8);
+  --card-line: rgba(90, 93, 152, 0.12);
   --card-sheen: rgba(255, 255, 255, 0.9);
-  --win: #ececee;
-  --win-bar: #f5f5f7;
-  --win-text: #1d1d1f;
-  --win-dim: #6e6e73;
-  --win-line: #d6d6db;
+  --win: #ecebf3;
+  --win-bar: #f6f5fa;
+  --win-text: #2a2d55;
+  --win-dim: #6e7099;
+  --win-line: #dcdae8;
   --win-content: #ffffff;
-  --win-stripe: rgba(0, 0, 0, 0.035);
-  --seg: #e1e1e6;
+  --win-stripe: rgba(90, 93, 152, 0.05);
+  --seg: #e2e0ee;
   --seg-on: #ffffff;
-  --plot-ink: #1d1d1f;
-  --img-ground: #f0f0f2;
+  --plot-ink: #363a71;
+  --img-ground: #f0eff6;
   --finder: #ffffff;
-  --finder-bar: #f4f4f6;
-  --finder-side: #f0f0f3;
-  --finder-line: #dedee3;
-  --finder-text: #1d1d1f;
-  --finder-dim: #6e6e73;
-  --select: #1f6feb;
-  --select-soft: rgba(0, 0, 0, 0.07);
+  --finder-bar: #f5f4fa;
+  --finder-side: #f0eff7;
+  --finder-line: #e0deeb;
+  --finder-text: #2a2d55;
+  --finder-dim: #6e7099;
+  --select: #5a5d98;
+  --select-soft: rgba(90, 93, 152, 0.12);
   --doc: #ffffff;
-  --doc-fold: #d5d9e2;
+  --doc-fold: #d9d8e8;
   --key: #ffffff;
-  --key-line: #cfd5e4;
+  --key-line: #d6d4e6;
   --icon-rim: transparent;
   --brand-icon: url("favicon-light.png");
   color-scheme: light;
@@ -194,7 +201,7 @@ a:hover { text-decoration-thickness: 2px; }
 /* ---- Hero: the pitch, and Finder playing out what uFits does ----------- */
 .hero-wrap {
   position: relative; overflow: hidden;
-  background: radial-gradient(55% 65% at 74% 46%, var(--glow), transparent 72%);
+  background: radial-gradient(55% 65% at 74% 46%, var(--glow), transparent 70%);
 }
 .sky { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
 .hero {
@@ -420,11 +427,11 @@ canvas.fill { width: 100%; height: 100%; display: block; }
 .marquee:hover .lane { animation-play-state: paused; }
 @keyframes lane { to { transform: translateX(-50%); } }
 .chip { display: inline-flex; align-items: center; gap: 10px; padding: 9px 15px 9px 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--sky-raised); font: 500 0.8rem/1 var(--font-display); letter-spacing: -0.02em; white-space: nowrap; }
-.chip i { position: relative; width: 16px; height: 20px; border-radius: 2px 6px 2px 2px; background: var(--doc); box-shadow: inset 0 -7px 0 var(--fam, #4c7dff), 0 0 0 1px rgba(0, 0, 0, 0.12); }
-.chip.fits { --fam: #4c7dff; }
-.chip.fz { --fam: #22b3a5; }
-.chip.xisf { --fam: #a46bff; }
-.chip.xray { --fam: #f08a3c; }
+.chip i { position: relative; width: 16px; height: 20px; border-radius: 2px 6px 2px 2px; background: var(--doc); box-shadow: inset 0 -7px 0 var(--fam, #5a62a6), 0 0 0 1px rgba(0, 0, 0, 0.12); }
+.chip.fits { --fam: #5a62a6; }
+.chip.fz { --fam: #8890be; }
+.chip.xisf { --fam: #d9789b; }
+.chip.xray { --fam: #d49d3a; }
 
 /* Light by day, Dusk by night. */
 .day { position: relative; flex: 1; border-radius: 16px; overflow: hidden; }
@@ -449,7 +456,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
 .toast .done { color: var(--win-dim); font-size: 11px; line-height: 5px; }
 
 /* ---- Get it ----------------------------------------------------------------- */
-.get { position: relative; padding-block: clamp(56px, 9vw, 120px) clamp(56px, 8vw, 100px); text-align: center; background: radial-gradient(45% 55% at 50% 32%, var(--glow), transparent 70%); }
+.get { position: relative; padding-block: clamp(56px, 9vw, 120px) clamp(56px, 8vw, 100px); text-align: center; background: radial-gradient(45% 45% at 50% 34%, var(--glow), transparent 72%); }
 .mark { display: block; width: 260px; height: 190px; margin: 0 auto 6px; }
 .get .install { max-width: 660px; margin: 0 auto; }
 .get .meta { justify-content: center; margin-top: 18px; }
@@ -700,7 +707,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
   // The theme's colours, read once a theme.
   const C = {};
   function readColors() {
-    for (const n of ["win-content", "win-line", "win-dim", "win-text", "win-bar", "plot-ink", "accent", "img-ground", "doc", "doc-fold", "finder-dim", "star"])
+    for (const n of ["win-content", "win-line", "win-dim", "win-text", "win-bar", "plot-ink", "accent", "img-ground", "doc", "doc-fold", "finder-dim", "star", "star-dim", "pink"])
       C[n] = token("--" + n);
   }
   readColors();
@@ -805,9 +812,11 @@ canvas.fill { width: 100%; height: 100%; display: block; }
       const box = sky.getBoundingClientRect();
       const r = random(7);
       const n = Math.min(420, Math.round((box.width * box.height) / 4200));
-      stars = Array.from({ length: n }, () => ({
-        x: r() * box.width, y: r() * box.height, size: 0.35 + Math.pow(r(), 4) * 1.6, phase: r() * 6.283, speed: 0.3 + r() * 1.1,
-      }));
+      stars = Array.from({ length: n }, () => {
+        const kind = r();
+        return { x: r() * box.width, y: r() * box.height, size: 0.35 + Math.pow(r(), 4) * 1.6, phase: r() * 6.283, speed: 0.3 + r() * 1.1,
+          tint: kind < 0.02 ? "pink" : kind < 0.045 ? "accent" : kind < 0.2 ? "star-dim" : "star" };
+      });
       // None behind the words, where a star would read as a stray dot.
       const clear = [...document.querySelectorAll(".top .wrap > *, .pitch > *, .steps")].map((el) => {
         const b = el.getBoundingClientRect();
@@ -818,8 +827,8 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     const s = play(sky, (t) => {
       const { ctx, w, h } = fit(sky);
       ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = C.star;
       for (const st of stars) {
+        ctx.fillStyle = C[st.tint];
         const twinkle = reduceMotion ? 0.75 : 0.45 + 0.55 * (0.5 + 0.5 * Math.sin((t / 1000) * st.speed + st.phase));
         ctx.globalAlpha = twinkle * (0.35 + 0.65 * Math.min(1, st.size));
         ctx.beginPath();
@@ -1391,7 +1400,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     ctx.closePath();
     ctx.fillStyle = C["doc-fold"];
     ctx.fill();
-    ctx.fillStyle = "#8a909e";
+    ctx.fillStyle = "#8a8db0";
     ctx.font = `600 ${Math.max(7, Math.round(ph * 0.12))}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -1753,12 +1762,12 @@ canvas.fill { width: 100%; height: 100%; display: block; }
         for (let i = 0; i < BINS; i++) bins[i] = Math.log10(bins[i] + 1) / top;
       }
       const pw = Math.min(190, w * 0.38), ph = Math.min(76, h * 0.3), px = 12, py = h - ph - 12;
-      ctx.fillStyle = "rgba(6, 8, 14, 0.62)";
+      ctx.fillStyle = "rgba(13, 14, 26, 0.66)";
       ctx.beginPath();
       ctx.roundRect ? ctx.roundRect(px, py, pw, ph, 8) : ctx.rect(px, py, pw, ph);
       ctx.fill();
       const ix = px + 10, iy = py + 10, iw = pw - 20, ih = ph - 20;
-      ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
+      ctx.fillStyle = "rgba(195, 200, 230, 0.32)";
       for (let i = 0; i < BINS; i++) {
         const bh = bins[i] * ih;
         ctx.fillRect(ix + (i * iw) / BINS, iy + ih - bh, iw / BINS - 0.6, bh);
@@ -1799,7 +1808,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
       ctx.imageSmoothingEnabled = s * dpr < 5;
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
       if (s > 10) {
-        ctx.strokeStyle = `rgba(128, 140, 170, ${0.28 * clamp((s - 10) / 14)})`;
+        ctx.strokeStyle = `rgba(136, 144, 190, ${0.3 * clamp((s - 10) / 14)})`;
         ctx.lineWidth = 1;
         ctx.beginPath();
         for (let x = Math.ceil(sx); x < sx + sw; x++) {
@@ -2038,11 +2047,11 @@ canvas.fill { width: 100%; height: 100%; display: block; }
       const f = (t % 11000) / 11000;
       const night = f < 0.32 ? 0 : f < 0.47 ? inOut((f - 0.32) / 0.15) : f < 0.82 ? 1 : 1 - inOut((f - 0.82) / 0.15);
       const sky = ctx.createLinearGradient(0, 0, 0, h);
-      sky.addColorStop(0, mix("#7fb2ff", "#0a0e2a", night));
-      sky.addColorStop(1, mix("#e3eeff", "#1d2252", night));
+      sky.addColorStop(0, mix("#aeb1dd", "#101120", night));
+      sky.addColorStop(1, mix("#f0eff6", "#232740", night));
       ctx.fillStyle = sky;
       ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = "#fff";
+      ctx.fillStyle = "#eceef8";
       for (const d of dots) {
         ctx.globalAlpha = night * (0.45 + 0.4 * Math.sin(t / 700 + d.p));
         ctx.fillRect(d.x * w, d.y * h, d.s, d.s);
@@ -2050,7 +2059,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
       ctx.globalAlpha = 1;
       // The sun sets as the moon rises.
       const R = Math.min(w, h) * 0.07;
-      ctx.fillStyle = "#ffd36e";
+      ctx.fillStyle = "#f0c457";
       ctx.globalAlpha = 1 - night;
       ctx.beginPath();
       ctx.arc(w * 0.82, h * 0.2 + night * h * 0.5, R, 0, 6.2832);
@@ -2062,7 +2071,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
       ctx.rect(0, 0, w, h);
       ctx.arc(w * 0.18 + R * 0.38, my - R * 0.22, R * 0.72, 0, 6.2832, true);
       ctx.clip("evenodd");
-      ctx.fillStyle = "#f1ecdc";
+      ctx.fillStyle = "#efdcb8";
       ctx.beginPath();
       ctx.arc(w * 0.18, my, R * 0.8, 0, 6.2832);
       ctx.fill();
