@@ -13,7 +13,7 @@
 // Usage: clicklag OUTDIR FILE   (FILE: several HDUs, its first an image)
 // Exit status 1 when the median time to open the menu or to switch is over
 // 400 ms, or when the image did not zoom, or an Option-drag did not move
-// it; 0 without checking when this process may not post events.
+// it as it went; 0 without checking when this process may not post events.
 //
 //        clicklag OUTDIR FILE --update
 // With uFits 99.0.0 noted as out in the app's settings (the caller writes
@@ -326,39 +326,53 @@ static double optionScroll(NSWindow *w, NSPoint p)
 }
 
 /// A drag from p to q (window coordinates) with button and flags held:
-/// press, hold seconds, eight moves 16 ms apart, release; the uptime of
-/// the first move.
-static double dragWith(NSWindow *w, NSPoint p, NSPoint q, CGMouseButton button, CGEventFlags flags, double hold)
+/// press, eight moves about 16 ms apart, release. This app runs on all the
+/// while: it hosts the preview, and blocked it would hand Quick Look
+/// nothing until the drag was over. Watches the part r of the window: ms
+/// from the first move until it changed (-1: not in 3 s), and in *during
+/// whether that was while the button was still down.
+static double dragWith(NSWindow *w, NSPoint p, NSPoint q, CGMouseButton button, CGEventFlags flags, NSRect r,
+                       BOOL *during)
 {
     CGFloat top = NSMaxY(NSScreen.screens.firstObject.frame);
     NSPoint sp = [w convertPointToScreen:p], sq = [w convertPointToScreen:q];
     CGPoint a = CGPointMake(sp.x, top - sp.y), b = CGPointMake(sq.x, top - sq.y);
     BOOL left = button == kCGMouseButtonLeft;
+    uint64_t base = partPixels(w, r);
     post(CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, a, kCGMouseButtonLeft));
     spin(0.05);
     CGEventRef down = CGEventCreateMouseEvent(NULL, left ? kCGEventLeftMouseDown : kCGEventOtherMouseDown, a, button);
     CGEventSetFlags(down, flags);
     post(down);
-    usleep((useconds_t)(hold * 1e6));
-    double t0 = uptime();
+    spin(0.03);
+    double t0 = uptime(), changed = -1;
     for (int i = 1; i <= 8; i++) {
         CGPoint at = CGPointMake(a.x + (b.x - a.x) * i / 8, a.y + (b.y - a.y) * i / 8);
         CGEventRef e = CGEventCreateMouseEvent(NULL, left ? kCGEventLeftMouseDragged : kCGEventOtherMouseDragged, at,
                                                button);
         CGEventSetFlags(e, flags);
         post(e);
-        usleep(16000);
+        spin(0.016);
+        if (changed < 0 && partPixels(w, r) != base)
+            changed = uptime() - t0;
     }
+    *during = changed >= 0;
     CGEventRef up = CGEventCreateMouseEvent(NULL, left ? kCGEventLeftMouseUp : kCGEventOtherMouseUp, b, button);
     CGEventSetFlags(up, flags);
     post(up);
-    return t0;
+    while (changed < 0 && uptime() - t0 < 3) {
+        spin(0.005);
+        if (partPixels(w, r) != base)
+            changed = uptime() - t0;
+    }
+    return changed < 0 ? -1 : changed * 1000;
 }
 
 /// Moving the zoomed-in image in Quick Look: an Option-drag, and a drag
-/// with the middle button, move the picture, and dragging back brings it
-/// back. Whether Quick Look passes the middle button on is its own affair
-/// (only said). The number of ways that did not move it.
+/// with the middle button, move the picture while the button is down, and
+/// dragging back brings it back. Whether Quick Look passes the middle
+/// button on is its own affair (only said). The number of ways that did
+/// not move it as it should.
 static int checkPan(NSWindow *w, NSRect area)
 {
     NSRect margin = NSMakeRect(NSMinX(area) + 8, NSMidY(area) - 40, 40, 80);
@@ -377,24 +391,22 @@ static int checkPan(NSWindow *w, NSRect area)
         CGEventFlags flags = middle ? 0 : kCGEventFlagMaskAlternate;
         stillPixels(w);
         uint64_t base = partPixels(w, band);
-        double moved = waitPart(w, band, base, NO, dragWith(w, mid, to, button, flags, 0.03));
+        BOOL during = NO, again = NO;
+        double moved = dragWith(w, mid, to, button, flags, band, &during);
         spin(0.7);
-        double back = moved < 0 ? -1 : waitPart(w, band, base, YES, dragWith(w, to, mid, button, flags, 0.03));
-        printf("     %s moved the image after %6.1f ms, and back after %6.1f ms%s\n",
-               middle ? "A drag with the middle button" : "An Option-drag", moved, back,
-               middle && moved < 0 ? " (Quick Look did not pass the middle button on)" : "");
-        failed += !middle && moved < 0;
+        double back = -1;
+        if (moved >= 0) {
+            dragWith(w, to, mid, button, flags, band, &again);
+            back = waitPart(w, band, base, YES, uptime());
+        }
+        printf("     %s moved the image after %6.1f ms%s; dragged back, it %s\n",
+               middle ? "A drag with the middle button" : "An Option-drag", moved,
+               moved < 0 ? (middle ? " (Quick Look did not pass the middle button on)" : "")
+                         : during ? ", the button still down" : ", only once the button came up",
+               back < 0 ? "did not come back as it was" : "came back as it was");
+        failed += !middle && (moved < 0 || !during);
         spin(0.7);
     }
-    // Pressed and held still first: whether a drag is held back from the
-    // press for a while, or from its first move.
-    stillPixels(w);
-    uint64_t base = partPixels(w, band);
-    double held = waitPart(w, band, base, NO, dragWith(w, mid, to, kCGMouseButtonLeft, kCGEventFlagMaskAlternate, 0.8));
-    spin(0.7);
-    waitPart(w, band, base, YES, dragWith(w, to, mid, kCGMouseButtonLeft, kCGEventFlagMaskAlternate, 0.03));
-    printf("     Held still for 0.8 s first, an Option-drag moved the image after %6.1f ms\n", held);
-    spin(0.7);
     for (int i = 0; i < 3; i++) {   // back to the whole image
         clickWith(w, mid, kCGEventFlagMaskAlternate | kCGEventFlagMaskShift);
         spin(0.7);
@@ -632,7 +644,7 @@ int main(int argc, const char *argv[])
         printf("%s zoom in Quick Look: %s\n", zoomFailed ? "FAIL" : "ok  ",
                zoomFailed ? "Option-click or Option-scrolling did not zoom" : "Option-click and Option-scrolling zoom");
         printf("%s moving the image in Quick Look: %s\n", panFailed ? "FAIL" : "ok  ",
-               panFailed ? "an Option-drag did not move it" : "an Option-drag moves it");
+               panFailed ? "an Option-drag did not move it as it went" : "an Option-drag moves it as it goes");
         return ok && !zoomFailed && !panFailed ? 0 : 1;
     }
 }
