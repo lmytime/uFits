@@ -220,6 +220,110 @@ static void report(NSString *step, BOOL ok, NSString *what)
     printf("%s %s: %s\n", ok ? "ok  " : "FAIL", step.UTF8String, what.UTF8String);
 }
 
+/// A mouse event at p (window coordinates) with mods held; the middle
+/// button's say so (button number 2), as the mouse sends them.
+static NSEvent *mouseEvent(NSEventType type, NSPoint p, NSEventModifierFlags mods)
+{
+    NSEvent *e = [NSEvent mouseEventWithType:type
+                                    location:p
+                               modifierFlags:mods
+                                   timestamp:0
+                                windowNumber:gWindow.windowNumber
+                                     context:nil
+                                 eventNumber:0
+                                  clickCount:1
+                                    pressure:1];
+    BOOL other = type == NSEventTypeOtherMouseDown || type == NSEventTypeOtherMouseDragged ||
+                 type == NSEventTypeOtherMouseUp;
+    CGEventRef cg = other && e.buttonNumber != 2 && e.CGEvent ? CGEventCreateCopy(e.CGEvent) : NULL;
+    if (cg) {
+        CGEventSetIntegerValueField(cg, kCGMouseEventButtonNumber, kCGMouseButtonCenter);
+        NSEvent *middle = [NSEvent eventWithCGEvent:cg];
+        CFRelease(cg);
+        if (middle.buttonNumber == 2 && NSEqualPoints(middle.locationInWindow, p))
+            e = middle;
+    }
+    return e;
+}
+
+/// Hands e to v, as the window does.
+static void sendMouse(NSView *v, NSEvent *e)
+{
+    switch (e.type) {
+    case NSEventTypeLeftMouseDown: [v mouseDown:e]; break;
+    case NSEventTypeLeftMouseDragged: [v mouseDragged:e]; break;
+    case NSEventTypeLeftMouseUp: [v mouseUp:e]; break;
+    case NSEventTypeOtherMouseDown: [v otherMouseDown:e]; break;
+    case NSEventTypeOtherMouseDragged: [v otherMouseDragged:e]; break;
+    case NSEventTypeOtherMouseUp: [v otherMouseUp:e]; break;
+    default: break;
+    }
+}
+
+/// A press at from, a drag to to in four steps and a release, with the
+/// middle button or the left one, and mods held (to == from: a click).
+static void dragWith(NSView *v, BOOL middle, NSEventModifierFlags mods, NSPoint from, NSPoint to)
+{
+    sendMouse(v, mouseEvent(middle ? NSEventTypeOtherMouseDown : NSEventTypeLeftMouseDown, from, mods));
+    for (int i = 1; i <= 4; i++)
+        sendMouse(v, mouseEvent(middle ? NSEventTypeOtherMouseDragged : NSEventTypeLeftMouseDragged,
+                                NSMakePoint(from.x + (to.x - from.x) * i / 4, from.y + (to.y - from.y) * i / 4),
+                                mods));
+    sendMouse(v, mouseEvent(middle ? NSEventTypeOtherMouseUp : NSEventTypeLeftMouseUp, to, mods));
+}
+
+/// Moving a zoomed-in image: an Option-drag or a middle-button drag keeps
+/// the point of the image taken hold of under the pointer, at the same
+/// zoom; a middle-click centres the view on the point clicked; an
+/// Option-click without a drag still zooms in, Shift-Option-click out; the
+/// part on view is drawn in detail where it moved to.
+static void checkPan(NSScrollView *sv, NSView<FQImageViewParts> *iv)
+{
+    NSPoint mid = [sv convertPoint:NSMakePoint(NSMidX(sv.bounds), NSMidY(sv.bounds)) toView:nil];
+    NSPoint to = NSMakePoint(mid.x + 120, mid.y - 80);
+    CGFloat zoom = sv.magnification;
+    for (int middle = 0; middle < 2; middle++) {
+        NSEventModifierFlags mods = middle ? 0 : NSEventModifierFlagOption;
+        NSPoint held = [iv convertPoint:mid fromView:nil];
+        NSRect before = sv.documentVisibleRect;
+        dragWith(iv, middle, mods, mid, to);
+        NSPoint under = [iv convertPoint:to fromView:nil];
+        double off = hypot(under.x - held.x, under.y - held.y);
+        report(middle ? @"pan-middle" : @"pan-option", off < 1 && fabs(sv.magnification / zoom - 1) < 1e-6,
+               [NSString stringWithFormat:@"dragged by 120, -80 points: the image's point %@ taken hold of is %.2f "
+                                          @"pixels from the pointer; on view %@ -> %@, at %.4f points per pixel "
+                                          @"(was %.4f)%@",
+                                          NSStringFromPoint(held), off, NSStringFromRect(before),
+                                          NSStringFromRect(sv.documentVisibleRect), sv.magnification, zoom,
+                                          middle ? [NSString stringWithFormat:@"; button %ld",
+                                                    (long)mouseEvent(NSEventTypeOtherMouseDown, mid, 0).buttonNumber]
+                                                 : @""]);
+        dragWith(iv, middle, mods, to, mid);   // and back
+    }
+
+    NSPoint aside = NSMakePoint(mid.x - 100, mid.y + 60);
+    NSPoint want = [iv convertPoint:aside fromView:nil];
+    dragWith(iv, YES, 0, aside, aside);
+    NSRect vis = sv.documentVisibleRect;
+    double off = hypot(NSMidX(vis) - want.x, NSMidY(vis) - want.y);
+    report(@"pan-centre", off < 1 && fabs(sv.magnification / zoom - 1) < 1e-6,
+           [NSString stringWithFormat:@"middle-click: the point %@ clicked is %.2f pixels from the middle of %@",
+                                      NSStringFromPoint(want), off, NSStringFromRect(vis)]);
+
+    dragWith(iv, NO, NSEventModifierFlagOption, mid, mid);
+    CGFloat in = sv.magnification;
+    dragWith(iv, NO, NSEventModifierFlagOption | NSEventModifierFlagShift, mid, mid);
+    report(@"zoom-click", fabs(in / zoom - 2) < 1e-3 && fabs(sv.magnification / zoom - 1) < 1e-3,
+           [NSString stringWithFormat:@"Option-click: %.4f points per pixel, Shift-Option-click: %.4f (from %.4f)", in,
+                                      sv.magnification, zoom]);
+
+    spin(0.8);   // the detail comes after a pause
+    NSRect df = iv.detailFrame, on = NSIntersectionRect(sv.documentVisibleRect, iv.bounds);
+    report(@"pan-detail", iv.detail && NSContainsRect(NSInsetRect(df, 1, 1), NSInsetRect(on, 2, 2)),
+           [NSString stringWithFormat:@"after moving: detail over %@, on view %@", NSStringFromRect(df),
+                                      NSStringFromRect(on)]);
+}
+
 /// Grey levels of img, top row first.
 static NSData *greys(CGImageRef img)
 {
@@ -309,6 +413,7 @@ static void checkZoom(FQPreviewController *vc, NSString *data)
                                       detail ? CGImageGetHeight(detail) : 0, NSStringFromRect(df),
                                       NSStringFromRect(vis), match]);
     screenshot(@"zoom-detail");
+    checkPan(sv, iv);
     commandKey(root, @"-");
     report(@"zoom-out", fabs(sv.magnification / (4 * fit) - 1) < 1e-3,
            [NSString stringWithFormat:@"Command -: %.4f points per pixel", sv.magnification]);

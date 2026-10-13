@@ -7,12 +7,13 @@
 // double-click time (half a second) unless the preview lets them through
 // (FQLetClicksThrough). Then zooms the image with Option-clicks and
 // Option-scrolling (and Command + and 0, which reach the preview only when
-// Quick Look passes keys on).
+// Quick Look passes keys on), and moves it with Option-drags and drags with
+// the middle button (which Quick Look need not pass on).
 //
 // Usage: clicklag OUTDIR FILE   (FILE: several HDUs, its first an image)
 // Exit status 1 when the median time to open the menu or to switch is over
-// 400 ms, or when the image did not zoom; 0 without checking when this
-// process may not post events.
+// 400 ms, or when the image did not zoom, or an Option-drag did not move
+// it; 0 without checking when this process may not post events.
 //
 //        clicklag OUTDIR FILE --update
 // With uFits 99.0.0 noted as out in the app's settings (the caller writes
@@ -324,6 +325,74 @@ static double optionScroll(NSWindow *w, NSPoint p)
     return t0;
 }
 
+/// A drag from p to q (window coordinates) with button and flags held:
+/// press, eight moves 16 ms apart, release; the uptime of the first move.
+static double dragWith(NSWindow *w, NSPoint p, NSPoint q, CGMouseButton button, CGEventFlags flags)
+{
+    CGFloat top = NSMaxY(NSScreen.screens.firstObject.frame);
+    NSPoint sp = [w convertPointToScreen:p], sq = [w convertPointToScreen:q];
+    CGPoint a = CGPointMake(sp.x, top - sp.y), b = CGPointMake(sq.x, top - sq.y);
+    BOOL left = button == kCGMouseButtonLeft;
+    post(CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, a, kCGMouseButtonLeft));
+    spin(0.05);
+    CGEventRef down = CGEventCreateMouseEvent(NULL, left ? kCGEventLeftMouseDown : kCGEventOtherMouseDown, a, button);
+    CGEventSetFlags(down, flags);
+    post(down);
+    usleep(30000);
+    double t0 = uptime();
+    for (int i = 1; i <= 8; i++) {
+        CGPoint at = CGPointMake(a.x + (b.x - a.x) * i / 8, a.y + (b.y - a.y) * i / 8);
+        CGEventRef e = CGEventCreateMouseEvent(NULL, left ? kCGEventLeftMouseDragged : kCGEventOtherMouseDragged, at,
+                                               button);
+        CGEventSetFlags(e, flags);
+        post(e);
+        usleep(16000);
+    }
+    CGEventRef up = CGEventCreateMouseEvent(NULL, left ? kCGEventLeftMouseUp : kCGEventOtherMouseUp, b, button);
+    CGEventSetFlags(up, flags);
+    post(up);
+    return t0;
+}
+
+/// Moving the zoomed-in image in Quick Look: an Option-drag, and a drag
+/// with the middle button, move the picture, and dragging back brings it
+/// back. Whether Quick Look passes the middle button on is its own affair
+/// (only said). The number of ways that did not move it.
+static int checkPan(NSWindow *w, NSRect area)
+{
+    NSRect margin = NSMakeRect(NSMinX(area) + 8, NSMidY(area) - 40, 40, 80);
+    NSRect band = NSInsetRect(area, NSWidth(area) * 0.3, NSHeight(area) * 0.3);
+    NSPoint mid = NSMakePoint(NSMidX(area), NSMidY(area)), to = NSMakePoint(mid.x + 90, mid.y);
+    stillPixels(w);
+    uint64_t whole = partPixels(w, margin);
+    if (waitPart(w, margin, whole, NO, clickWith(w, mid, kCGEventFlagMaskAlternate)) < 0) {
+        printf("     (Option-click did not zoom in: moving not checked)\n");
+        return 1;
+    }
+    spin(0.7);   // not a double click
+    int failed = 0;
+    for (int middle = 0; middle < 2; middle++) {
+        CGMouseButton button = middle ? kCGMouseButtonCenter : kCGMouseButtonLeft;
+        CGEventFlags flags = middle ? 0 : kCGEventFlagMaskAlternate;
+        stillPixels(w);
+        uint64_t base = partPixels(w, band);
+        double moved = waitPart(w, band, base, NO, dragWith(w, mid, to, button, flags));
+        spin(0.7);
+        double back = moved < 0 ? -1 : waitPart(w, band, base, YES, dragWith(w, to, mid, button, flags));
+        printf("     %s moved the image after %6.1f ms, and back after %6.1f ms%s\n",
+               middle ? "A drag with the middle button" : "An Option-drag", moved, back,
+               middle && moved < 0 ? " (Quick Look did not pass the middle button on)" : "");
+        failed += !middle && moved < 0;
+        spin(0.7);
+    }
+    for (int i = 0; i < 3; i++) {   // back to the whole image
+        clickWith(w, mid, kCGEventFlagMaskAlternate | kCGEventFlagMaskShift);
+        spin(0.7);
+    }
+    waitPart(w, margin, whole, YES, uptime());
+    return failed;
+}
+
 /// A key pressed with Command held.
 static double commandKey(CGKeyCode key)
 {
@@ -539,8 +608,10 @@ int main(int argc, const char *argv[])
             [switches addObject:@(image < 0 ? 1e9 : image)];
         }
         // The image (Image was clicked last) zooms.
-        int zoomFailed = checkZoom(w, NSMakeRect(NSMinX(rf), NSMinY(rf) + 30, NSWidth(rf), NSHeight(rf) - 30));
+        NSRect picture = NSMakeRect(NSMinX(rf), NSMinY(rf) + 30, NSWidth(rf), NSHeight(rf) - 30);
+        int zoomFailed = checkZoom(w, picture);
         screenshot(w, [out stringByAppendingPathComponent:@"ui-clicks-zoom.png"]);
+        int panFailed = checkPan(w, picture);
         [pv close];
 
         double m = median(menus), s = median(switches);
@@ -550,6 +621,8 @@ int main(int argc, const char *argv[])
                ok ? "ok  " : "FAIL", m, s, kLimitMs);
         printf("%s zoom in Quick Look: %s\n", zoomFailed ? "FAIL" : "ok  ",
                zoomFailed ? "Option-click or Option-scrolling did not zoom" : "Option-click and Option-scrolling zoom");
-        return ok && !zoomFailed ? 0 : 1;
+        printf("%s moving the image in Quick Look: %s\n", panFailed ? "FAIL" : "ok  ",
+               panFailed ? "an Option-drag did not move it" : "an Option-drag moves it");
+        return ok && !zoomFailed && !panFailed ? 0 : 1;
     }
 }

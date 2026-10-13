@@ -57,7 +57,8 @@ The bar at the bottom of the preview has:
 
 To zoom into an image, pinch, ⌥-click (⇧⌥-click zooms out), or scroll with ⌘ or ⌥
 held; in the uFits app ⌘+, ⌘− and ⌘0 work too. Zoomed in, the part on view is shown at
-full resolution.
+full resolution. To move around it, drag with the middle mouse button or with ⌥ held (a
+middle-click centres the view where you click), or scroll.
 
 When a new version of uFits is out, **Update available** appears in the bar; open the
 uFits app and it updates itself in a few seconds.

@@ -83,7 +83,8 @@ Time spent in the core alone, measured on a 4-core Linux VM:
 - Changing the stretch only remaps the image already binned, so it is instant even for
   big or compressed files.
 - Zoom (pinch, ⌥-click, ⌘- or ⌥-scroll; ⌘+ ⌘− ⌘0 where keys reach the preview) goes up
-  to 32 points per image pixel. Once an image shown binned is zoomed in past its binned
+  to 32 points per image pixel. A drag with the middle button or with ⌥ held moves the
+  image (an ⌥-click without a drag still zooms; a middle-click centres the view there). Once an image shown binned is zoomed in past its binned
   pixels, the part on view is read again at full resolution in the background
   (`fq_render_detail`: a region, mapped with the stretch of the whole image) and laid
   over it.

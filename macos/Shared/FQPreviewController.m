@@ -59,7 +59,8 @@ static const CGFloat kMaxZoom = 32;
 /// An image, one point per pixel (the scroll view around it zooms): the
 /// whole image as rendered, and over it, when zoomed in on an image shown
 /// binned, the part on view rendered pixel for pixel. Pixels stay crisp
-/// when enlarged. Command- or Option-scrolling zooms.
+/// when enlarged. Command- or Option-scrolling zooms; dragging with the
+/// middle button, or with Option held, moves the image.
 @interface FQImageView : NSView
 @property(nonatomic, nullable) CGImageRef image;
 @property(nonatomic, readonly, nullable) CGImageRef detail;
@@ -71,6 +72,12 @@ static const CGFloat kMaxZoom = 32;
 @implementation FQImageView {
     CGImageRef _image, _detail;
     CALayer *_detailLayer;
+    // A press that can move the image (middle button, or Option-click):
+    // the point of the image under the pointer then, where the pointer was
+    // in the window, which button, and whether it has moved the image yet.
+    NSPoint _grab, _grabInWindow;
+    NSInteger _grabButton;   // -1: none
+    BOOL _grabZoomsOut, _dragged;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -88,6 +95,7 @@ static const CGFloat kMaxZoom = 32;
         [layer addSublayer:_detailLayer];
         self.layer = layer;
         self.wantsLayer = YES;
+        _grabButton = -1;
     }
     return self;
 }
@@ -170,7 +178,64 @@ static const CGFloat kMaxZoom = 32;
     return YES;
 }
 
-/// Option-click zooms in, Shift-Option-click out, as in Quick Look.
+/// Shows the image from origin (this view's coordinates) on, as far as it
+/// goes; centred where it is smaller than the view.
+- (void)scrollOriginTo:(NSPoint)origin
+{
+    NSScrollView *sv = self.enclosingScrollView;
+    NSClipView *clip = sv.contentView;
+    NSRect r = clip.bounds;
+    r.origin = origin;
+    [clip scrollToPoint:[clip constrainBoundsRect:r].origin];
+    [sv reflectScrolledClipView:clip];
+}
+
+/// Takes hold of the image at the pointer.
+- (void)grab:(NSEvent *)event
+{
+    _grab = [self convertPoint:event.locationInWindow fromView:nil];
+    _grabInWindow = event.locationInWindow;
+    _grabButton = event.buttonNumber;
+    _grabZoomsOut = (event.modifierFlags & NSEventModifierFlagShift) != 0;
+    _dragged = NO;
+}
+
+/// Moves the image with the pointer, keeping the point taken hold of under
+/// it (as far as the image goes), once the pointer has moved a little.
+- (void)dragTo:(NSEvent *)event
+{
+    NSPoint w = event.locationInWindow;
+    if (!_dragged) {
+        if (hypot(w.x - _grabInWindow.x, w.y - _grabInWindow.y) < 3)
+            return;
+        _dragged = YES;
+        [NSCursor.closedHandCursor push];
+    }
+    NSPoint p = [self convertPoint:w fromView:nil];
+    NSPoint o = self.enclosingScrollView.contentView.bounds.origin;
+    [self scrollOriginTo:NSMakePoint(o.x - (p.x - _grab.x), o.y - (p.y - _grab.y))];
+}
+
+/// Lets go of the image; after a click, without a drag, the middle button
+/// centres the view on the point clicked (as DS9 does), and Option zooms in
+/// there, Shift-Option out (as Quick Look does).
+- (void)letGo
+{
+    NSInteger button = _grabButton;
+    _grabButton = -1;
+    if (_dragged) {
+        [NSCursor pop];
+        _dragged = NO;
+    } else if (button == 2) {
+        NSSize visible = self.enclosingScrollView.contentView.bounds.size;
+        [self scrollOriginTo:NSMakePoint(_grab.x - visible.width / 2, _grab.y - visible.height / 2)];
+    } else {
+        [self zoomBy:_grabZoomsOut ? 0.5 : 2 at:_grab];
+    }
+}
+
+/// Option-click: a drag moves the image; a click zooms in, Shift-Option-
+/// click out, as in Quick Look.
 - (void)mouseDown:(NSEvent *)event
 {
     NSEventModifierFlags mods = event.modifierFlags & (NSEventModifierFlagOption | NSEventModifierFlagShift |
@@ -180,7 +245,49 @@ static const CGFloat kMaxZoom = 32;
         [super mouseDown:event];
         return;
     }
-    [self zoomBy:(mods & NSEventModifierFlagShift) ? 0.5 : 2 at:[self convertPoint:event.locationInWindow fromView:nil]];
+    [self grab:event];
+}
+
+- (void)mouseDragged:(NSEvent *)event
+{
+    if (_grabButton == 0)
+        [self dragTo:event];
+    else
+        [super mouseDragged:event];
+}
+
+- (void)mouseUp:(NSEvent *)event
+{
+    if (_grabButton == 0)
+        [self letGo];
+    else
+        [super mouseUp:event];
+}
+
+/// The middle button: a drag moves the image; a click centres it there.
+- (void)otherMouseDown:(NSEvent *)event
+{
+    if (!self.enclosingScrollView || event.buttonNumber != 2) {
+        [super otherMouseDown:event];
+        return;
+    }
+    [self grab:event];
+}
+
+- (void)otherMouseDragged:(NSEvent *)event
+{
+    if (_grabButton == 2)
+        [self dragTo:event];
+    else
+        [super otherMouseDragged:event];
+}
+
+- (void)otherMouseUp:(NSEvent *)event
+{
+    if (_grabButton == 2)
+        [self letGo];
+    else
+        [super otherMouseUp:event];
 }
 
 @end
