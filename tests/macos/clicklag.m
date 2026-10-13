@@ -326,8 +326,9 @@ static double optionScroll(NSWindow *w, NSPoint p)
 }
 
 /// A drag from p to q (window coordinates) with button and flags held:
-/// press, eight moves 16 ms apart, release; the uptime of the first move.
-static double dragWith(NSWindow *w, NSPoint p, NSPoint q, CGMouseButton button, CGEventFlags flags)
+/// press, hold seconds, eight moves 16 ms apart, release; the uptime of
+/// the first move.
+static double dragWith(NSWindow *w, NSPoint p, NSPoint q, CGMouseButton button, CGEventFlags flags, double hold)
 {
     CGFloat top = NSMaxY(NSScreen.screens.firstObject.frame);
     NSPoint sp = [w convertPointToScreen:p], sq = [w convertPointToScreen:q];
@@ -338,7 +339,7 @@ static double dragWith(NSWindow *w, NSPoint p, NSPoint q, CGMouseButton button, 
     CGEventRef down = CGEventCreateMouseEvent(NULL, left ? kCGEventLeftMouseDown : kCGEventOtherMouseDown, a, button);
     CGEventSetFlags(down, flags);
     post(down);
-    usleep(30000);
+    usleep((useconds_t)(hold * 1e6));
     double t0 = uptime();
     for (int i = 1; i <= 8; i++) {
         CGPoint at = CGPointMake(a.x + (b.x - a.x) * i / 8, a.y + (b.y - a.y) * i / 8);
@@ -376,15 +377,24 @@ static int checkPan(NSWindow *w, NSRect area)
         CGEventFlags flags = middle ? 0 : kCGEventFlagMaskAlternate;
         stillPixels(w);
         uint64_t base = partPixels(w, band);
-        double moved = waitPart(w, band, base, NO, dragWith(w, mid, to, button, flags));
+        double moved = waitPart(w, band, base, NO, dragWith(w, mid, to, button, flags, 0.03));
         spin(0.7);
-        double back = moved < 0 ? -1 : waitPart(w, band, base, YES, dragWith(w, to, mid, button, flags));
+        double back = moved < 0 ? -1 : waitPart(w, band, base, YES, dragWith(w, to, mid, button, flags, 0.03));
         printf("     %s moved the image after %6.1f ms, and back after %6.1f ms%s\n",
                middle ? "A drag with the middle button" : "An Option-drag", moved, back,
                middle && moved < 0 ? " (Quick Look did not pass the middle button on)" : "");
         failed += !middle && moved < 0;
         spin(0.7);
     }
+    // Pressed and held still first: whether a drag is held back from the
+    // press for a while, or from its first move.
+    stillPixels(w);
+    uint64_t base = partPixels(w, band);
+    double held = waitPart(w, band, base, NO, dragWith(w, mid, to, kCGMouseButtonLeft, kCGEventFlagMaskAlternate, 0.8));
+    spin(0.7);
+    waitPart(w, band, base, YES, dragWith(w, to, mid, kCGMouseButtonLeft, kCGEventFlagMaskAlternate, 0.03));
+    printf("     Held still for 0.8 s first, an Option-drag moved the image after %6.1f ms\n", held);
+    spin(0.7);
     for (int i = 0; i < 3; i++) {   // back to the whole image
         clickWith(w, mid, kCGEventFlagMaskAlternate | kCGEventFlagMaskShift);
         spin(0.7);

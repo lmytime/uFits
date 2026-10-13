@@ -209,7 +209,6 @@ static const CGFloat kMaxZoom = 32;
         if (hypot(w.x - _grabInWindow.x, w.y - _grabInWindow.y) < 3)
             return;
         _dragged = YES;
-        [NSCursor.closedHandCursor push];
     }
     NSPoint p = [self convertPoint:w fromView:nil];
     NSPoint o = self.enclosingScrollView.contentView.bounds.origin;
@@ -224,7 +223,6 @@ static const CGFloat kMaxZoom = 32;
     NSInteger button = _grabButton;
     _grabButton = -1;
     if (_dragged) {
-        [NSCursor pop];
         _dragged = NO;
     } else if (button == 2) {
         NSSize visible = self.enclosingScrollView.contentView.bounds.size;
