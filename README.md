@@ -78,6 +78,19 @@ Open uFits (in Applications) to see whether its Quick Look extensions are on, an
 - **Check for updates automatically (once a day)**: uFits asks GitHub, in the background,
   whether a new version is out, and offers it. **Check Now** asks at once.
 
+## FAQ
+
+**How do I switch from QuickFits?**
+
+1. In System Settings › General › Login Items & Extensions, under Extensions, open Quick
+   Look and uncheck both QuickFits entries. (On macOS 13 and 14: System Settings › Privacy
+   & Security › Extensions › Quick Look; on macOS 12 and earlier: System Preferences ›
+   Extensions › Quick Look.)
+2. An easier way: move QuickFits from Applications to the Trash :)
+
+If Space still shows QuickFits' previews after that, open uFits and click **Reset Quick
+Look**.
+
 ## Troubleshooting
 
 - **Space shows nothing, or Finder shows plain icons.** Open the uFits app: it tells you
