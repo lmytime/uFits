@@ -2,19 +2,19 @@ uFits shows FITS and XISF files in Finder: Quick Look previews (select a file, p
 Space) and thumbnails for images, cubes, tile-compressed `.fz` files, spectra, light
 curves, catalogs and tables, with every header.
 
-**New in 0.0.7**
+**New in 0.0.8**
 
-- A new icon: a galaxy in pixel art, in two looks, Dusk and a light one. On macOS 26
-  uFits shows the light icon, and Dusk when System Settings › Appearance › Icon & widget
-  style is Dark; on macOS 15 and earlier, Dusk.
-- **App icon** in the uFits app: Automatic, or always Dusk, or always the light icon. The
-  Dock and the app's window show the one you choose, and updates keep it.
-- A homepage that shows uFits at work: [lmytime.github.io/uFits](https://lmytime.github.io/uFits/).
+- Move around a zoomed-in image: drag it with the middle mouse button, or with ⌥ held. A
+  middle-click centres the view where you click; ⌥-click still zooms in, and ⇧⌥-click
+  out. In Quick Look and in the uFits app.
+- Switching from QuickFits? See the [FAQ](https://github.com/lmytime/uFits#faq).
 
 From 0.0.3 on, uFits says when a newer version is out (**Update available** in the
 preview's bar) and updates itself when you open it. From 0.0.2 or earlier, update once
-with the command below. See [0.0.6](https://github.com/lmytime/uFits/releases/tag/v0.0.6)
-for thumbnails that fill Finder's icons and the app's settings,
+with the command below. See [0.0.7](https://github.com/lmytime/uFits/releases/tag/v0.0.7)
+for the pixel galaxy icon and the App icon setting,
+[0.0.6](https://github.com/lmytime/uFits/releases/tag/v0.0.6) for thumbnails that fill
+Finder's icons and the app's settings,
 [0.0.5](https://github.com/lmytime/uFits/releases/tag/v0.0.5) for XISF images and
 [0.0.3](https://github.com/lmytime/uFits/releases/tag/v0.0.3) for zoom and the FITS files
 of X-ray missions.
