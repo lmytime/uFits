@@ -154,21 +154,28 @@ upstream size options to keep the three binaries small.
 
 `FQUpdate` (shared by the app and the preview extension) keeps what it learns in the
 app's settings, and only the app goes online: Quick Look runs previews in a sandbox
-without network access, whatever their entitlements say. A launchd job,
-`~/Library/LaunchAgents/io.github.lmytime.uFits.update.plist` (set up by the app when it
-opens and by `install.sh`; removed when "Check for updates" is turned off, and by
-`install.sh --uninstall`), runs `uFits --check-for-updates-if-due` every four hours. At
-most once a day that looks where `github.com/lmytime/uFits/releases/latest` redirects
-(`.../releases/tag/vX.Y.Z`, read with a `HEAD` request: no API, no rate limit). The
-preview may read and write the app's settings (`Preview.entitlements`; the stretch that
-previews open with is one setting for Quick Look and the app) and, when a newer version
-is out, shows **Update available** in its bar. A preview may not open other apps either
+without network access, whatever their entitlements say. The app looks as it opens, at
+most once a day (unless "Check for updates" is off), where
+`github.com/lmytime/uFits/releases/latest` redirects (`.../releases/tag/vX.Y.Z`, read
+with a `HEAD` request: no API, no rate limit). The preview may read and write the app's
+settings (`Preview.entitlements`; the stretch that previews open with is one setting for
+Quick Look and the app) and, when the app has seen a newer version, shows **Update
+available** in its bar. A preview may not open other apps either
 (`deny(1) lsopen`): its click asks Quick Look to open `ufits://update` for it, and when
 Quick Look declines (it does), a popover says to open the uFits app. The app offers the
 update as it opens (and at once from "Update available" in its own windows), then runs
 that release's `install.sh` with `UFITS_FROM_APP=1` (the installer then leaves it
 running) and `UFITS_DEST` set to the folder it is in, opens the new copy and quits.
 `uFits --check-for-updates` looks at once and prints what it found.
+
+uFits 0.0.9 and earlier also had a launchd job,
+`~/Library/LaunchAgents/io.github.lmytime.uFits.update.plist`, run
+`uFits --check-for-updates-if-due` every four hours, so that previews said when a new
+version was out even if the app was never opened. macOS kept announcing that job as a
+new background item ("Background Items Added"), it seems after every update: uFits is
+ad-hoc signed, so each new version is a new app to macOS. The job is gone: the app
+removes it as it opens, `install.sh` as it installs, and the job itself when it runs a
+later uFits (`tests/macos/update_job_check.sh`).
 
 ## Building
 
@@ -303,7 +310,8 @@ Look's double-click recognizer would hold each click for half a second), and che
 that no extension crashed. It also plants an old copy of uFits numbered 1.0.0 and
 checks that the installer takes it out of Quick Look's hands, lets a copy of the build
 numbered 0.0.1 update itself to the latest release as a user would
-(`tests/macos/update_check.sh`: its offer, **Update**, the new copy running), and
-uninstalls, checking that nothing of uFits is left in `~/Library`
+(`tests/macos/update_check.sh`: its offer, **Update**, the new copy running), checks
+that the launchd job of uFits 0.0.9 and earlier goes (`tests/macos/update_job_check.sh`),
+and uninstalls, checking that nothing of uFits is left in `~/Library`
 (`tests/macos/uninstall_check.sh`). After a release is published, a last job has the
 previous release update itself to the new one.

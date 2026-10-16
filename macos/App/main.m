@@ -48,7 +48,7 @@ static NSDictionary<NSString *, UTType *> *FQExtensionsElsewhere(void)
     return out;
 }
 
-static void FQScheduleChecks(BOOL on);
+static void FQRemoveUpdateJob(void);
 
 #pragma mark App icon
 
@@ -141,7 +141,7 @@ static NSImage *FQCurrentIcon(void)
     _launched = YES;
     if (!_openedFiles)
         [self showWelcome:nil];
-    FQScheduleChecks(FQUpdate.enabled);   // in case uFits moved
+    FQRemoveUpdateJob();   // of uFits 0.0.9 and earlier
     // The icon of choice: on the app again when an update replaced it, and in
     // the Dock, which shows the app's own icon while it runs.
     if (![FQIconChoice() isEqualToString:@"auto"]) {
@@ -383,7 +383,7 @@ static NSStackView *FQRow(NSArray<NSView *> *views, CGFloat spacing)
         _appIcon.target = self;
         _appIcon.action = @selector(appIconChanged:);
         NSStackView *iconRow = FQRow(@[ [NSTextField labelWithString:@"App icon:"], _appIcon ], 8);
-        _autoCheck = [NSButton checkboxWithTitle:@"Check for updates automatically (once a day)"
+        _autoCheck = [NSButton checkboxWithTitle:@"Check for updates when uFits opens"
                                           target:self
                                           action:@selector(autoCheckChanged:)];
         NSButton *checkNow = [NSButton buttonWithTitle:@"Check Now" target:self action:@selector(checkForUpdates:)];
@@ -742,7 +742,6 @@ static BOOL FQInApplications(void)
 - (void)autoCheckChanged:(NSButton *)sender
 {
     FQUpdate.enabled = sender.state == NSControlStateValueOn;
-    FQScheduleChecks(FQUpdate.enabled);
 }
 
 /// uFits › Check for Updates…: looks now, and says what it found.
@@ -922,61 +921,30 @@ static BOOL FQInApplications(void)
 
 @end
 
-#pragma mark - Looking for updates in the background
+#pragma mark - Looking for updates
 
-/// A launchd job runs uFits --check-for-updates-if-due every four hours
-/// (it goes online once a day at most), so that a newer version shows in
-/// the preview, which may not go online itself:
-/// ~/Library/LaunchAgents/<bundle id>.update.plist.
-static NSString *FQAgentLabel(void)
+/// uFits 0.0.9 and earlier had launchd run uFits --check-for-updates-if-due
+/// every four hours (~/Library/LaunchAgents/<bundle id>.update.plist), so
+/// that previews said when a new version was out, and macOS kept announcing
+/// that job ("Background Items Added"; ad-hoc signed, each new version of
+/// uFits seems a new app to it). uFits now looks only as it opens, and this
+/// removes the job.
+static void FQRemoveUpdateJob(void)
 {
-    return [NSBundle.mainBundle.bundleIdentifier ?: @"io.github.lmytime.uFits" stringByAppendingString:@".update"];
-}
-
-/// Sets up (on) or removes (off) that job, for this copy of uFits.
-static void FQScheduleChecks(BOOL on)
-{
-    NSString *path = [NSString stringWithFormat:@"%@/Library/LaunchAgents/%@.plist", NSHomeDirectory(), FQAgentLabel()];
-    NSString *domain = [NSString stringWithFormat:@"gui/%u", getuid()];
-    NSString *service = [NSString stringWithFormat:@"%@/%@", domain, FQAgentLabel()];
-    NSFileManager *fm = NSFileManager.defaultManager;
-    if (!on) {
-        if ([fm fileExistsAtPath:path]) {
-            RunTool(@"/bin/launchctl", @[ @"bootout", service ]);
-            [fm removeItemAtPath:path error:nil];
-        }
-        return;
-    }
-    // Only where uFits is installed: not from a disk image or a copy that
-    // macOS moved aside (App Translocation).
-    NSString *exe = NSBundle.mainBundle.executablePath;
-    if (!exe || [exe hasPrefix:@"/Volumes/"] || [exe rangeOfString:@"/AppTranslocation/"].location != NSNotFound)
-        return;
-    NSDictionary *job = @{
-        @"Label" : FQAgentLabel(),
-        @"ProgramArguments" : @[ exe, @"--check-for-updates-if-due" ],
-        @"StartInterval" : @(4 * 3600),
-        @"RunAtLoad" : @YES,
-        @"ProcessType" : @"Background",
-        @"LowPriorityIO" : @YES,
-    };
-    if ([[NSDictionary dictionaryWithContentsOfFile:path] isEqualToDictionary:job])
-        return;   // as it should be (launchd loads it at login)
-    [fm createDirectoryAtPath:path.stringByDeletingLastPathComponent
-        withIntermediateDirectories:YES
-                         attributes:nil
-                              error:nil];
-    if (![job writeToURL:[NSURL fileURLWithPath:path] error:nil])
-        return;
-    RunTool(@"/bin/launchctl", @[ @"bootout", service ]);
-    RunTool(@"/bin/launchctl", @[ @"bootstrap", domain, path ]);
+    NSString *label =
+        [NSBundle.mainBundle.bundleIdentifier ?: @"io.github.lmytime.uFits" stringByAppendingString:@".update"];
+    NSString *path = [NSString stringWithFormat:@"%@/Library/LaunchAgents/%@.plist", NSHomeDirectory(), label];
+    if (![NSFileManager.defaultManager removeItemAtPath:path error:nil])
+        return;   // no such job
+    // Last: when the job runs this, launchd ends it here.
+    RunTool(@"/bin/launchctl", @[ @"bootout", [NSString stringWithFormat:@"gui/%u/%@", getuid(), label] ]);
 }
 
 /// uFits --check-for-updates: says whether a newer version is out.
-static int CheckForUpdates(BOOL force)
+static int CheckForUpdates(void)
 {
     __block int status = -1;
-    [FQUpdate check:force
+    [FQUpdate check:YES
                done:^(NSString *newer, NSError *error) {
                    if (error)
                        fprintf(stderr, "uFits: %s\n", error.localizedDescription.UTF8String);
@@ -995,11 +963,13 @@ static int CheckForUpdates(BOOL force)
 int main(int argc, const char *argv[])
 {
     @autoreleasepool {
-        // From the command line (and launchd, and install.sh).
+        // From the command line (and install.sh).
         if (argc > 1 && !strcmp(argv[1], "--check-for-updates"))
-            return CheckForUpdates(YES);
-        if (argc > 1 && !strcmp(argv[1], "--check-for-updates-if-due"))
-            return FQUpdate.due ? CheckForUpdates(NO) : 0;
+            return CheckForUpdates();
+        if (argc > 1 && !strcmp(argv[1], "--check-for-updates-if-due")) {
+            FQRemoveUpdateJob();   // the job of uFits 0.0.9 and earlier runs this
+            return 0;
+        }
         if (argc > 1 && !strcmp(argv[1], "--file-types")) {
             // What macOS takes each extension uFits claims for.
             UTType *fits = [UTType typeWithIdentifier:kFITSType];
@@ -1029,10 +999,6 @@ int main(int argc, const char *argv[])
                 return 1;
             }
             [FQSettings() setObject:choice forKey:kIconKey];
-            return 0;
-        }
-        if (argc > 1 && !strcmp(argv[1], "--schedule-update-checks")) {
-            FQScheduleChecks(FQUpdate.enabled);
             return 0;
         }
         NSApplication *app = NSApplication.sharedApplication;

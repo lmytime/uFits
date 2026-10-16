@@ -27,7 +27,7 @@ REPO=lmytime/uFits
 VERSION=${UFITS_VERSION:-@VERSION@}   # filled in when a release is published
 APP=uFits.app
 IDS="io.github.lmytime.uFits.Preview io.github.lmytime.uFits.Thumbnail"
-AGENT=io.github.lmytime.uFits.update   # looks for a newer uFits (see the app)
+AGENT=io.github.lmytime.uFits.update   # the launchd job of uFits 0.0.9 and earlier
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 TMP=
 MNT=
@@ -257,8 +257,6 @@ install_ufits() {
         say "$others"
     fi
     reset_quicklook
-    # Looking for updates now and then, unless turned off in the app (by
-    # versions that can: an older one would just start).
     bin="$dest/$APP/Contents/MacOS/uFits"
     # The icon chosen in the app: a custom icon on the app, gone with the copy
     # replaced (versions that have the setting).
@@ -266,12 +264,10 @@ install_ufits() {
     case $choice in
     dusk | light) ! grep -q -- --set-icon "$bin" 2>/dev/null || "$bin" --set-icon "$choice" >/dev/null 2>&1 || true ;;
     esac
-    if grep -q -- --schedule-update-checks "$bin" 2>/dev/null; then
-        "$bin" --schedule-update-checks >/dev/null 2>&1 || true
-    else
-        launchctl bootout "gui/$(id -u)/$AGENT" 2>/dev/null || true
-        rm -f "$HOME/Library/LaunchAgents/$AGENT.plist"
-    fi
+    # uFits 0.0.9 and earlier had launchd look for updates every four hours,
+    # and macOS kept announcing that job; uFits now looks as it opens.
+    launchctl bootout "gui/$(id -u)/$AGENT" 2>/dev/null || true
+    rm -f "$HOME/Library/LaunchAgents/$AGENT.plist"
 
     for id in $missing; do
         say "Note: Quick Look has not picked up $id yet; opening uFits from $dest once registers it."

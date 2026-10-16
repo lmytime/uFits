@@ -8,13 +8,16 @@
 # is opened; when it does not offer the update by itself, uFits › Check for
 # Updates… asks for it; Update is clicked (System Events clicks for the
 # user). Then VERSION must be in /Applications and running, the old copy
-# gone, and Quick Look and the launchd job must use the new copy. PICTURES,
-# if given, gets app-update-offer.png and app-updated.png.
+# gone, Quick Look must use the new copy, and the launchd job that uFits
+# 0.0.9 and earlier set up to look for updates must be gone (or, when VERSION
+# is one of those, run the new copy). PICTURES, if given, gets
+# app-update-offer.png and app-updated.png.
 set -eu
 
 want=$1
 pics=${2:-}
 app=/Applications/uFits.app
+job=$HOME/Library/LaunchAgents/io.github.lmytime.uFits.update.plist
 
 version() { plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist" 2>/dev/null || true; }
 
@@ -70,6 +73,7 @@ if [ -z "$offered" ]; then
     exit 1
 fi
 picture app-update-offer.png
+[ ! -e "$job" ] || echo "     (uFits $(version) has set up its launchd job)"
 button Update --click
 t0=$(date +%s)
 
@@ -97,7 +101,12 @@ for id in Preview Thumbnail; do
     check "Quick Look has its $id extension" \
         'pluginkit -m -v -i io.github.lmytime.uFits.$id | grep -F "($want)" | grep -qF "$app/"'
 done
-check "the launchd job runs it" '[ "$(plutil -extract ProgramArguments.0 raw \
-    "$HOME/Library/LaunchAgents/io.github.lmytime.uFits.update.plist" 2> /dev/null)" = "$app/Contents/MacOS/uFits" ]'
+if grep -q -- --schedule-update-checks "$app/Contents/MacOS/uFits"; then
+    check "the launchd job runs it" \
+        '[ "$(plutil -extract ProgramArguments.0 raw "$job" 2> /dev/null)" = "$app/Contents/MacOS/uFits" ]'
+else
+    check "no launchd job" '[ ! -e "$job" ] &&
+        ! launchctl print "gui/$(id -u)/io.github.lmytime.uFits.update" > /dev/null 2>&1'
+fi
 pkill -x uFits 2> /dev/null || true
 exit $fail

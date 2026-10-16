@@ -138,7 +138,7 @@ jobs:
           # then the disk image built above, which the tests below use.
           sh install.sh
           UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh
-          # The app looks for a newer release, as it does once a day.
+          # The app looks for a newer release, as it does when it opens.
           /Applications/uFits.app/Contents/MacOS/uFits --check-for-updates
           # When the app runs the installer to update itself, it keeps running
           # (and opens the new copy once the installer is done).
@@ -149,9 +149,6 @@ jobs:
           osascript -e 'quit app "uFits"' || pkill -x uFits || true
           # What macOS takes each extension uFits claims for.
           /Applications/uFits.app/Contents/MacOS/uFits --file-types
-          # A launchd job (set up by the installer) looks for updates now and then.
-          plutil -p ~/Library/LaunchAgents/io.github.lmytime.uFits.update.plist
-          launchctl print "gui/$(id -u)/io.github.lmytime.uFits.update" | grep -E "^\s*(state|program|path) =" || true
           # Both extensions are registered (the tests below need them).
           pluginkit -m -v -i io.github.lmytime.uFits.Preview | grep io.github.lmytime.uFits.Preview
           pluginkit -m -v -i io.github.lmytime.uFits.Thumbnail | grep io.github.lmytime.uFits.Thumbnail
@@ -423,6 +420,10 @@ jobs:
           # This build again, for what follows.
           UFITS_DMG=$(ls build/uFits-*.dmg) sh install.sh > /dev/null
           exit $status
+      - name: The launchd job of uFits 0.0.9 and earlier goes
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        run: UFITS_DMG=$(ls build/uFits-*.dmg) sh tests/macos/update_job_check.sh
       - name: Crash reports
         if: ${{ !cancelled() }}
         run: |
@@ -431,7 +432,7 @@ jobs:
       - name: Quick Look logs
         if: ${{ !cancelled() && (failure() || env.FULL == 'true') }}
         run: |
-          # Looks for a newer release (the app, the launchd job), the preview's
+          # Looks for a newer release (the app), the preview's
           # "Update available", and what the sandbox kept the preview from
           log show --last 15m --style compact --predicate 'eventMessage CONTAINS "the latest release is" OR
             eventMessage CONTAINS "Update available" OR eventMessage CONTAINS "how to update" OR

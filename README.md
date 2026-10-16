@@ -66,8 +66,9 @@ held; in the uFits app ⌘+, ⌘− and ⌘0 work too. Zoomed in, the part on vi
 full resolution. To move around it, drag with the middle mouse button or with ⌥ held (a
 middle-click centres the view where you click), or scroll.
 
-When a new version of uFits is out, **Update available** appears in the bar; open the
-uFits app and it updates itself in a few seconds.
+When you open the uFits app, it looks for a new version (once a day at most) and offers
+it: click **Update** and it updates itself in a few seconds. Once the app has seen a new
+version, **Update available** appears in the bar too.
 
 You can also open FITS, XISF and ASDF files in the uFits app (File › Open, or drop them on its
 icon).
@@ -82,8 +83,8 @@ Open uFits (in Applications) to see whether its Quick Look extensions are on, an
 - **App icon:** Automatic (on macOS 26 the light icon, and the dark one, Dusk, when System
   Settings › Appearance › Icon & widget style is Dark; Dusk on earlier versions), or always
   Dusk or always the light one.
-- **Check for updates automatically (once a day)**: uFits asks GitHub, in the background,
-  whether a new version is out, and offers it. **Check Now** asks at once.
+- **Check for updates when uFits opens** (once a day at most): uFits asks GitHub whether a
+  new version is out, and offers it. **Check Now** asks at once.
 
 ## FAQ
 
