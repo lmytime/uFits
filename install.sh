@@ -226,7 +226,7 @@ install_ufits() {
     rm -rf "$dest/$APP" || fail "could not replace $dest/$APP"
     ditto "$MNT/$APP" "$dest/$APP" || fail "could not copy uFits to $dest"
     hdiutil detach -quiet "$MNT" 2>/dev/null && mounted=0
-    xattr -dr com.apple.quarantine "$dest/$APP" 2>/dev/null || true
+    /usr/bin/xattr -dr com.apple.quarantine "$dest/$APP" 2>/dev/null || true
 
     # Other copies of uFits that macOS knows of (an old build, a copy left in
     # Downloads): Quick Look can use one of them instead of this one (on
