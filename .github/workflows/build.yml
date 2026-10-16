@@ -1,11 +1,25 @@
 name: build
 
-# Branches in this repository are tested on push (a pull request shows those
-# runs too); superseded runs of the same branch are cancelled. Pushing a tag
-# vX.Y.Z, or running the workflow by hand with a release tag, also publishes
-# release X.Y.Z with the disk image once every test has passed.
+# Each commit is tested once, on push to the branch it is made on (a pull
+# request shows those runs too); superseded runs of the same branch are
+# cancelled. main is not tested on push: its commits come tested from a
+# branch, and every release tests in full. Pushes that change only the
+# homepage (docs/) or Markdown files are not tested.
+#
+# A push runs the core tests on Linux and the app on macOS 15. A run by hand
+# (Actions > build > Run workflow) or for a release also tests on macOS 26
+# and runs the checks kept for releases: icons, updating, installing over
+# another copy, windows to review. Pushing a tag vX.Y.Z, or running the
+# workflow by hand with a release tag, also publishes release X.Y.Z with the
+# disk image once every test has passed.
 on:
   push:
+    branches-ignore: [main]
+    tags: ["v*"]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - LICENSE
   workflow_dispatch:
     inputs:
       release:
@@ -48,9 +62,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, macos-26]
+        # macOS 26 too in full runs (by hand, or a release).
+        os: ${{ fromJSON((github.event_name == 'workflow_dispatch' || github.ref_type == 'tag') && '["macos-15", "macos-26"]' || '["macos-15"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
+    env:
+      FULL: ${{ github.event_name == 'workflow_dispatch' || github.ref_type == 'tag' }}
     steps:
       - uses: actions/checkout@v4
       - name: Version
@@ -137,7 +154,7 @@ jobs:
           /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
             | grep -B2 -A8 "gov.nasa.gsfc.fits" | head -40 || true
       - name: Icon size beside other apps' (best effort)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.FULL == 'true' }}
         timeout-minutes: 3
         run: |
           # The share of its square each icon fills, as Finder and the Dock
@@ -149,7 +166,7 @@ jobs:
             "/System/Applications/System Settings.app" "/Applications/Google Chrome.app" /Applications/Firefox.app \
             ${xcode:+"$xcode"} || true
       - name: App icon, light and dark, and the icon of choice
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.FULL == 'true' }}
         timeout-minutes: 6
         run: |
           app=/Applications/uFits.app
@@ -247,7 +264,7 @@ jobs:
           # The same as Finder asks for its icons (Quick Look may frame them).
           ../qlthumb --icon ../ql orient-ll.fits orient-ll-big.fits orient-ul-topdown.fits orient-ul.xisf
       - name: Finder icons (best effort)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.FULL == 'true' }}
         timeout-minutes: 3
         run: |
           # The orientation files in a Finder window, for review: blocks in
@@ -306,7 +323,7 @@ jobs:
           defaults delete io.github.lmytime.uFits stretch 2>/dev/null || true
           exit $status
       - name: App windows (best effort)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.FULL == 'true' }}
         timeout-minutes: 2
         run: |
           open /Applications/uFits.app
@@ -321,7 +338,7 @@ jobs:
           screencapture -x build/ql/app-viewer.png || true
           osascript -e 'quit app "uFits"' || true
       - name: Another copy of uFits, numbered higher (as the first builds were)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.FULL == 'true' }}
         timeout-minutes: 4
         run: |
           # A copy of uFits 1.0.0 left somewhere: which copy makes Finder's
@@ -372,7 +389,7 @@ jobs:
           esac
           rm -rf /private/tmp/old-builds
       - name: Update, as a user would
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.FULL == 'true' }}
         timeout-minutes: 6
         run: |
           # This build, numbered 0.0.1, updates itself to the latest release
@@ -404,7 +421,7 @@ jobs:
           ls ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i ufits || echo "no uFits crash reports"
           for f in ~/Library/Logs/DiagnosticReports/*uFits*; do [ -f "$f" ] && head -150 "$f"; done; true
       - name: Quick Look logs
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && (failure() || env.FULL == 'true') }}
         run: |
           # Looks for a newer release (the app, the launchd job), the preview's
           # "Update available", and what the sandbox kept the preview from
@@ -442,6 +459,7 @@ jobs:
   # and Dusk when icons are dark.
   icon-on-26:
     name: The release build's icon on macOS 26
+    if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
     needs: macos
     runs-on: macos-26
     timeout-minutes: 8
