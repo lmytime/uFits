@@ -115,6 +115,11 @@ static void par_for(size_t n, int threads, void *ctx, task_fn fn)
 }
 #endif
 
+void fqi_par_for(size_t n, int threads, void *ctx, void (*fn)(void *ctx, size_t i))
+{
+    par_for(n, threads, ctx, fn);
+}
+
 /* -------------------------------------------------- compressed images */
 
 enum { ALG_NONE, ALG_RICE, ALG_GZIP1, ALG_GZIP2, ALG_PLIO, ALG_UNSUPPORTED };
@@ -550,6 +555,12 @@ int fqi_describe_image(fq_file *f, int idx, imgdesc *d)
     d->hdu = idx;
     if (h->xisf)
         return fqi_xisf_describe(h, d);
+    if (h->asdf) {
+        if (!fqi_asdf_describe(h, d))
+            return 0;
+        d->compressed = fqi_asdf_compression(f, h, d->cmptype, sizeof d->cmptype);
+        return 1;
+    }
     int is_img = idx == 0 || !strcmp(h->xtension, "IMAGE") || !strcmp(h->xtension, "IUEIMAGE");
     if (is_img && !h->groups) {
         if (h->naxis < 1)
@@ -602,6 +613,8 @@ static int select_target(fq_file *f, const fq_opts *o, imgdesc *d, int *table, c
                 hdu_t *h = fqi_get_hdu(f, o->hdu);
                 if (h->xisf)
                     fqi_seterr(err, errlen, "%s", fqi_xisf_error(h));
+                else if (h->asdf)
+                    fqi_seterr(err, errlen, "%s", fqi_asdf_error(h));
                 else
                     fqi_seterr(err, errlen, "%s compression is not supported", d->cmptype);
                 return -1;
@@ -621,6 +634,11 @@ static int select_target(fq_file *f, const fq_opts *o, imgdesc *d, int *table, c
     memset(&oned, 0, sizeof oned);
     memset(&unsup, 0, sizeof unsup);
     int have1d = 0, haveunsup = 0, tables = 0;
+    if (f->asdf) {   /* Roman's "data" (or JWST's) before its other arrays */
+        int pref = fqi_asdf_preferred(f);
+        if (pref >= 0 && fqi_describe_image(f, pref, d) && d->supported)
+            return 0;
+    }
     for (int i = 0; i < 4096; i++) {
         hdu_t *h = fqi_get_hdu(f, i);
         if (!h)
@@ -662,11 +680,15 @@ static int select_target(fq_file *f, const fq_opts *o, imgdesc *d, int *table, c
         hdu_t *h = fqi_get_hdu(f, unsup.hdu);
         if (h->xisf)
             fqi_seterr(err, errlen, "%s", fqi_xisf_error(h));
+        else if (h->asdf)
+            fqi_seterr(err, errlen, "%s", fqi_asdf_error(h));
         else
             fqi_seterr(err, errlen, "%s compression is not supported", unsup.cmptype);
         return -1;
     }
-    if (tables)
+    if (f->asdf)
+        fqi_seterr(err, errlen, "no array to show in this ASDF file");
+    else if (tables)
         fqi_seterr(err, errlen, "no image, and no table with columns to plot");
     else
         fqi_seterr(err, errlen, "no image data");
@@ -675,11 +697,15 @@ static int select_target(fq_file *f, const fq_opts *o, imgdesc *d, int *table, c
 
 /* ------------------------------------------------------- pixel access */
 
-enum { F_U8, F_I16, F_I32, F_I64, F_F32, F_F64, F_F32N, F_XISF };
+enum { F_U8, F_I16, F_I32, F_I64, F_F32, F_F64, F_F32N, F_NATIVE };
+/* F_NATIVE samples read directly: little-endian (the host's) formats. */
+enum { N_GENERIC, N_U8, N_I8, N_U16, N_I16, N_U32, N_I32, N_F16, N_F32, N_F64 };
 
 typedef struct {
     int fmt, bpp;
-    int bitpix, big_endian, stride; /* XISF scalar format and sample stride */
+    int bitpix, sign, big_endian, stride; /* F_NATIVE (XISF, ASDF): sample format
+                                             (signed integers: sign) and stride */
+    int native;                     /* F_NATIVE: N_*, a format read directly */
     double scale, zero, ref;
     int has_blank;
     int64_t blank;
@@ -706,7 +732,30 @@ static inline const uint8_t *src_row(const src_t *s, int slot, int64_t y)
     return s->base + off;
 }
 
-static double xisf_sample(const src_t *s, const uint8_t *p)
+static float half_float(uint16_t h)
+{
+    uint32_t sign = (uint32_t)(h & 0x8000u) << 16, exp = (h >> 10) & 0x1f, man = h & 0x3ffu, bits;
+    if (exp == 0 && man == 0) {
+        bits = sign;
+    } else if (exp == 0) {   /* subnormal */
+        exp = 113;
+        while (!(man & 0x400u)) {
+            man <<= 1;
+            exp--;
+        }
+        bits = sign | exp << 23 | (man & 0x3ffu) << 13;
+    } else if (exp == 31) {
+        bits = sign | 0x7f800000u | man << 13;
+    } else {
+        bits = sign | (exp + 112) << 23 | man << 13;
+    }
+    float v;
+    memcpy(&v, &bits, 4);
+    return v;
+}
+
+/* A sample of XISF or ASDF data, in its own byte order. */
+static double native_sample(const src_t *s, const uint8_t *p)
 {
     uint64_t u = 0;
     if (s->big_endian) {
@@ -714,6 +763,12 @@ static double xisf_sample(const src_t *s, const uint8_t *p)
             u = (u << 8) | p[i];
     } else {
         memcpy(&u, p, (size_t)s->bpp);
+    }
+    if (s->bitpix == -16)
+        return half_float((uint16_t)u);
+    if (s->sign) {
+        int shift = 64 - 8 * s->bpp;
+        return (double)((int64_t)(u << shift) >> shift);
     }
     if (s->bitpix == -32) {
         uint32_t bits = (uint32_t)u;
@@ -729,6 +784,16 @@ static double xisf_sample(const src_t *s, const uint8_t *p)
     return (double)u;
 }
 
+/* One case of F_NATIVE: n samples of type T (SIZE bytes) at IDX, as VALUE. */
+#define NATIVE_RUN(CODE, T, SIZE, VALUE, IDX)                                    \
+        case CODE:                                                               \
+            for (int64_t i = 0; i < n; i++) {                                    \
+                T v;                                                             \
+                memcpy(&v, p + (IDX) * (SIZE) * st, SIZE);                       \
+                out[i] = (float)((double)(VALUE) - ref);                         \
+            }                                                                    \
+            break;
+
 /* Convert n pixels at indices IDX (an expression of x0, i, step) to floats. */
 #define DECODE_FN(NAME, IDX)                                                     \
 static void NAME(const src_t *s, const uint8_t *row, int64_t x0, int64_t step,  \
@@ -741,10 +806,25 @@ static void NAME(const src_t *s, const uint8_t *row, int64_t x0, int64_t step,  
     const int hb = s->has_blank;                                                 \
     const int64_t bl = s->blank;                                                 \
     switch (s->fmt) {                                                            \
-    case F_XISF:                                                                \
-        for (int64_t i = 0; i < n; i++)                                          \
-            out[i] = (float)(xisf_sample(s, p + (IDX) * s->bpp * s->stride) - s->ref); \
+    case F_NATIVE: {                                                            \
+        const int64_t st = s->stride;                                            \
+        const double ref = s->ref;                                               \
+        switch (s->native) {                                                     \
+        NATIVE_RUN(N_U8, uint8_t, 1, v, IDX) \
+        NATIVE_RUN(N_I8, int8_t, 1, v, IDX) \
+        NATIVE_RUN(N_U16, uint16_t, 2, v, IDX) \
+        NATIVE_RUN(N_I16, int16_t, 2, v, IDX) \
+        NATIVE_RUN(N_U32, uint32_t, 4, v, IDX) \
+        NATIVE_RUN(N_I32, int32_t, 4, v, IDX) \
+        NATIVE_RUN(N_F16, uint16_t, 2, half_float(v), IDX)                            \
+        NATIVE_RUN(N_F32, float, 4, v, IDX) \
+        NATIVE_RUN(N_F64, double, 8, v, IDX) \
+        default:                                                                 \
+            for (int64_t i = 0; i < n; i++)                                      \
+                out[i] = (float)(native_sample(s, p + (IDX) * s->bpp * st) - ref); \
+        }                                                                        \
         break;                                                                   \
+    }                                                                            \
     case F_U8:                                                                   \
         for (int64_t i = 0; i < n; i++) {                                        \
             uint8_t v = p[IDX];                                                  \
@@ -1087,7 +1167,7 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
     /* Colour: three plane cubes and Bayer mosaics. */
     P->color = FQ_COLOR_MONO;
     if (!o->mono && P->kind == FQ_KIND_IMAGE) {
-        if (d->naxis == 3 && d->naxes[2] == 3) {
+        if (d->naxis == 3 && d->naxes[2] == 3 && !h->asdf) {
             int rgb = 1;
             if (fqi_kw_str(f, h, "CTYPE3", v, sizeof v) && v[0]) {
                 for (char *p = v; *p; p++)
@@ -1184,17 +1264,37 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
     s->zero = h->bzero;
     s->has_blank = h->has_blank && h->bitpix > 0;
     s->blank = h->blank;
-    if (h->xisf) {
-        s->fmt = F_XISF;
+    if (h->xisf || h->asdf) {
+        s->fmt = F_NATIVE;
         s->bitpix = h->bitpix;
         s->bpp = abs(h->bitpix) / 8;
         s->avail = h->data_len;
-        if (fqi_xisf_load(f, h, &s->base, &s->big_endian, &s->stride, err, errlen))
-            return -1;
+        if (h->xisf) {
+            if (fqi_xisf_load(f, h, &s->base, &s->big_endian, &s->stride, err, errlen))
+                return -1;
+        } else {
+            /* Only the plane shown is read (and decompressed). */
+            s->sign = fqi_asdf_signed(h);
+            if (fqi_asdf_load(f, h, P->plane, o->threads, &s->base, &s->big_endian, &s->avail, err, errlen))
+                return -1;
+            for (int slot = 0; slot < 3; slot++)
+                s->plane[slot] = 0;
+        }
+        s->native = N_GENERIC;
+        if (!s->big_endian) {
+            switch (s->bitpix) {
+            case 8: s->native = s->sign ? N_I8 : N_U8; break;
+            case 16: s->native = s->sign ? N_I16 : N_U16; break;
+            case 32: s->native = s->sign ? N_I32 : N_U32; break;
+            case -16: s->native = N_F16; break;
+            case -32: s->native = N_F32; break;
+            case -64: s->native = N_F64; break;
+            }
+        }
         if (!o->exact && (s->bpp >= 4)) {
             const uint8_t *r = src_row(s, 0, P->H / 2);
             if (r) {
-                double v = xisf_sample(s, r + (P->W / 2) * s->bpp * s->stride);
+                double v = native_sample(s, r + (P->W / 2) * s->bpp * s->stride);
                 if (isfinite(v) && fabs(v) > 1e5)
                     s->ref = v;
             }
@@ -2254,7 +2354,7 @@ int fq_list_hdus(fq_file *f, fq_hdu_entry *out, int max)
         imgdesc d;
         fqi_plotspec ps;
         if (fqi_describe_image(f, i, &d)) {
-            if (!d.supported && !h->xisf)
+            if (!d.supported && !h->xisf && !h->asdf)
                 continue;
             int64_t W = d.naxes[0], H = d.naxis > 1 ? d.naxes[1] : 1;
             e.kind = (H == 1 || (H <= 8 && W >= 64 * H)) ? FQ_KIND_PLOT : FQ_KIND_IMAGE;
@@ -2266,7 +2366,7 @@ int fq_list_hdus(fq_file *f, fq_hdu_entry *out, int max)
             fqi_dims_text(dims, sizeof dims, d.naxis, d.naxes);
             h = fqi_get_hdu(f, i);
             snprintf(e.desc, sizeof e.desc, "%s %s", dims, h->xisf ? fqi_xisf_type(h) :
-                     fqi_type_name(d.bitpix, h->bscale, h->bzero));
+                     h->asdf ? fqi_asdf_type(h) : fqi_type_name(d.bitpix, h->bscale, h->bzero));
         } else if (fqi_table_plot_spec(f, i, &ps)) {
             e.kind = FQ_KIND_PLOT;
             e.table = 1;

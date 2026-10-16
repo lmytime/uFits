@@ -65,26 +65,32 @@ static NSString *FQTypeName(int bitpix)
 }
 
 @interface FQHDUItem ()
-- (instancetype)initWithEntry:(const fq_hdu_entry *)e;
+- (instancetype)initWithEntry:(const fq_hdu_entry *)e array:(BOOL)array;
 @end
 
 @implementation FQHDUItem
 
-- (instancetype)initWithEntry:(const fq_hdu_entry *)e
+- (instancetype)initWithEntry:(const fq_hdu_entry *)e array:(BOOL)array
 {
     if ((self = [super init])) {
         _hdu = e->hdu;
         _kind = e->kind;
         _isTable = e->table != 0;
+        _isArray = array;
         _nplanes = e->nplanes;
         NSString *desc = [FQString(e->desc) stringByReplacingOccurrencesOfString:@" x "
                                                                       withString:@" × "];
         NSString *ext = FQString(e->extname);
         _extname = ext;
-        _title = ext.length ? [NSString stringWithFormat:@"HDU %d  %@ — %@", e->hdu, ext, desc]
-                            : [NSString stringWithFormat:@"HDU %d — %@", e->hdu, desc];
-        _shortTitle = ext.length ? [NSString stringWithFormat:@"HDU %d %@", e->hdu, ext]
-                                 : [NSString stringWithFormat:@"HDU %d", e->hdu];
+        if (array) {   // ASDF: the array's place in the tree
+            _title = [NSString stringWithFormat:@"%@ — %@", ext, desc];
+            _shortTitle = ext;
+        } else {
+            _title = ext.length ? [NSString stringWithFormat:@"HDU %d  %@ — %@", e->hdu, ext, desc]
+                                : [NSString stringWithFormat:@"HDU %d — %@", e->hdu, desc];
+            _shortTitle = ext.length ? [NSString stringWithFormat:@"HDU %d %@", e->hdu, ext]
+                                     : [NSString stringWithFormat:@"HDU %d", e->hdu];
+        }
     }
     return self;
 }
@@ -97,6 +103,12 @@ static NSString *FQTypeName(int bitpix)
         char name[72] = "", naxis[16] = "";
         fq_keyword(f, hdu, "EXTNAME", name, sizeof name);
         _extname = FQString(name);
+        if (fq_format(f) == FQ_FORMAT_ASDF) {   // no array to show: the tree
+            _isArray = YES;
+            _title = @"tree — no array to show";
+            _shortTitle = @"tree";
+            return self;
+        }
         BOOL empty = fq_keyword(f, hdu, "NAXIS", naxis, sizeof naxis) && atoi(naxis) == 0;
         NSString *desc = empty ? @"no data" : @"header";
         _title = _extname.length ? [NSString stringWithFormat:@"HDU %d  %@ — %@", hdu, _extname, desc]
@@ -127,7 +139,7 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
     NSMutableArray<FQHDUItem *> *items = [NSMutableArray array];
     for (int hdu = 0; hdu < total || k < n; hdu++) {
         if (k < n && e[k].hdu == hdu)
-            [items addObject:[[FQHDUItem alloc] initWithEntry:&e[k++]]];
+            [items addObject:[[FQHDUItem alloc] initWithEntry:&e[k++] array:fq_format(f) == FQ_FORMAT_ASDF]];
         else if (hdu < total)
             [items addObject:[[FQHDUItem alloc] initWithHeaderOf:hdu file:f]];
         else

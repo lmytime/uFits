@@ -44,18 +44,23 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: .github/workflows/build.yml
-      - run: pip install numpy astropy lz4 zstandard
-      - run: sudo apt-get update && sudo apt-get install -y libexpat1-dev
-      - name: Decode and binning vs astropy
+      - run: pip install numpy astropy lz4 zstandard asdf roman_datamodels
+      - run: sudo apt-get update && sudo apt-get install -y libexpat1-dev libbz2-dev
+      - name: Decode and binning vs astropy and asdf
         run: make test
       - name: AddressSanitizer + UBSan, damaged files
         run: |
           gcc -std=c99 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined \
-              -Icore -Ithird_party/zstd -o build/fqtool-asan tools/fqtool.c core/*.c \
-              third_party/zstd/zstddeclib.c -lz -lexpat -lm -lpthread
+              -Icore -Ithird_party/zstd -Ithird_party/libyaml -DHAVE_CONFIG_H -o build/fqtool-asan \
+              tools/fqtool.c core/*.c third_party/zstd/zstddeclib.c third_party/libyaml/{api,reader,scanner,parser}.c \
+              -lz -lexpat -lbz2 -lm -lpthread
           python3 tests/test_core.py build/fqtool-asan build/testdata > /dev/null
           python3 tests/test_xisf.py build/fqtool-asan build/testdata
+          python3 tests/test_asdf.py build/fqtool-asan build/testdata
           python3 tests/fuzz.py build/fqtool-asan build/testdata 500
+          # ASDF files alone, as the mix above has few of them.
+          mkdir -p build/asdf-only && cp build/testdata/*.asdf build/asdf-only/
+          python3 tests/fuzz.py build/fqtool-asan build/asdf-only 300
 
   macos:
     name: macOS app + Quick Look (${{ matrix.os }})
@@ -95,6 +100,7 @@ jobs:
         run: |
           cmp LICENSE build/uFits.app/Contents/Resources/LICENSE
           cmp third_party/zstd/LICENSE build/uFits.app/Contents/Resources/zstd-LICENSE
+          cmp third_party/libyaml/LICENSE build/uFits.app/Contents/Resources/libyaml-LICENSE
           find build/uFits.app -type f | sort
           lipo -info build/uFits.app/Contents/MacOS/uFits build/uFits.app/Contents/PlugIns/*.appex/Contents/MacOS/*
           codesign -d --entitlements - build/uFits.app/Contents/PlugIns/uFitsPreview.appex
@@ -120,7 +126,7 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: .github/workflows/build.yml
-      - run: pip install numpy astropy lz4 zstandard
+      - run: pip install numpy astropy lz4 zstandard asdf roman_datamodels
       - name: Core tests (Apple clang, GCD)
         run: make test
       - name: Install and register the extensions
@@ -251,7 +257,8 @@ jobs:
           ../qlthumb ../ql f32.fits u16.fits rgb.fits bayer_rggb.fits rice_f32_sd1.fits \
             footprint_f32.fits mef.fits spec1d.fits cube5.fits lc_tess.fits lc_mag.fits spec_sdss.fits pha.fits \
             catalog_wrap.fits catalog_gaia.fits xisf_mono.xisf xisf_rgb.xisf xisf_zstd.xisf \
-            xisf_utf8_declaration.xisf xisf_uppercase_hex_zstd.xisf
+            xisf_utf8_declaration.xisf xisf_uppercase_hex_zstd.xisf asdf_image.asdf asdf_lz4_cube.asdf \
+            asdf_roman_cal.asdf asdf_roman_uncal.asdf
           # Which way up: a bright block on the first pixels belongs in the
           # lower left of a FITS image, the upper left of an XISF one.
           python3 ../../tests/macos/make_orient_files.py .
@@ -260,9 +267,10 @@ jobs:
           cp orient-ll.fits small-icon.fits
           ../qlthumb --size 32 --none ../ql small-icon.fits
           ../qlthumb ../ql small-icon.fits
-          ../qlthumb ../ql orient-ll.fits orient-ll-big.fits orient-ll-rice.fits orient-ul-topdown.fits orient-ul.xisf
+          ../qlthumb ../ql orient-ll.fits orient-ll-big.fits orient-ll-rice.fits orient-ul-topdown.fits orient-ul.xisf \
+            orient-ll.asdf
           # The same as Finder asks for its icons (Quick Look may frame them).
-          ../qlthumb --icon ../ql orient-ll.fits orient-ll-big.fits orient-ul-topdown.fits orient-ul.xisf
+          ../qlthumb --icon ../ql orient-ll.fits orient-ll-big.fits orient-ul-topdown.fits orient-ul.xisf orient-ll.asdf
       - name: Finder icons (best effort)
         if: ${{ !cancelled() && env.FULL == 'true' }}
         timeout-minutes: 3
@@ -287,7 +295,7 @@ jobs:
           cp ../uFits-*.dmg disk.img
           ../qlpreview ../ql f32.fits spec1d.fits mef.fits lc_tess.fits catalog_gaia.fits tables_mixed.fits \
             spectrum.pha events.evt image.img disk.img xisf_mono.xisf xisf_multi.xisf xisf_zstd.xisf \
-            xisf_utf8_declaration.xisf xisf_uppercase_hex_zstd.xisf
+            xisf_utf8_declaration.xisf xisf_uppercase_hex_zstd.xisf asdf_roman_cal.asdf asdf_mixed.asdf
       - name: Preview UI (HDU menu, plane slider, plots, tables, find bar, timings)
         if: ${{ !cancelled() }}
         timeout-minutes: 6

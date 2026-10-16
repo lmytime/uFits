@@ -983,6 +983,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
             _hduMenu.lastItem.representedObject = @(item.hdu);
         }
         [_hduMenu sizeToFit];   // for its height
+        _hduMenu.toolTip = _hdus.firstObject.isArray ? @"Array to show" : @"HDU to show";
         CGFloat longest = 0;
         for (FQHDUItem *item in _hdus)
             longest = MAX(longest, [item.shortTitle sizeWithAttributes:@{NSFontAttributeName : _hduMenu.font}].width);
@@ -1462,7 +1463,9 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
         return out;
     }
     char name[72] = "";
-    NSString *title = fq_keyword(f, hdu, "EXTNAME", name, sizeof name) && name[0]
+    NSString *title = fq_format(f) == FQ_FORMAT_ASDF   // the tree, whichever array is chosen
+                          ? @"——— ASDF tree ———\n"
+                      : fq_keyword(f, hdu, "EXTNAME", name, sizeof name) && name[0]
                           ? [NSString stringWithFormat:@"——— HDU %d  %@ ———\n", hdu, FQString(name)]
                           : [NSString stringWithFormat:@"——— HDU %d ———\n", hdu];
     [out appendAttributedString:[[NSAttributedString alloc] initWithString:title attributes:heading]];

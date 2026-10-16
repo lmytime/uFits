@@ -1,8 +1,9 @@
 # uFits
 
-Quick Look for FITS and XISF files on macOS. Select a file in Finder and press Space to
-see it, and get real thumbnails in Finder windows. Files named `.fits`, `.fit`, `.fts`,
-`.fz` and `.xisf` work, and so do the FITS files of X-ray missions: `.pha`, `.pi`, `.arf`, `.rmf`,
+Quick Look for FITS, XISF and ASDF files on macOS. Select a file in Finder and press Space
+to see it, and get real thumbnails in Finder windows. Files named `.fits`, `.fit`, `.fts`,
+`.fz`, `.xisf` and `.asdf` (the Roman Space Telescope's, for one) work, and so do the FITS
+files of X-ray missions: `.pha`, `.pi`, `.arf`, `.rmf`,
 `.rsp`, `.rsp2`, `.evt`, `.lc`, `.hk`, `.mkf`, `.dph` and `.img` (which macOS takes for
 a disk image: Space shows it, but Finder icons stay plain).
 
@@ -14,7 +15,7 @@ Homepage: **[lmytime.github.io/uFits](https://lmytime.github.io/uFits/)**
 curl -fsSL https://github.com/lmytime/uFits/releases/latest/download/install.sh | sh
 ```
 
-That's all: select a FITS or XISF file in Finder and press Space. Works on macOS 11 or later,
+That's all: select a FITS, XISF or ASDF file in Finder and press Space. Works on macOS 11 or later,
 Apple silicon and Intel.
 
 To uninstall (the app, its settings and all it keeps in your Library):
@@ -36,21 +37,26 @@ by Apple), then open uFits once.
   files work too.
 - **XISF images**: 2D grayscale, RGB and Bayer images, with automatic stretch, zoom
   and an image menu for files containing multiple images. Compressed images work too.
+- **ASDF files**, such as those of the Nancy Grace Roman Space Telescope: every array in
+  the file, named by its place in the file's tree (`roman.data`, `roman.dq`, ...), the
+  science image first. Cubes (Roman's raw ramps) get the slider, and arrays compressed
+  with LZ4 (as Roman's are), zlib or bzip2 work too. **Header** shows the whole tree.
 - **Plots** of spectra and light curves (TESS, Kepler, SDSS, HST and JWST spectra, X-ray
   light curves and spectra, ...) and **sky maps** of catalogs with RA and Dec.
 - **Table**: the rows of any table, even millions of them. ⌘C copies the selected rows.
 - **Header**: every keyword, with values and comments lined up. ⌘F searches it.
 
-FITS and uncompressed XISF previews are fast even for huge files: uFits reads only
-the part of the file it shows.
+Previews are fast even for huge files: uFits reads only the part of the file it shows
+(of a compressed XISF image, the whole image; of a compressed ASDF cube, only the
+plane on show).
 
 ## Using the preview
 
 The bar at the bottom of the preview has:
 
 - **Image** (or **Plot**), **Table**, **Header**: what to show.
-- A menu of the file's HDUs (extensions such as `SCI`, `ERR`, `DQ`, or tables), or XISF
-  images, when it has more than one.
+- A menu of the file's HDUs (extensions such as `SCI`, `ERR`, `DQ`, or tables), XISF
+  images or ASDF arrays, when it has more than one.
 - A slider for the planes of a cube.
 - The stretch: automatic, linear (0.5–99.5 %) or min–max. Your choice is remembered
   (it is the same setting as in the uFits app).
@@ -63,7 +69,8 @@ middle-click centres the view where you click), or scroll.
 When a new version of uFits is out, **Update available** appears in the bar; open the
 uFits app and it updates itself in a few seconds.
 
-You can also open FITS and XISF files in the uFits app (File › Open, or drop them on its icon).
+You can also open FITS, XISF and ASDF files in the uFits app (File › Open, or drop them on its
+icon).
 
 ## The uFits app
 
@@ -110,6 +117,9 @@ Look**.
 - **Not supported:** `HCOMPRESS_1` compressed images (their header is still shown) and
   random-groups files.
 - **Some XISF variants are not supported.** See [XISF support and limits](DEVELOPMENT.md#xisf).
+- **Some arrays of an ASDF file are not in the menu.** Tables, masks, arrays in other
+  files and those of a WCS are not shown (the Header view lists them all). See [ASDF
+  support and limits](DEVELOPMENT.md#asdf).
 
 Building from source and how uFits works: [DEVELOPMENT.md](DEVELOPMENT.md).
 

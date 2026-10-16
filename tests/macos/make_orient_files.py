@@ -2,8 +2,10 @@
 """Files that show which way up a thumbnail is: sky with a bright block on
 the first pixels of the first rows. FITS puts its first row at the bottom,
 so the block belongs in the lower left (orient-ll-*), unless ROWORDER says
-TOP-DOWN; XISF puts its first row at the top (orient-ul-*). Small, big
-(binned a lot for a thumbnail) and tile-compressed.
+TOP-DOWN; XISF puts its first row at the top (orient-ul-*); ASDF arrays
+are shown as FITS images are, first row at the bottom (orient-ll.asdf, as
+Roman's pipeline writes them: LZ4). Small, big (binned a lot for a
+thumbnail) and tile-compressed.
 
 Usage: make_orient_files.py OUTDIR
 """
@@ -45,3 +47,10 @@ xml = ('<?xml version="1.0" encoding="UTF-8"?><xisf version="1.0" xmlns="http://
 head = struct.pack("<8sII", b"XISF0100", len(xml), 0) + xml
 with open(path("orient-ul.xisf"), "wb") as f:
     f.write(head + bytes(4096 - len(head)) + data)
+
+try:
+    import asdf
+except ImportError:
+    asdf = None
+if asdf:
+    asdf.AsdfFile({"data": sky(400, 600)}).write_to(path("orient-ll.asdf"), all_array_compression="lz4")

@@ -488,35 +488,6 @@ char *fqi_xisf_cards(const hdu_t *h, size_t *len)
     return s;
 }
 
-/* Decode LZ4 block format, including overlapping matches, with exact bounds. */
-static int lz4(const uint8_t *in, size_t n, uint8_t *out, size_t cap)
-{
-    size_t i = 0, o = 0;
-    while (i < n) {
-        unsigned token = in[i++];
-        size_t len = token >> 4;
-        if (len == 15) {
-            unsigned v;
-            do { if (i == n) return -1; v = in[i++]; if (len > SIZE_MAX - v) return -1; len += v; } while (v == 255);
-        }
-        if (len > n - i || len > cap - o) return -1;
-        memcpy(out + o, in + i, len); i += len; o += len;
-        if (i == n) return o == cap ? 0 : -1;
-        if (n - i < 2) return -1;
-        size_t off = in[i] | ((size_t)in[i + 1] << 8); i += 2;
-        if (!off || off > o) return -1;
-        len = (token & 15) + 4;
-        if ((token & 15) == 15) {
-            unsigned v;
-            do { if (i == n) return -1; v = in[i++]; if (len > SIZE_MAX - v) return -1; len += v; } while (v == 255);
-        }
-        if (len > cap - o) return -1;
-        for (size_t j = 0; j < len; j++) out[o + j] = out[o + j - off];
-        o += len;
-    }
-    return o == cap ? 0 : -1;
-}
-
 static int digit64(unsigned c)
 {
     if (c >= 'A' && c <= 'Z') return (int)c - 'A';
@@ -564,7 +535,7 @@ static uint8_t *embedded(fqi_xisf_image *x, size_t *len)
 static int decompress(const fqi_xisf_image *x, const uint8_t *in, size_t n, uint8_t *out, size_t cap)
 {
     if (n == cap) { memcpy(out, in, n); return 0; }
-    if (x->codec == X_LZ4) return lz4(in, n, out, cap);
+    if (x->codec == X_LZ4) return fq_lz4_decode(in, n, out, cap);
     if (x->codec == X_ZSTD) {
         size_t got = ZSTD_decompress(out, cap, in, n);
         return !ZSTD_isError(got) && got == cap ? 0 : -1;

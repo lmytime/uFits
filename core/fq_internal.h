@@ -1,7 +1,7 @@
 /*
  * fq_internal.h - types and helpers shared by the core's source files:
- * fq.c (files, headers), fq_image.c (images), fq_table.c (tables) and
- * fq_codec.c (decompression).
+ * fq.c (files, headers), fq_image.c (images), fq_table.c (tables),
+ * fq_codec.c (decompression), fq_xisf.c and fq_asdf.c (XISF and ASDF).
  */
 #ifndef FQ_INTERNAL_H
 #define FQ_INTERNAL_H
@@ -29,6 +29,8 @@ static inline uint64_t fq_be64(const uint8_t *p) { uint64_t v; memcpy(&v, p, 8);
 static inline int fqi_finite(float v) { return (v - v) == 0.0f; }
 
 typedef struct fqi_xisf_image fqi_xisf_image;
+typedef struct fqi_asdf fqi_asdf;
+typedef struct fqi_asdf_array fqi_asdf_array;
 
 /* One HDU, as far as the core needs to know it. */
 typedef struct {
@@ -43,6 +45,7 @@ typedef struct {
     char xtension[20];
     char extname[72];
     fqi_xisf_image *xisf;     /* XISF metadata; NULL for a FITS HDU */
+    fqi_asdf_array *asdf;     /* the ASDF array (or tree) this HDU stands for */
 } hdu_t;
 
 struct fq_file {
@@ -61,6 +64,7 @@ struct fq_file {
     int64_t scan_off;
     int scan_done;
     int xisf;
+    fqi_asdf *asdf;          /* an ASDF file: its tree and blocks */
 };
 
 /* An HDU holding an image (plain or tile compressed). */
@@ -122,7 +126,24 @@ const char *fqi_xisf_error(const hdu_t *h);
 int fqi_xisf_load(fq_file *f, hdu_t *h, const uint8_t **data,
                   int *big_endian, int *stride, char *err, size_t errlen);
 
+/* fq_asdf.c: each array of an ASDF tree is an HDU; the tree is their
+   header. fqi_asdf_load gives one plane (of a cube) in C order. */
+int fqi_asdf_open(fq_file *f, char *err, size_t errlen);
+void fqi_asdf_free(fqi_asdf *a);
+int fqi_asdf_describe(const hdu_t *h, imgdesc *d);
+int fqi_asdf_compression(const fq_file *f, const hdu_t *h, char *out, size_t n);
+int fqi_asdf_keyword(const hdu_t *h, const char *key, char *out, size_t n);
+char *fqi_asdf_cards(const fq_file *f, size_t *len);
+const char *fqi_asdf_type(const hdu_t *h);
+const char *fqi_asdf_error(const hdu_t *h);
+int fqi_asdf_signed(const hdu_t *h);
+int fqi_asdf_preferred(fq_file *f);
+int fqi_asdf_load(fq_file *f, hdu_t *h, int64_t plane, int threads, const uint8_t **data,
+                  int *big_endian, int64_t *avail, char *err, size_t errlen);
+
 /* fq_image.c */
+/* fn(ctx, i) for i in [0, n), on threads (0: every core). */
+void fqi_par_for(size_t n, int threads, void *ctx, void (*fn)(void *ctx, size_t i));
 int fqi_describe_image(fq_file *f, int idx, imgdesc *d);
 float fqi_percentile(float *a, int64_t n, double p);
 void fqi_plot_range(float *samp, int64_t n, double *ymin, double *ymax);
@@ -147,5 +168,9 @@ int64_t fq_inflate(const uint8_t *in, size_t inlen, uint8_t *out, size_t outcap)
 
 /* Undo the GZIP_2 byte shuffle. */
 void fq_unshuffle(const uint8_t *in, uint8_t *out, int64_t n, int itemsize);
+
+/* LZ4 block format (no frame), overlapping matches included, into exactly
+   cap bytes. 0 on success, -1 for damaged or short data. */
+int fq_lz4_decode(const uint8_t *in, size_t n, uint8_t *out, size_t cap);
 
 #endif

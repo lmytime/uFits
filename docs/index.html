@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>uFits · Quick Look for FITS files</title>
-<meta name="description" content="uFits adds Quick Look for FITS and XISF files to macOS: select a file in Finder, press Space, and see its image, plot, table or header at once.">
+<meta name="description" content="uFits adds Quick Look for FITS, XISF and ASDF files to macOS: select a file in Finder, press Space, and see its image, plot, table or header at once.">
 <meta property="og:title" content="uFits · Quick Look for FITS files">
 <meta property="og:description" content="Select a FITS file in Finder and press Space. Images, spectra, light curves, catalogs, cubes, tables and headers, at once.">
 <meta property="og:image" content="https://lmytime.github.io/uFits/icon.png">
@@ -448,6 +448,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
 .chip.fits { --fam: #5a62a6; }
 .chip.fz { --fam: #8890be; }
 .chip.xisf { --fam: #d9789b; }
+.chip.asdf { --fam: #4aa39b; }
 .chip.xray { --fam: #d49d3a; }
 
 /* Light by day, Dusk by night. */
@@ -654,7 +655,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
 
       <article class="tile wide formats" style="--span: 12">
         <div class="art"><div class="marquee" id="formats"></div></div>
-        <div class="cap"><h3>FITS, XISF and X-ray files</h3><span class="kicker">compressed ones too</span></div>
+        <div class="cap"><h3>FITS, XISF, ASDF and X-ray files</h3><span class="kicker">compressed ones too</span></div>
       </article>
 
       <article class="tile" style="--span: 6">
@@ -2074,7 +2075,8 @@ canvas.fill { width: 100%; height: 100%; display: block; }
   {
     const lanes = [
       [["fits", "ngc4535.fits"], ["fits", "m31_r.fit"], ["fz", "survey_tile.fz"], ["xisf", "m42.xisf"], ["fits", "frame_0042.fts"],
-        ["fits", "jw02736_cal.fits"], ["xisf", "flat_Ha.xisf"], ["fits", "tess_s21_lc.fits"], ["fz", "dr10_brick.fits.fz"], ["fits", "spec-4535.fits"]],
+        ["fits", "jw02736_cal.fits"], ["xisf", "flat_Ha.xisf"], ["asdf", "wfi01_f158_cal.asdf"], ["fits", "tess_s21_lc.fits"],
+        ["fz", "dr10_brick.fits.fz"], ["asdf", "skycell_coadd.asdf"], ["fits", "spec-4535.fits"]],
       [["xray", "source.pha"], ["xray", "bkg.pi"], ["xray", "resp.rmf"], ["xray", "area.arf"], ["xray", "xrt.rsp"],
         ["xray", "nicer_cl.evt"], ["xray", "pn_src.lc"], ["xray", "hk_0001.hk"], ["xray", "filter.mkf"], ["xray", "burst.dph"]],
     ];

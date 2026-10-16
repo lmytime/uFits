@@ -1,9 +1,13 @@
 /*
- * fq.h - uFits core: a small, fast FITS/XISF reader and preview renderer.
+ * fq.h - uFits core: a small, fast FITS/XISF/ASDF reader and preview renderer.
  *
- * Portable C99, using zlib, Expat and a bundled Zstandard decoder. Nothing knows about
- * macOS; the Quick Look extensions and the command line tool are thin
- * wrappers around these calls.
+ * Portable C99, using zlib, bzip2, Expat, and a bundled Zstandard decoder
+ * and libyaml parser. Nothing knows about macOS; the Quick Look extensions
+ * and the command line tool are thin wrappers around these calls.
+ *
+ * An XISF image, or an array of an ASDF file's tree, is an HDU here: an
+ * ASDF file's HDUs are its arrays (named by their place in the tree, as
+ * "roman.data"), and their header is the tree.
  *
  * Speed comes from never reading more of the file than the output needs:
  * the file is memory mapped, images are binned straight from the mapping
@@ -128,15 +132,18 @@ typedef struct {
     fq_kept *kept;             /* binned values (opts.keep), private */
 } fq_image;
 
-/* Open a FITS file (plain or gzip compressed) or monolithic XISF 1.0 file.
-   Returns NULL on failure and
-   writes a message to err. */
+/* Open a FITS file (plain or gzip compressed), monolithic XISF 1.0 file or
+   ASDF file. Returns NULL on failure and writes a message to err. */
 fq_file *fq_open(const char *path, char *err, size_t errlen);
 /* Same for a buffer in memory. With copy == 0 the buffer must outlive the
    fq_file. */
 fq_file *fq_open_memory(const void *data, size_t size, int copy,
                         char *err, size_t errlen);
 void fq_close(fq_file *f);
+
+enum { FQ_FORMAT_FITS = 0, FQ_FORMAT_XISF = 1, FQ_FORMAT_ASDF = 2 };
+/* Which of them the file is. */
+int fq_format(const fq_file *f);
 
 /* Render the first image (or opts->hdu) for display. */
 fq_image *fq_render(fq_file *f, const fq_opts *opts, char *err, size_t errlen);

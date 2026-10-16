@@ -126,8 +126,9 @@ static NSURL *FQWritePNG(CGImageRef image)
     }
     QLThumbnailReply *reply = [QLThumbnailReply replyWithImageFileURL:png];
     if (@available(macOS 12.0, *))
-        reply.extensionBadge =
-            [request.fileURL.pathExtension caseInsensitiveCompare:@"xisf"] == NSOrderedSame ? @"XISF" : @"FITS";
+        reply.extensionBadge = [request.fileURL.pathExtension caseInsensitiveCompare:@"xisf"] == NSOrderedSame ? @"XISF"
+                               : [request.fileURL.pathExtension caseInsensitiveCompare:@"asdf"] == NSOrderedSame ? @"ASDF"
+                                                                                                          : @"FITS";
     handler(reply, nil);
 }
 

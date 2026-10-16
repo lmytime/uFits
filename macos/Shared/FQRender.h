@@ -9,7 +9,7 @@
 NS_ASSUME_NONNULL_BEGIN
 
 /// One HDU of a file, for the menu: an image, a plotted table, a table, or
-/// just a header.
+/// just a header. In an ASDF file, an array (or the tree, if none).
 @interface FQHDUItem : NSObject
 @property(nonatomic, readonly) int hdu;
 @property(nonatomic, readonly) int kind;            // FQ_KIND_IMAGE, _PLOT, _TABLE, or _NONE
@@ -18,6 +18,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly, copy) NSString *extname;
 @property(nonatomic, readonly, copy) NSString *title; // "HDU 1  SCI — 4096 × 4096 float32"
 @property(nonatomic, readonly, copy) NSString *shortTitle; // "HDU 1 SCI"
+@property(nonatomic, readonly) BOOL isArray;          // of an ASDF file: "roman.data — ...", "roman.data"
 @end
 
 /// Wraps an image rendered by the core. Owns the fq_image.

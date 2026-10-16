@@ -3,7 +3,8 @@
  *
  * Opens a file (memory mapped, or inflated on demand when gzipped), walks
  * the HDU headers lazily and answers keyword lookups. Images are rendered
- * in fq_image.c, tables in fq_table.c.
+ * in fq_image.c, tables in fq_table.c; XISF and ASDF files are read by
+ * fq_xisf.c and fq_asdf.c.
  */
 #define _DEFAULT_SOURCE 1
 #define _DARWIN_C_SOURCE 1
@@ -186,9 +187,15 @@ static fq_file *finish_open(fq_file *f, const uint8_t *bytes, size_t len,
         fq_close(f);
         return NULL;
     }
+    if (f->size >= 5 && !memcmp(f->data, "#ASDF", 5)) {
+        if (fqi_asdf_open(f, err, errlen) == 0)
+            return f;
+        fq_close(f);
+        return NULL;
+    }
     if (f->size < CARD || memcmp(f->data, "SIMPLE  =", 9) != 0) {
         fq_close(f);
-        fqi_seterr(err, errlen, "not a FITS or XISF file");
+        fqi_seterr(err, errlen, "not a FITS, XISF or ASDF file");
         return NULL;
     }
     return f;
@@ -209,7 +216,7 @@ fq_file *fq_open(const char *path, char *err, size_t errlen)
     }
     if (st.st_size < 16) {
         close(fd);
-        fqi_seterr(err, errlen, "file too small to be FITS or XISF");
+        fqi_seterr(err, errlen, "file too small to be FITS, XISF or ASDF");
         return NULL;
     }
     size_t len = (size_t)st.st_size;
@@ -233,7 +240,7 @@ fq_file *fq_open(const char *path, char *err, size_t errlen)
 fq_file *fq_open_memory(const void *data, size_t size, int copy, char *err, size_t errlen)
 {
     if (!data || size < 16 || size > INT64_MAX) {
-        fqi_seterr(err, errlen, "invalid FITS or XISF buffer size");
+        fqi_seterr(err, errlen, "invalid FITS, XISF or ASDF buffer size");
         return NULL;
     }
     fq_file *f = calloc(1, sizeof *f);
@@ -279,8 +286,14 @@ void fq_close(fq_file *f)
     free(f->owned);
     for (int i = 0; i < f->nhdu; i++)
         fqi_xisf_free(f->hdu[i].xisf);
+    fqi_asdf_free(f->asdf);
     free(f->hdu);
     free(f);
+}
+
+int fq_format(const fq_file *f)
+{
+    return f->asdf ? FQ_FORMAT_ASDF : f->xisf ? FQ_FORMAT_XISF : FQ_FORMAT_FITS;
 }
 
 /* ------------------------------------------------------- header cards */
@@ -567,6 +580,8 @@ int fqi_kw_str(const fq_file *f, const hdu_t *h, const char *key, char *out, siz
 {
     if (h->xisf)
         return fqi_xisf_keyword(h, key, out, n);
+    if (h->asdf)
+        return fqi_asdf_keyword(h, key, out, n);
     const char *c = hdu_card(f, h, key);
     return c && fqi_card_value(c, out, n) >= 0;
 }
@@ -729,6 +744,8 @@ char *fq_header_cards(fq_file *f, int idx, size_t *len)
         return NULL;
     if (h->xisf)
         return fqi_xisf_cards(h, len);
+    if (h->asdf)   /* the whole tree, whichever array */
+        return fqi_asdf_cards(f, len);
     const char *p = (const char *)f->data + h->hdr_off;
     const int64_t n = h->hdr_len / CARD;
     fqi_sbuf out = { 0 };
@@ -921,7 +938,7 @@ char *fq_header_text(fq_file *f, int idx, size_t *len)
     hdu_t *h = fqi_get_hdu(f, idx);
     if (!h)
         return NULL;
-    if (h->xisf)
+    if (h->xisf || h->asdf)
         return fq_header_layout(f, idx, len, NULL, NULL);
     int64_t n = h->hdr_len / CARD;
     char *out = malloc((size_t)n * (CARD + 1) + 1);
@@ -983,7 +1000,18 @@ char *fq_summary_text(fq_file *f)
         const char *name = h.extname[0] ? h.extname : (i == 0 ? "PRIMARY" : "");
         const char *type = i == 0 ? "IMAGE" : h.xtension;
         imgdesc d;
-        if (h.zimage && fqi_describe_image(f, i, &d)) {
+        if (h.asdf) {
+            char comp[8];
+            fqi_dims_text(dims, sizeof dims, h.naxis, h.naxes);
+            if (!fqi_describe_image(f, i, &d))
+                snprintf(desc, sizeof desc, "%s", fqi_asdf_error(&h));
+            else if (fqi_asdf_compression(f, &h, comp, sizeof comp))
+                snprintf(desc, sizeof desc, "%s  %s  (%s)", dims, fqi_asdf_type(&h), comp);
+            else
+                snprintf(desc, sizeof desc, "%s  %s", dims, fqi_asdf_type(&h));
+            type = "ASDF";
+            name = h.extname;
+        } else if (h.zimage && fqi_describe_image(f, i, &d)) {
             fqi_dims_text(dims, sizeof dims, d.naxis, d.naxes);
             hdu_t *hp = fqi_get_hdu(f, i);
             snprintf(desc, sizeof desc, "%s  %s  (%s)", dims,

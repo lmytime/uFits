@@ -1,9 +1,10 @@
 /*
- * fq_codec.c - decoders for FITS tiled image compression.
+ * fq_codec.c - decoders for FITS tiled image compression, and LZ4.
  *
  * RICE_1, GZIP_1, GZIP_2 and PLIO_1, written from the format descriptions
- * in the FITS standard (section 10) and Pence et al. 2009. Every decoder
- * checks its input bounds: a damaged file gives an error, never a crash.
+ * in the FITS standard (section 10) and Pence et al. 2009; LZ4's block
+ * format (XISF and ASDF compress with it). Every decoder checks its input
+ * bounds: a damaged file gives an error, never a crash.
  */
 #include "fq_internal.h"
 
@@ -279,4 +280,45 @@ void fq_unshuffle(const uint8_t *in, uint8_t *out, int64_t n, int itemsize)
         for (int64_t i = 0; i < n; i++)
             dst[i * itemsize] = src[i];
     }
+}
+
+/* ---- LZ4 ----------------------------------------------------------------- */
+
+int fq_lz4_decode(const uint8_t *in, size_t n, uint8_t *out, size_t cap)
+{
+    size_t i = 0, o = 0;
+    while (i < n) {
+        unsigned token = in[i++];
+        size_t len = token >> 4;
+        if (len == 15) {
+            unsigned v;
+            do { if (i == n) return -1; v = in[i++]; if (len > SIZE_MAX - v) return -1; len += v; } while (v == 255);
+        }
+        if (len > n - i || len > cap - o) return -1;
+        memcpy(out + o, in + i, len); i += len; o += len;
+        if (i == n) return o == cap ? 0 : -1;
+        if (n - i < 2) return -1;
+        size_t off = in[i] | ((size_t)in[i + 1] << 8); i += 2;
+        if (!off || off > o) return -1;
+        len = (token & 15) + 4;
+        if ((token & 15) == 15) {
+            unsigned v;
+            do { if (i == n) return -1; v = in[i++]; if (len > SIZE_MAX - v) return -1; len += v; } while (v == 255);
+        }
+        if (len > cap - o) return -1;
+        if (off >= 8) {
+            /* A match may overlap what it writes: copy at most off bytes at
+               a time, each from bytes already written. */
+            while (len) {
+                size_t k = len < off ? len : off;
+                memcpy(out + o, out + o - off, k);
+                o += k;
+                len -= k;
+            }
+        } else {
+            for (size_t j = 0; j < len; j++) out[o + j] = out[o + j - off];
+            o += len;
+        }
+    }
+    return o == cap ? 0 : -1;
 }

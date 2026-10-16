@@ -1,5 +1,5 @@
 // main.m - the uFits app. Its job is to carry the two Quick Look
-// extensions; it also opens FITS and XISF files in small viewer windows, shows
+// extensions; it also opens FITS, XISF and ASDF files in small viewer windows, shows
 // whether the extensions are registered, and updates uFits when a newer
 // version is out (asked from its menu, or from the preview's "Update
 // available" through ufits://update).
@@ -14,13 +14,14 @@
 
 static NSString *const kFITSType = @"gov.nasa.gsfc.fits";
 static NSString *const kXISFType = @"io.github.lmytime.ufits.xisf";
+static NSString *const kASDFType = @"io.github.lmytime.ufits.asdf";
 
 /// The extensions uFits claims (Info.plist): FITS, tile-compressed FITS,
-/// the FITS files of X-ray missions, and XISF images.
+/// the FITS files of X-ray missions, XISF images and ASDF files.
 static NSArray<NSString *> *FQExtensions(void)
 {
     return @[ @"fits", @"fit", @"fts", @"fz", @"pha", @"pi", @"arf", @"rmf", @"rsp", @"rsp2", @"evt", @"lc", @"img",
-              @"hk", @"mkf", @"dph", @"xisf" ];
+              @"hk", @"mkf", @"dph", @"xisf", @"asdf" ];
 }
 
 /// Types of other files that the preview takes too, handing back those
@@ -37,10 +38,11 @@ static NSDictionary<NSString *, UTType *> *FQExtensionsElsewhere(void)
     NSMutableDictionary *out = [NSMutableDictionary dictionary];
     UTType *fits = [UTType typeWithIdentifier:kFITSType];
     UTType *xisf = [UTType typeWithIdentifier:kXISFType];
+    UTType *asdf = [UTType typeWithIdentifier:kASDFType];
     for (NSString *ext in FQExtensions()) {
         UTType *t = [UTType typeWithFilenameExtension:ext];
-        if (!t || !((fits && [t conformsToType:fits]) ||
-                    (xisf && [t conformsToType:xisf]) || FQAlsoPreviewed(t)))
+        if (!t || !((fits && [t conformsToType:fits]) || (xisf && [t conformsToType:xisf]) ||
+                    (asdf && [t conformsToType:asdf]) || FQAlsoPreviewed(t)))
             out[ext] = t ?: UTTypeData;
     }
     return out;
@@ -336,7 +338,7 @@ static NSStackView *FQRow(NSArray<NSView *> *views, CGFloat spacing)
         NSTextField *title = [NSTextField labelWithString:@"uFits"];
         title.font = [NSFont systemFontOfSize:26 weight:NSFontWeightSemibold];
         NSTextField *sub = [NSTextField
-            labelWithString:[NSString stringWithFormat:@"Quick Look for FITS and XISF files · version %@",
+            labelWithString:[NSString stringWithFormat:@"Quick Look for FITS, XISF and ASDF files · version %@",
                                                        FQUpdate.currentVersion]];
         sub.textColor = NSColor.secondaryLabelColor;
         NSStackView *names = [NSStackView stackViewWithViews:@[ title, sub ]];
@@ -345,7 +347,7 @@ static NSStackView *FQRow(NSArray<NSView *> *views, CGFloat spacing)
         names.spacing = 2;
 
         NSTextField *how = FQWrappingLabel(
-            @"Select a FITS or XISF file in Finder and press Space. Finder shows thumbnails in its icon "
+            @"Select a FITS, XISF or ASDF file in Finder and press Space. Finder shows thumbnails in its icon "
             @"and gallery views. Nothing needs to keep running: macOS loads the Quick Look extensions of "
             @"uFits when they are needed. If previews do not show up, check that uFits is on under "
             @"System Settings › General › Login Items & Extensions › Quick Look, then click Reset Quick Look.",
@@ -532,7 +534,7 @@ static BOOL FQInApplications(void)
     if ([ident hasPrefix:@"dyn."])
         [lines addObject:@"⚠︎ The FITS file type is not registered yet: move uFits to Applications and open it once."];
     else if (!elsewhere.count)
-        [lines addObject:@"✓ FITS and XISF files are recognised."];
+        [lines addObject:@"✓ FITS, XISF and ASDF files are recognised."];
     else {
         NSMutableArray<NSString *> *names = [NSMutableArray array];
         for (NSString *ext in FQExtensions())
@@ -719,7 +721,7 @@ static BOOL FQInApplications(void)
         NSParagraphStyleAttributeName : centred
     };
     NSMutableAttributedString *credits = [[NSMutableAttributedString alloc]
-        initWithString:@"Quick Look for FITS and XISF files.\n"
+        initWithString:@"Quick Look for FITS, XISF and ASDF files.\n"
             attributes:plain];
     NSMutableDictionary *link = [plain mutableCopy];
     link[NSLinkAttributeName] = [NSURL URLWithString:@"https://lmytime.github.io/uFits/"];
@@ -1002,11 +1004,13 @@ int main(int argc, const char *argv[])
             // What macOS takes each extension uFits claims for.
             UTType *fits = [UTType typeWithIdentifier:kFITSType];
             UTType *xisf = [UTType typeWithIdentifier:kXISFType];
+            UTType *asdf = [UTType typeWithIdentifier:kASDFType];
             for (NSString *ext in FQExtensions()) {
                 UTType *t = [UTType typeWithFilenameExtension:ext];
                 printf(".%-5s %-40s %s\n", ext.UTF8String, t.identifier.UTF8String ?: "?",
                        t && fits && [t conformsToType:fits] ? "FITS"
                        : t && xisf && [t conformsToType:xisf] ? "XISF"
+                       : t && asdf && [t conformsToType:asdf] ? "ASDF"
                        : FQAlsoPreviewed(t)                 ? "previewed (not FITS to macOS: no Finder icons)"
                                                             : "NOT RECOGNISED");
             }

@@ -731,6 +731,22 @@ int main(int argc, const char *argv[])
         load(vc, [data stringByAppendingPathComponent:@"xisf_zstd.xisf"]);
         capture(@"xisf-zstd", @"mode=0 [Image|Table(off)|Header]");
 
+        // ASDF: the arrays by their place in the tree, Roman's data first;
+        // the tree is the header, whichever array is chosen.
+        NSString *roman = [data stringByAppendingPathComponent:@"asdf_roman_cal.asdf"];
+        if ([NSFileManager.defaultManager fileExistsAtPath:roman]) {
+            load(vc, roman);
+            capture(@"asdf-roman", @"shows \"roman.data\"");
+            pickMode(root, 2);
+            expectListing(@"asdf-roman-header", @"——— ASDF tree ———");
+            expectListing(@"asdf-roman-meta", @"  meta");
+            pickMode(root, 0);
+        } else {
+            printf("--   asdf-roman: no Roman file (roman_datamodels is not installed)\n");
+        }
+        load(vc, [data stringByAppendingPathComponent:@"asdf_lz4_cube.asdf"]);
+        capture(@"asdf-cube", @"slider=2 of 4");
+
         // Multi-extension file: the HDU menu switches between SCI, ERR and DQ.
         load(vc, [data stringByAppendingPathComponent:@"mef.fits"]);
         capture(@"mef", @"menu=\"HDU 1  SCI — 256 × 256 float32\" (4 items) shows \"HDU 1 SCI\"");

@@ -7,15 +7,17 @@ How uFits is built, tested and released. To install it, see the [README](README.
 uFits is built to be small and fast:
 
 - **No Python or cfitsio at runtime.** A portable C core plus thin Objective-C Quick
-  Look extensions. It uses system zlib and Expat, and includes the upstream Zstandard
-  decompressor under its BSD license in `third_party/zstd`. Both Apple Silicon and
-  Intel builds need only Xcode command line tools.
+  Look extensions. It uses system zlib, bzip2 and Expat, and includes the upstream
+  Zstandard decompressor under its BSD license in `third_party/zstd` and libyaml's
+  parser under its MIT license in `third_party/libyaml`. Both Apple Silicon and Intel
+  builds need only Xcode command line tools.
 - **Reads only what it shows.** Files are memory mapped; images are binned straight from
   the mapping, sampling a few pixels per output pixel when shrinking a lot, so a
   thumbnail of a 256 MB image touches a small fraction of the file. For tile-compressed
   files only the tiles under the sampled rows are decompressed. XISF compression is
   block based: the selected image is decompressed in full and cached until another
-  image is selected or the file is closed.
+  image is selected or the file is closed. Of a compressed ASDF array only the plane
+  shown is decompressed (see [ASDF](#asdf)).
 - **Uses every core.** Binning, tile decompression and the final mapping run in parallel
   (Grand Central Dispatch).
 
@@ -30,6 +32,7 @@ Time spent in the core alone, measured on a 4-core Linux VM:
 | 4096×4096 int16 (32 MB) | 7 ms | 17 ms |
 | 8192×8192 float32 (256 MB) | 9 ms | 43 ms |
 | 4096×4096 Rice-compressed `.fz` | 21 ms | 53 ms |
+| 4088×4088 float32, Roman's L2 (ASDF, LZ4, 70 MB) | 25 ms | 41 ms |
 
 ## What the core handles
 
@@ -111,9 +114,41 @@ applied; the preview uses uFits' stretch controls. Checksums are not verified.
 See the [XISF specification](https://pixinsight.com/doc/docs/XISF-1.0-spec/XISF-1.0-spec.html)
 for the file format.
 
-The app bundles uFits' BSD 3-Clause license as `Contents/Resources/LICENSE` and
-the Zstandard notice as `Contents/Resources/zstd-LICENSE`. The macOS Zstandard
-decoder is compiled with upstream size options to keep the three binaries small.
+## ASDF
+
+ASDF files (the [Advanced Scientific Data Format](https://asdf-standard.readthedocs.io/);
+the Roman Space Telescope's data products are ASDF files) hold a YAML tree, then
+binary blocks. The tree is read with libyaml's event parser, as Python's asdf reads it
+(through PyYAML), up to 64 MiB and 100 levels deep. Each array in it of a numeric type
+is an "HDU": int8 to uint64, float16/32/64 and bool, in either byte order, with any
+number of dimensions (cubes get the slider; 1-D arrays are plotted), views of other
+arrays (offsets and strides) included. Arrays are named by their place in the tree
+(`roman.data`); one named `data` is shown first, and the value of a quantity is named
+for the quantity. The tree is the header of every array: a line per key, nested keys
+indented, tags as comments, arrays as their shape and type (as numpy gives them: rows,
+then columns), and what wrote the file (`asdf_library`, `history`) last. Arrays are
+drawn as FITS images are, the first row at the bottom.
+
+Blocks may be stored as they are, and are then read straight from the mapped file
+like FITS images, or compressed with LZ4 (in pieces of 4 MiB, as Python's asdf
+frames it; Roman's pipeline compresses every array so), zlib or bzip2. Of a compressed
+block only the part with the plane shown is decompressed (LZ4 pieces on every core;
+zlib and bzip2 from the start of the block), and kept until another plane or array is
+shown; a plane may take up to 512 MiB decompressed. Streamed blocks and blocks counted
+from the end (`source: -1`) work.
+
+Not shown: arrays written inline in the tree (they are small; the tree has their
+values), arrays in other files, string, record and complex arrays, tables (their
+columns stay in the tree), the arrays of transforms and WCS (gwcs), and masks (an
+array is shown without its mask). Compression that extensions add (zstd, blosc, ...)
+is reported as not supported. Checksums are not verified.
+
+## Licenses
+
+The app bundles uFits' BSD 3-Clause license as `Contents/Resources/LICENSE`, the
+Zstandard notice as `Contents/Resources/zstd-LICENSE` and libyaml's as
+`Contents/Resources/libyaml-LICENSE`. The macOS Zstandard decoder is compiled with
+upstream size options to keep the three binaries small.
 
 ## Updates
 
@@ -218,6 +253,7 @@ and the installer, set it again after an update replaces the app.
 ```
 core/       C core: parsing, decompression, binning, stretch (portable C)
 third_party/zstd/  upstream single-file Zstandard decompressor and license
+third_party/libyaml/  libyaml's YAML parser (for ASDF trees) and license
 tools/      fqtool command line front end, icon generator and flat_icon (macOS 15's icon)
 macos/      Objective-C: app, Quick Look preview and thumbnail extensions
 tests/      astropy-based test file generator, comparisons, fuzzer, Quick Look smoke test
@@ -228,7 +264,8 @@ Makefile    builds everything with clang; no Xcode project
 The core builds and runs anywhere, which keeps it easy to test:
 
 ```sh
-make test                                     # needs numpy, astropy, lz4, zstandard
+make test                                     # needs numpy, astropy, lz4, zstandard, asdf
+                                              # (and roman_datamodels for Roman's files)
 make fqtool && build/fqtool render image.fits out.png --max 1024
 build/fqtool info image.fits                  # HDU list and what Quick Look would show
 build/fqtool header image.fits 1              # header cards in columns (--raw: as in the file)
@@ -243,14 +280,20 @@ listings and every header card as split into keyword, value and comment.
 `tests/test_xisf.py` generates XISF fixtures independently with NumPy and the Python
 compression libraries, checking sample values, byte order, storage order, compression
 and shuffling, multiple images, display orientation, metadata, and malformed inputs.
-On Linux install the zlib and Expat development packages before building the core.
+`tests/test_asdf.py` writes ASDF files with Python's asdf (and Roman's own, with
+roman_datamodels, when it is installed) and checks every type and byte order, the
+three compressions, cubes plane by plane, views, streamed blocks, quantities, which
+arrays are listed, the header, and damaged files.
+On Linux install the zlib, bzip2 and Expat development packages before building the core.
 `tests/fuzz.py` feeds damaged files to an AddressSanitizer/UBSan build. CI runs both
-on Linux and on macOS (15 and 26), then installs the app on the macOS runners, requests
+on Linux and on macOS 15 (and 26, when run by hand or for a release: see the top of
+`.github/workflows/build.yml` for what runs when), then installs the app on the macOS
+runners, requests
 thumbnails through `QLThumbnailGenerator` (also as Finder asks for its icons) and
 previews through `QLPreviewView` (the machinery behind Finder's Quick Look), checks
 that thumbnails are the right way up (`tests/macos/make_orient_files.py`: a bright
-block on the first pixels belongs in the lower left of a FITS image, the upper left
-of an XISF one) and as sharp as the screen, and that icons under 40 points (list and
+block on the first pixels belongs in the lower left of a FITS image or an ASDF
+array, the upper left of an XISF one) and as sharp as the screen, and that icons under 40 points (list and
 column views) keep the file's icon, takes a picture of Finder's icons, drives the preview's controls (HDU menu, plane
 slider, find bar), times mode switches and table scrolling with big files
 (`tests/macos/make_big_files.py`: a catalog of a million rows, a table 300 columns

@@ -70,6 +70,18 @@
 		</dict>
 		<dict>
 			<key>CFBundleTypeName</key>
+			<string>ASDF File</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>io.github.lmytime.ufits.asdf</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
 			<string>FITS File</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
@@ -135,6 +147,27 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>xisf</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<!-- Roman's data products, among others. -->
+			<key>UTTypeIdentifier</key>
+			<string>io.github.lmytime.ufits.asdf</string>
+			<key>UTTypeDescription</key>
+			<string>Advanced Scientific Data Format</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.content</string>
+			</array>
+			<key>UTTypeReferenceURL</key>
+			<string>https://asdf-standard.readthedocs.io/</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>asdf</string>
 				</array>
 			</dict>
 		</dict>

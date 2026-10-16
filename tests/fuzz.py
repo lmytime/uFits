@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Throw damaged FITS and XISF files at fqtool and make sure it never crashes.
+"""Throw damaged FITS, XISF and ASDF files at fqtool and make sure it never crashes.
 
 Usage: fuzz.py FQTOOL TESTDATA_DIR [ITERATIONS]
 
@@ -63,9 +63,58 @@ def mutate_xisf(data):
     return bytes(d)
 
 
+# Values for the fields of ASDF arrays, and things YAML parsers trip on.
+ASDF_FIELDS = [b"source", b"datatype", b"byteorder", b"shape", b"offset", b"strides"]
+ASDF_VALUES = [b"0", b"-1", b"-99", b"7", b"9223372036854775807", b"-9223372036854775808", b"[]", b"[0]",
+               b"[1, 1]", b"[99999999999, 3]", b"['*', 4]", b"[2, 0]", b"[-4, 2]", b"float16", b"bool8",
+               b"[ascii, 4]", b"complex64", b"big", b"other.asdf", b"*id001", b"!core/ndarray-1.1.0 {}"]
+ASDF_SNIPPETS = [b"&a [*a]", b"*nowhere", b"!<tag:x> ", b"? [a, b]\n: c\n", b"{" * 300, b"[" * 2000,
+                 b"'" + b"x" * 5000, b"|\n  " + b"\xff\xfe" * 50, b"%TAG ! x\n", b"--- ", b"\n...\n",
+                 b"\t\x00\x01", b"- " * 400, b"a: !core/ndarray-1.1.0 {source: 0, shape: [2, 2], datatype: int8}"]
+
+
+def mutate_asdf(data):
+    d = bytearray(data)
+    end = data.find(b"\n...\n")
+    tree_end = end + 5 if end >= 0 else len(d)
+    kind = rnd.randrange(7)
+    if kind == 0:   # bytes of the tree
+        for _ in range(rnd.randrange(1, 20)):
+            d[rnd.randrange(tree_end)] = rnd.randrange(256)
+    elif kind == 1:  # a field of an array
+        fields = [m for m in re.finditer(rb"(?:%s): ([^\n,}]*)" % b"|".join(ASDF_FIELDS), d[:tree_end])]
+        if fields:
+            m = rnd.choice(fields)
+            d[m.start(1):m.end(1)] = rnd.choice(ASDF_VALUES)
+    elif kind == 2:  # a block header
+        at = data.find(b"\xd3BLK", tree_end - 5)
+        if at >= 0:
+            pos = at + rnd.choice([4, 5, 6, 9, 10, 14, 22, 30, 38])
+            for i in range(rnd.randrange(1, 5)):
+                if pos + i < len(d):
+                    d[pos + i] = rnd.choice([0, 1, 0x7f, 0xff, rnd.randrange(256)])
+            if rnd.random() < 0.3:
+                d[at + 10:at + 14] = rnd.choice([b"lz4\0", b"zlib", b"bzp2", b"zstd", b"\0\0\0\0"])
+    elif kind == 3:  # the data of the blocks (LZ4 frames, zlib streams)
+        for _ in range(rnd.randrange(1, 100)):
+            d[rnd.randrange(min(tree_end, len(d) - 1), len(d))] = rnd.randrange(256)
+    elif kind == 4:
+        d = d[:rnd.randrange(1, len(d))]
+    elif kind == 5:  # YAML that parsers trip on
+        at = rnd.randrange(tree_end)
+        d[at:at] = rnd.choice(ASDF_SNIPPETS)
+    else:
+        a = rnd.randrange(len(d))
+        b = min(len(d), a + rnd.randrange(1, 20000))
+        d[a:b] = bytes(b - a)
+    return bytes(d)
+
+
 def mutate(data):
     if data.startswith(b"XISF0100"):
         return mutate_xisf(data)
+    if data.startswith(b"#ASDF"):
+        return mutate_asdf(data)
     d = bytearray(data)
     kind = rnd.randrange(7)
     if kind == 0:   # flip bytes anywhere
@@ -102,8 +151,8 @@ def mutate(data):
 
 def main():
     files = [os.path.join(DATA, f) for f in sorted(os.listdir(DATA))
-             if f.endswith((".fits", ".xisf")) and os.path.getsize(os.path.join(DATA, f)) < 2_000_000]
-    bad, xisf_count = 0, 0
+             if f.endswith((".fits", ".xisf", ".asdf")) and os.path.getsize(os.path.join(DATA, f)) < 2_000_000]
+    bad, xisf_count, asdf_count = 0, 0, 0
     env = dict(os.environ, ASAN_OPTIONS=f"detect_leaks={int(sys.platform != 'darwin')}:abort_on_error=0",
                UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1")
     with tempfile.TemporaryDirectory() as tmp:
@@ -112,6 +161,7 @@ def main():
             src = rnd.choice(files)
             suffix = os.path.splitext(src)[1]
             xisf_count += suffix == ".xisf"
+            asdf_count += suffix == ".asdf"
             target = os.path.join(tmp, "m" + suffix)
             data = mutate(open(src, "rb").read())
             open(target, "wb").write(data)
@@ -119,6 +169,8 @@ def main():
             for args in (["render", target, png, "--max", str(rnd.choice([16, 100, 512])),
                           "--samples", str(rnd.choice([0, 1, 2, 4]))],
                          ["render", target, png, "--max", str(rnd.choice([16, 100, 512])), "--region", region],
+                         ["render", target, png, "--max", "64", "--hdu", str(rnd.randrange(4)),
+                          "--plane", str(rnd.randrange(-1, 6))],
                          ["info", target],
                          ["header", target, str(rnd.randrange(3))] + rnd.choice([[], ["--cards"], ["--spans"]]),
                          ["hdus", target], ["table", target, str(rnd.randrange(1, 3)), "50"],
@@ -140,7 +192,7 @@ def main():
                     print(f"CRASH {os.path.basename(src)} {args[0]} rc={r.returncode} -> {keep}")
                     print(r.stderr[-3000:])
                     break
-    print(f"{N} mutated files ({xisf_count} XISF), {bad} problems")
+    print(f"{N} mutated files ({xisf_count} XISF, {asdf_count} ASDF), {bad} problems")
     sys.exit(1 if bad else 0)
 
 
