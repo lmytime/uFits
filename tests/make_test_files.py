@@ -227,6 +227,12 @@ def main(out):
         fits.Column("dec", "D", unit="deg", array=rng.uniform(20, 30, 2000)),
         fits.Column("phot_g_mean_mag", "E", array=rng.normal(17, 1.5, 2000)),
     ], name="GAIA")], p("catalog_gaia.fits"))
+    # An image, then the catalog of its sources.
+    write([fits.PrimaryHDU(rng.normal(100, 5, (64, 64)).astype(np.float32)), fits.BinTableHDU.from_columns([
+        fits.Column("RA", "D", unit="deg", array=rng.uniform(150, 150.1, 200)),
+        fits.Column("DEC", "D", unit="deg", array=rng.uniform(2, 2.1, 200)),
+        fits.Column("FLUX", "E", array=rng.lognormal(3, 1, 200)),
+    ], name="SOURCES")], p("image_catalog.fits"))
 
     k = 6
     mixed = fits.BinTableHDU.from_columns([

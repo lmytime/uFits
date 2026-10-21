@@ -171,6 +171,7 @@ typedef struct {
     int hdu;
     int kind;                 /* FQ_KIND_IMAGE, FQ_KIND_PLOT or FQ_KIND_TABLE */
     int table;                /* a table (plotted or not): fq_table_open works */
+    int sky;                  /* a catalog: its plot is a map of sky positions */
     int64_t nplanes;          /* planes of a cube */
     char extname[72];
     char desc[96];            /* "4096 x 4096 float32", "PDCSAP_FLUX vs TIME",
@@ -180,6 +181,10 @@ typedef struct {
 /* The HDUs uFits can show (images, plots) or list (tables), in file order;
    returns how many (at most max). */
 int fq_list_hdus(fq_file *f, fq_hdu_entry *out, int max);
+/* The HDU fq_render shows when opts->hdu is -1, found from the headers
+   alone; -1 if there is none (fq_render then says why). *sky is set when it
+   is a catalog, whose map reads rows from all over the table. */
+int fq_default_hdu(fq_file *f, int *sky);
 /* Columns and first rows of a table HDU as text. malloc'd, NULL if the HDU
    is not a table. */
 char *fq_table_text(fq_file *f, int hdu, int maxrows, size_t *len);

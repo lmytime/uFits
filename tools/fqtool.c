@@ -3,6 +3,8 @@
  *
  *   fqtool info FILE                 HDU list and what would be shown
  *   fqtool hdus FILE                 the HDUs a viewer can switch between
+ *   fqtool default FILE              the HDU a preview opens on (sky=1: a
+ *                                     catalog, which opens on its rows)
  *   fqtool header FILE [HDU] [--raw|--cards|--spans]   header cards lined up
  *                                     as the preview shows them (or as in the
  *                                     file, split by tabs, or the styled parts)
@@ -157,6 +159,7 @@ static void usage(void)
     fprintf(stderr,
             "usage: fqtool info FILE\n"
             "       fqtool hdus FILE\n"
+            "       fqtool default FILE\n"
             "       fqtool header FILE [HDU] [--raw|--cards|--spans]\n"
             "       fqtool table FILE HDU [ROWS]\n"
             "       fqtool render FILE OUT.png [--max N] [--samples K] [--stretch auto|linear|minmax]\n"
@@ -284,6 +287,12 @@ int main(int argc, char **argv)
                    : e[i].kind == FQ_KIND_TABLE ? "table"
                                                 : "image",
                    (long long)e[i].nplanes, e[i].extname[0] ? e[i].extname : "-", e[i].desc);
+    } else if (!strcmp(cmd, "default")) {
+        int sky, hdu = fq_default_hdu(f, &sky);
+        if (hdu < 0)
+            printf("none\n");
+        else
+            printf("hdu=%d sky=%d\n", hdu, sky);
     } else if (!strcmp(cmd, "rows")) {
         int hdu = argc > 3 ? atoi(argv[3]) : 1;
         long long first = argc > 4 ? atoll(argv[4]) : 0, count = argc > 5 ? atoll(argv[5]) : 10;

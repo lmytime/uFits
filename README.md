@@ -42,7 +42,8 @@ notarized by Apple), then open uFits once.
   science image first. Cubes (Roman's raw ramps) get the slider, and arrays compressed
   with LZ4 (as Roman's are), zlib or bzip2 work too. **Header** shows the whole tree.
 - **Plots** of spectra and light curves (TESS, Kepler, SDSS, HST and JWST spectra, X-ray
-  light curves and spectra, ...) and **sky maps** of catalogs with RA and Dec.
+  light curves and spectra, ...) and **sky maps** of catalogs with RA and Dec. Catalogs
+  open on their rows: click **Plot** for the map.
 - **Table**: the rows of any table, even millions of them. ⌘C copies the selected rows.
 - **Header**: every keyword, with values and comments lined up. ⌘F searches it.
 

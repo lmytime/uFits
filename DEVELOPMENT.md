@@ -64,7 +64,10 @@ Time spent in the core alone, measured on a 4-core Linux VM:
   `RAJ2000`/`DEJ2000`, `ALPHA_J2000`/`DELTA_J2000`, `GLON`/`GLAT` and other common
   pairs), right ascension growing to the left, fields across RA = 0 kept in one piece,
   placeholder values such as -999 skipped. Crowded catalogs are shaded by density. A
-  5-million-row catalog plots in about 0.15 s.
+  5-million-row catalog plots in about 0.15 s, but the map samples rows from all over the
+  table, so for a catalog of 100 GB it takes minutes: previews open a catalog on its rows
+  and draw the map only when **Plot** is picked (`fq_default_hdu` tells from the headers
+  what a file opens on). Finder's thumbnails of catalogs are still maps.
 - Tile-compressed images (`fpack`, `.fz`): `RICE_1`, `GZIP_1`, `GZIP_2`, `PLIO_1`,
   `NOCOMPRESS`, with all three quantization/dithering modes.
 - Gzipped files (`.fits.gz`) when built with `GZIP=1` (see below).
@@ -75,7 +78,7 @@ Time spent in the core alone, measured on a 4-core Linux VM:
   with no view per cell, which keeps scrolling smooth, also inside Quick Look. Binary
   and ASCII tables, with array, string, logical, bit, complex and variable-length
   columns. ⌘C copies the selected rows as tab-separated text. Files whose tables have
-  nothing to plot open on it.
+  nothing to plot, and catalogs, open on it.
 - **Header** shows the header of the HDU picked, its cards in columns: keywords in
   bold at a fixed width, values and comments lined up, long strings (`CONTINUE`) joined
   into one line, `HIERARCH` keywords in full, `COMMENT`/`HISTORY` text under the

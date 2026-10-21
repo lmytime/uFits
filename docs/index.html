@@ -1473,7 +1473,8 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     menu.length = 0;
     f.hdus.forEach((h, k) => menu.add(new Option(h.title, String(k))));
     $("hduBox").hidden = f.hdus.length < 2;
-    show(f.start, "picture");
+    // A catalog opens on its rows (Plot draws its map), the rest on their picture.
+    show(f.start, f.hdus[f.start].picture === "sky" ? "table" : "picture");
   }
   function show(nextHdu, nextMode) {
     hdu = nextHdu;
@@ -1659,7 +1660,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
     { file: 1, views: [["table", 1700]] },
     { file: 4, views: [["sweep", 2600]] },
     { file: 5, views: [] },
-    { file: 3, views: [["table", 1600]] },
+    { file: 3, views: [["picture", 1800]] },
     { file: 2, views: [["header", 1600]] },
   ];
   let visit = 0;   // the file the story is at, to go on from after a pause
@@ -1697,7 +1698,7 @@ canvas.fill { width: 100%; height: 100%; display: block; }
             sweep = { t0: hero.time, ms: ms - 400, from: plane, to: plane < 16 ? 26 : 4 };
             await wait(ms);
           } else {
-            const button = what === "table" ? segTable : segHeader;
+            const button = what === "table" ? segTable : what === "picture" ? segPicture : segHeader;
             aim(button, 0.1, 2, 600);
             await wait(680);
             await click();

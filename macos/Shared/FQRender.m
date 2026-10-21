@@ -76,6 +76,7 @@ static NSString *FQTypeName(int bitpix)
         _hdu = e->hdu;
         _kind = e->kind;
         _isTable = e->table != 0;
+        _isCatalog = e->sky != 0;
         _isArray = array;
         _nplanes = e->nplanes;
         NSString *desc = [FQString(e->desc) stringByReplacingOccurrencesOfString:@" x "
@@ -168,6 +169,7 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
                       plane:-1
                        keep:NO
                        hdus:NULL
+                    catalog:NULL
                       error:error];
 }
 
@@ -179,14 +181,29 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
                      plane:(long long)plane
                       keep:(BOOL)keep
                       hdus:(NSArray<FQHDUItem *> **)hdus
+                   catalog:(int *)catalog
                      error:(NSString **)error
 {
     char err[256] = "";
+    if (catalog)
+        *catalog = -1;
     fq_file *f = fq_open(path.fileSystemRepresentation, err, sizeof err);
     if (!f) {
         if (error)
             *error = FQString(err);
         return nil;
+    }
+    int sky = 0, shown = catalog && hdu < 0 ? fq_default_hdu(f, &sky) : -1;
+    if (shown >= 0 && sky) {
+        // Unless it has no rows to show: a big gzip file is not listed.
+        NSArray<FQHDUItem *> *items = FQListHDUs(f, path);
+        if (items.count) {
+            *catalog = shown;
+            if (hdus)
+                *hdus = items;
+            fq_close(f);
+            return nil;
+        }
     }
     fq_opts o;
     fq_opts_default(&o);

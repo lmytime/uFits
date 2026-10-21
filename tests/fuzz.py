@@ -173,7 +173,7 @@ def main():
                           "--plane", str(rnd.randrange(-1, 6))],
                          ["info", target],
                          ["header", target, str(rnd.randrange(3))] + rnd.choice([[], ["--cards"], ["--spans"]]),
-                         ["hdus", target], ["table", target, str(rnd.randrange(1, 3)), "50"],
+                         ["hdus", target], ["default", target], ["table", target, str(rnd.randrange(1, 3)), "50"],
                          ["rows", target, str(rnd.randrange(1, 3)), str(rnd.choice([0, 3, 999])), "5"]):
                 try:
                     r = subprocess.run([FQ, *args], capture_output=True, text=True, errors="replace",

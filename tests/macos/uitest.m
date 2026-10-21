@@ -798,11 +798,26 @@ int main(int argc, const char *argv[])
         pickMode(root, 0);
         capture(@"sdss-plot", @"mode=0 [Plot|Table|Header]");
 
-        // A catalog: sky positions, a field across RA = 0, and its rows.
+        // A catalog opens on its rows; Plot draws its map of sky positions
+        // (a field across RA = 0).
         load(vc, [data stringByAppendingPathComponent:@"catalog_wrap.fits"]);
-        capture(@"catalog", @"DEC vs RA");
-        pickMode(root, 1);
+        capture(@"catalog", @"mode=1 [Plot|Table|Header]");
         capture(@"catalog-table", @"grid=3000 rows [#,ID,RA,DEC,MAG,NAME]");
+        pickMode(root, 0);
+        capture(@"catalog-plot", @"\"3000 rows\"  menu=\"HDU 1  CATALOG — DEC vs RA\"");
+        BOOL drawn = contentReady(0);
+        printf("%s catalog-plot: Plot draws the map\n", drawn ? "ok  " : "FAIL");
+        if (!drawn)
+            gFailures++;
+
+        // An image, then its catalog: the catalog, picked while the image
+        // shows, shows its rows (nothing of the image), and Plot its map.
+        load(vc, [data stringByAppendingPathComponent:@"image_catalog.fits"]);
+        capture(@"image-catalog", @"mode=0 [Image|Table(off)|Header]");
+        pickHDU(root, 1);
+        capture(@"image-catalog-rows", @"mode=1 [Plot|Table|Header]");
+        pickMode(root, 0);
+        capture(@"image-catalog-plot", @"\"200 rows\"  menu=\"HDU 1  SOURCES — DEC vs RA\"");
 
         // A file of tables that cannot be plotted opens on its first table;
         // the menu switches tables; the header opens at the table picked, its
@@ -838,12 +853,13 @@ int main(int argc, const char *argv[])
         // switching modes, scrolling a big table down and a wide one across.
         NSString *catalog = [data stringByAppendingPathComponent:@"big_catalog.fits"];
         if ([NSFileManager.defaultManager fileExistsAtPath:catalog]) {
-            timeLoad(vc, @"open 1M-row catalog (sky plot)", catalog);
-            timeSwitch(@"catalog: Plot -> Table", 1);
+            timeLoad(vc, @"open 1M-row catalog (its rows)", catalog);
             timeScroll(@"catalog: scroll down", NO, 200);
             timeJump(@"catalog: jump to row 900000", 900000);
             capture(@"big-catalog-900000", @"grid=1000000 rows");
             timeScroll(@"catalog: scroll right", YES, 2);
+            timeSwitch(@"catalog: Table -> Plot (drawn)", 0);
+            timeSwitch(@"catalog: Plot -> Table", 1);
             timeSwitch(@"catalog: Table -> Header", 2);
             timeSwitch(@"catalog: Header -> Plot", 0);
             timeSwitch(@"catalog: Plot -> Table again", 1);
@@ -879,9 +895,9 @@ int main(int argc, const char *argv[])
                        msSince(t0), spinner ? "   (showed Loading…)" : "   (no Loading…)");
                 if (!ok)
                     gFailures++;
-                timeSwitch(@"gz catalog: Plot -> Table", 1);
                 timeSwitch(@"gz catalog: Table -> Header", 2);
-                timeSwitch(@"gz catalog: Header -> Plot", 0);
+                timeSwitch(@"gz catalog: Header -> Plot (drawn)", 0);
+                timeSwitch(@"gz catalog: Plot -> Table", 1);
             }
             timeLoad(vc, @"open 200-HDU file", [data stringByAppendingPathComponent:@"many_hdus.fits"]);
             timeSwitch(@"200 HDUs: Image -> Header", 2);

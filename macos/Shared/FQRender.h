@@ -14,6 +14,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly) int hdu;
 @property(nonatomic, readonly) int kind;            // FQ_KIND_IMAGE, _PLOT, _TABLE, or _NONE
 @property(nonatomic, readonly) BOOL isTable;        // a table, plotted or not
+@property(nonatomic, readonly) BOOL isCatalog;      // a table of sky positions: shown as its rows,
+                                                    // its map drawn only when asked for
 @property(nonatomic, readonly) long long nplanes;
 @property(nonatomic, readonly, copy) NSString *extname;
 @property(nonatomic, readonly, copy) NSString *title; // "HDU 1  SCI — 4096 × 4096 float32"
@@ -42,7 +44,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Same, for a given HDU and cube plane (-1 = automatic). With hdus, also
 /// lists the HDUs that can be shown, whether or not rendering succeeds.
-/// With keep, the binned values are kept so -restretch: is quick.
+/// With keep, the binned values are kept so -restretch: is quick. With
+/// catalog, a catalog that hdu -1 would show is not drawn (its map reads
+/// rows from all over the file): nil is returned, with no error, and
+/// *catalog is its HDU; else *catalog is -1.
 + (nullable instancetype)renderFile:(NSString *)path
                           maxPixels:(int)maxPixels
                             samples:(int)samples
@@ -51,6 +56,7 @@ NS_ASSUME_NONNULL_BEGIN
                               plane:(long long)plane
                                keep:(BOOL)keep
                                hdus:(NSArray<FQHDUItem *> *_Nullable *_Nullable)hdus
+                            catalog:(int *_Nullable)catalog
                               error:(NSString *_Nullable *_Nullable)error;
 
 /// Stretches an image rendered with keep again, without reading the file

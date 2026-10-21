@@ -212,6 +212,9 @@ def check_listings():
         rc, out = fqtool("hdus", os.path.join(DATA, fn))
         return [l.split(" | ")[0] for l in out.splitlines()]
 
+    def default(fn):
+        return fqtool("default", os.path.join(DATA, fn))[1].strip()
+
     def rows(fn, hdu, n=10):
         rc, out = fqtool("table", os.path.join(DATA, fn), str(hdu), str(n))
         return [re.split(r"\s{2,}", l.strip()) for l in out.splitlines()[5:]] if rc == 0 else None
@@ -226,6 +229,16 @@ def check_listings():
     expect("tables_mixed.fits hdus", hdus("tables_mixed.fits"), ["1 table 1 MIXED", "2 table 1 ASCII"])
     expect("spec_sdss.fits hdus", hdus("spec_sdss.fits"), ["1 plot 1 COADD", "2 table 1 SPECOBJ"])
     expect("catalog_wrap.fits hdus", hdus("catalog_wrap.fits"), ["1 plot 1 CATALOG"])
+    expect("image_catalog.fits hdus", hdus("image_catalog.fits"), ["0 image 1 -", "1 plot 1 SOURCES"])
+    # What a preview opens on, from the headers: a catalog (sky=1) opens on
+    # its rows, so that its map is drawn only when asked for.
+    expect("catalog_wrap.fits default", default("catalog_wrap.fits"), "hdu=1 sky=1")
+    expect("catalog_gaia.fits default", default("catalog_gaia.fits"), "hdu=1 sky=1")
+    expect("image_catalog.fits default", default("image_catalog.fits"), "hdu=0 sky=0")
+    expect("lc_tess.fits default", default("lc_tess.fits"), "hdu=1 sky=0")
+    expect("spec_sdss.fits default", default("spec_sdss.fits"), "hdu=1 sky=0")
+    expect("mef.fits default", default("mef.fits"), "hdu=1 sky=0")
+    expect("table_only.fits default", default("table_only.fits"), "none")
     r = rows("tables_mixed.fits", 1)
     expect("tables_mixed.fits row 0", r and r[0][:7] if r else r,
            ["alpha", "T", "0x0000", "0", "1", "0", "[0 1 2]"])

@@ -900,6 +900,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSString *error = nil;
         NSArray<FQHDUItem *> *hdus = nil;
+        int catalog = -1;   // a file opens on a catalog's rows, not its map
         FQRendering *r;
         if (first)
             r = [FQRendering renderFile:path
@@ -910,6 +911,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
                                   plane:plane
                                    keep:YES
                                    hdus:&hdus
+                                catalog:&catalog
                                   error:&error];
         else
             r = [FQRendering renderFile:path
@@ -920,12 +922,15 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
                                   plane:plane
                                    keep:YES
                                    hdus:NULL
+                                catalog:NULL
                                   error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (generation == self->_generation) {
                 self->_busy = NO;
-                if (first)
+                if (first) {
                     self->_hdus = hdus;
+                    self->_selected = catalog;
+                }
                 [self showRendering:r error:error first:first];
                 if (first)
                     [self checkForUpdate];
@@ -990,8 +995,10 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
         _hduWidth = MIN(ceil(longest) + 34, 260);
         [_hduMenu setFrameSize:NSMakeSize(_hduWidth, NSHeight(_hduMenu.frame))];
 
-        // Files without a picture open on their first table, or the header.
-        _selected = r ? r.info.hdu : -1;
+        // Files without a picture open on their first table, or the header;
+        // a catalog on its rows (_selected: it, else -1).
+        if (r)
+            _selected = r.info.hdu;
         for (FQHDUItem *item in _hdus)
             if (_selected < 0 && item.kind == FQ_KIND_TABLE)
                 _selected = item.hdu;
@@ -1030,7 +1037,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 
 - (BOOL)showsPlaneSlider
 {
-    if (!_rendering || _rendering.kind != FQ_KIND_IMAGE)
+    if ([self shownRendering].kind != FQ_KIND_IMAGE)
         return NO;
     fq_info in = _rendering.info;
     return in.nplanes > 1 && in.color == FQ_COLOR_MONO;
@@ -1068,7 +1075,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     BOOL picture = _mode.selectedSegment == kModePicture;
     wanted[0] = _hdus.count > 1;
     wanted[1] = picture && [self showsPlaneSlider];
-    wanted[2] = picture && _rendering && _rendering.kind == FQ_KIND_IMAGE;
+    wanted[2] = picture && [self shownRendering].kind == FQ_KIND_IMAGE;
 }
 
 /// Right to left: the switch, then the stretch menu, plane slider and HDU
@@ -1210,6 +1217,14 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     return _selected >= 0 ? _selected : _rendering ? _rendering.info.hdu : 0;
 }
 
+/// What was drawn last, unless the HDU picked is a catalog whose map is not
+/// drawn: what another HDU drew is not shown for it.
+- (FQRendering *)shownRendering
+{
+    FQHDUItem *item = [self selectedItem];
+    return item.isCatalog && _rendering && _rendering.info.hdu != item.hdu ? nil : _rendering;
+}
+
 /// Picture and Table are on for the HDU picked when it can be drawn, or is
 /// a table; Header always is.
 - (void)updateModeSwitch
@@ -1238,7 +1253,8 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     BOOL picture = mode == kModePicture;
     BOOL rows = mode == kModeTable && [self prepareTable:hdu];
     BOOL header = mode == kModeHeader && [self prepareHeader:hdu];
-    int kind = _rendering ? _rendering.kind : FQ_KIND_NONE;
+    FQRendering *shown = [self shownRendering];
+    int kind = shown ? shown.kind : FQ_KIND_NONE;
     _headerScroll.hidden = !header;
     _tableScroll.hidden = !rows;
     BOOL wasHidden = _imageScroll.hidden;
@@ -1246,8 +1262,8 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     if (wasHidden && !_imageScroll.hidden)
         [self fitImage:NO];   // the window may have changed size meanwhile
     _spectrumView.hidden = !picture || kind != FQ_KIND_PLOT;
-    _message.hidden = !picture || _message.stringValue.length == 0 ||
-                      (kind != FQ_KIND_NONE && !(kind == FQ_KIND_IMAGE && _rendering.info.empty));
+    _message.hidden = !picture || shown != _rendering || _message.stringValue.length == 0 ||
+                      (kind != FQ_KIND_NONE && !(kind == FQ_KIND_IMAGE && shown.info.empty));
     [self setLoading:picture ? _busy : !(rows || header)];
     if (_focusOnReady && (picture || rows || header)) {
         _focusOnReady = NO;
@@ -1264,7 +1280,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     _hduMenu.needsDisplay = YES;
     // The bar says briefly what is on show, and only what nothing else
     // says: the picture's size and type, or the table's rows and columns.
-    _info.stringValue = picture && _rendering ? _renderInfo ?: @"" : rows ? [self tableSummary] : @"";
+    _info.stringValue = picture && shown ? _renderInfo ?: @"" : rows ? [self tableSummary] : @"";
     [self layoutBar];
 }
 
@@ -1677,7 +1693,20 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
 {
     (void)sender;
     _focusOnReady = YES;
+    [self drawCatalogIfAsked];
     [self showMode:_mode.selectedSegment];
+}
+
+/// A catalog's map of the sky is drawn when Plot is picked, not before: it
+/// reads rows from all over the file, which takes long for a big catalog.
+- (void)drawCatalogIfAsked
+{
+    FQHDUItem *item = [self selectedItem];
+    if (_mode.selectedSegment != kModePicture || !item.isCatalog || _hdu == item.hdu)
+        return;   // not asked for, not a catalog, or drawn (or on its way)
+    _hdu = item.hdu;
+    _plane = -1;
+    [self requestRender];
 }
 
 - (void)stretchChanged:(id)sender
@@ -1708,17 +1737,22 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
     FQHDUItem *item = [self selectedItem];
     if (!item)
         return;
-    // An image or a plot is drawn in the background, whatever is on show.
-    BOOL drawable = item.kind == FQ_KIND_IMAGE || item.kind == FQ_KIND_PLOT;
+    // An image or a plot is drawn in the background, whatever is on show; a
+    // catalog's map only when Plot is picked.
+    BOOL drawable = item.kind == FQ_KIND_IMAGE || (item.kind == FQ_KIND_PLOT && !item.isCatalog);
     if (drawable && _selected != _hdu && !(_hdu < 0 && _rendering && _selected == _rendering.info.hdu)) {
         _hdu = _selected;
         _plane = -1;
         [self requestRender];
     }
     // The same mode when this HDU has it (a header always), or what it has:
-    // its picture, else its rows, else its header.
+    // its picture, else its rows, else its header. A catalog shows its rows
+    // rather than a map not drawn yet.
+    NSInteger mode = _mode.selectedSegment;
+    if (mode == kModePicture && item.isCatalog && ![self shownRendering])
+        mode = kModeTable;
     _focusOnReady = YES;
-    [self showMode:_mode.selectedSegment];
+    [self showMode:mode];
 }
 
 - (void)planeChanged:(id)sender
