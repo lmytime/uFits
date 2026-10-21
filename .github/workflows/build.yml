@@ -129,6 +129,10 @@ jobs:
       - run: pip install numpy astropy lz4 zstandard asdf roman_datamodels
       - name: Core tests (Apple clang, GCD)
         run: make test
+      - name: Big files read only what is shown
+        if: ${{ !cancelled() }}
+        timeout-minutes: 3
+        run: sh tests/macos/bigfile_check.sh build/fqtool build/bigfiles
       - name: Install and register the extensions
         env:
           GH_TOKEN: ${{ github.token }}

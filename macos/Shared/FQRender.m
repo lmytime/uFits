@@ -136,7 +136,7 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
     fq_hdu_entry *e = calloc(kMaxHDUs, sizeof *e);
     if (!e)
         return @[];
-    int n = fq_list_hdus(f, e, kMaxHDUs), total = MIN(fq_hdu_count(f), (int)kMaxHDUs), k = 0;
+    int n = fq_list_hdus(f, e, kMaxHDUs), total = fq_hdu_count_upto(f, kMaxHDUs), k = 0;
     NSMutableArray<FQHDUItem *> *items = [NSMutableArray array];
     for (int hdu = 0; hdu < total || k < n; hdu++) {
         if (k < n && e[k].hdu == hdu)

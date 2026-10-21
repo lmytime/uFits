@@ -103,8 +103,7 @@ $(B)/obj/core/%.o: core/%.c $(CORE_H)
 
 $(B)/obj/zstddeclib.o: $(ZSTD_SRC) Makefile
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS_) -Os -DZSTD_NO_INLINE -DHUF_FORCE_DECOMPRESS_X1 \
-	    -DZSTD_FORCE_DECOMPRESS_SEQUENCES_SHORT -c $< -o $@
+	$(CC) $(CFLAGS_) -c $< -o $@
 
 $(B)/obj/yaml/%.o: third_party/libyaml/%.c $(YAML_H) Makefile
 	@mkdir -p $(dir $@)

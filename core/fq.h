@@ -166,6 +166,9 @@ float *fq_decode_float(fq_file *f, const fq_opts *opts, int *w, int *h,
 
 /* Number of HDUs, or images in XISF (reads every header in the file). */
 int fq_hdu_count(fq_file *f);
+/* The same, counting no further than max (and reading headers only that
+   far): for a list that shows at most max. */
+int fq_hdu_count_upto(fq_file *f, int max);
 
 typedef struct {
     int hdu;

@@ -904,6 +904,8 @@ typedef struct plan_s {
     int f, k, offs[MAX_K];
     int w, h;
     int stat_only;            /* only the rows of the statistics grid are read */
+    long advise;              /* page size: the rows binned are read in full,
+                                 from the mapped file (0: no read-ahead hint) */
     const struct plan_s *donor; /* compressed: bands it decoded may be used */
     int truncated;
     src_t src;
@@ -1345,15 +1347,10 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
                 s->ref = pv;
         }
     }
-#if defined(POSIX_MADV_WILLNEED)
-    if (P->k == P->f && !P->stat_only && f->map && f->maplen && !f->z) {
-        /* Everything will be read: ask for read-ahead. */
-        uintptr_t a = (uintptr_t)s->base & ~(uintptr_t)4095;
-        uintptr_t e = (uintptr_t)(s->base + s->avail);
-        if (e > a)
-            posix_madvise((void *)a, (size_t)(e - a), POSIX_MADV_WILLNEED);
-    }
-#endif
+    /* Every row of the part shown is read: each chunk of the binning asks
+       for read-ahead of its rows (advise_rows). */
+    if (P->k == P->f && !P->stat_only && f->map && f->maplen && !f->z)
+        P->advise = sysconf(_SC_PAGESIZE);
     return 0;
 }
 
@@ -1502,6 +1499,42 @@ static void bin_bayer_row(const plan_t *P, int oy, float *tmp, float *col, float
     }
 }
 
+/* Read-ahead for output rows [i0, i1) of a plan that reads all their
+   source rows from the mapped file: those rows only, and of each only the
+   part shown when that is less than half of it. Since macOS 15.4 the hint
+   faults in every page of its range before it returns, so a hint over the
+   whole data unit read all of a cube to show one plane, or all of an image
+   to show a zoomed-in part. */
+static void advise_rows(const plan_t *P, int i0, int i1)
+{
+#if defined(POSIX_MADV_WILLNEED)
+    const src_t *s = &P->src;
+    const int64_t cell = P->color == FQ_COLOR_BAYER ? 2 : 1, rb = s->W * s->bpp;
+    int64_t y0 = (P->ry + (int64_t)i0 * P->f) * cell, y1 = (P->ry + (int64_t)i1 * P->f) * cell;
+    const int64_t x0 = P->rx * cell * s->bpp, x1 = (P->rx + P->rw) * cell * s->bpp;
+    const int whole = 2 * (x1 - x0) >= rb;
+    const uint8_t *end = s->base + s->avail;
+    if (y1 > s->H)
+        y1 = s->H;
+    for (int c = 0; c < (cell == 2 ? 1 : P->nch); c++)
+        for (int64_t y = y0; y < y1; y = whole ? y1 : y + 1) {
+            const uint8_t *r = src_row(s, c, y);
+            if (!r)
+                break;
+            const uint8_t *e = whole ? r + (y1 - y) * rb : r + x1;
+            uintptr_t a = (uintptr_t)(whole ? r : r + x0) & ~(uintptr_t)(P->advise - 1);
+            if (e > end)
+                e = end;
+            if ((uintptr_t)e > a)
+                posix_madvise((void *)a, (size_t)((uintptr_t)e - a), POSIX_MADV_WILLNEED);
+        }
+#else
+    (void)P;
+    (void)i0;
+    (void)i1;
+#endif
+}
+
 static void bin_task(void *ctx, size_t ci)
 {
     binjob *J = ctx;
@@ -1510,6 +1543,8 @@ static void bin_task(void *ctx, size_t ci)
     int i1 = (int)((int64_t)J->nrows * (int64_t)(ci + 1) / J->nchunks);
     if (i0 >= i1)
         return;
+    if (P->advise > 0 && !J->rows)
+        advise_rows(P, i0, i1);
     const int w = P->w;
     /* Scratch for what one pass reads: whole blocks when every pixel is
        averaged, one value per output column when sampling. */

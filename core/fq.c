@@ -562,6 +562,14 @@ int fq_hdu_count(fq_file *f)
     return f->nhdu;
 }
 
+int fq_hdu_count_upto(fq_file *f, int max)
+{
+    if (max <= 0)
+        return 0;
+    fqi_get_hdu(f, max - 1);
+    return f->nhdu < max ? f->nhdu : max;
+}
+
 static const char *hdu_card(const fq_file *f, const hdu_t *h, const char *key)
 {
     const char *p = (const char *)f->data + h->hdr_off;

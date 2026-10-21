@@ -13,7 +13,11 @@ uFits is built to be small and fast:
   builds need only Xcode command line tools.
 - **Reads only what it shows.** Files are memory mapped; images are binned straight from
   the mapping, sampling a few pixels per output pixel when shrinking a lot, so a
-  thumbnail of a 256 MB image touches a small fraction of the file. For tile-compressed
+  thumbnail of a 256 MB image touches a small fraction of the file. When every row of
+  the part shown is read (a cube's plane, a zoomed-in part), each chunk of the binning
+  asks for read-ahead of its own rows only: since macOS 15.4 the hint faults in its
+  whole range before it returns, so a hint over the whole data unit would read all of a
+  cube to show one plane (`tests/macos/bigfile_check.sh` times that). For tile-compressed
   files only the tiles under the sampled rows are decompressed. XISF compression is
   block based: the selected image is decompressed in full and cached until another
   image is selected or the file is closed. Of a compressed ASDF array only the plane
@@ -150,8 +154,9 @@ is reported as not supported. Checksums are not verified.
 
 The app bundles uFits' BSD 3-Clause license as `Contents/Resources/LICENSE`, the
 Zstandard notice as `Contents/Resources/zstd-LICENSE` and libyaml's as
-`Contents/Resources/libyaml-LICENSE`. The macOS Zstandard decoder is compiled with
-upstream size options to keep the three binaries small.
+`Contents/Resources/libyaml-LICENSE`. The Zstandard decoder is compiled at `-O2` like
+the rest: its upstream size options (`-Os`, `ZSTD_NO_INLINE`, ...) saved about 90 KB per
+architecture and binary but made decoding float images about twice as slow.
 
 ## Updates
 
