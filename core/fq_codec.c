@@ -284,41 +284,87 @@ void fq_unshuffle(const uint8_t *in, uint8_t *out, int64_t n, int itemsize)
 
 /* ---- LZ4 ----------------------------------------------------------------- */
 
+static inline void cp8(uint8_t *d, const uint8_t *s) { memcpy(d, s, 8); }
+static inline void cp16(uint8_t *d, const uint8_t *s) { memcpy(d, s, 16); }
+
 int fq_lz4_decode(const uint8_t *in, size_t n, uint8_t *out, size_t cap)
 {
-    size_t i = 0, o = 0;
-    while (i < n) {
-        unsigned token = in[i++];
+    const uint8_t *ip = in, *const iend = in + n;
+    uint8_t *op = out, *const oend = out + cap;
+    while (ip < iend) {
+        unsigned token = *ip++;
         size_t len = token >> 4;
-        if (len == 15) {
-            unsigned v;
-            do { if (i == n) return -1; v = in[i++]; if (len > SIZE_MAX - v) return -1; len += v; } while (v == 255);
+        if (len != 15 && (size_t)(iend - ip) >= 16 && (size_t)(oend - op) >= 16) {
+            cp16(op, ip);                     /* at most 14 literals: one wild copy */
+            op += len;
+            ip += len;
+        } else {
+            if (len == 15) {
+                unsigned v;
+                do {
+                    if (ip == iend) return -1;
+                    v = *ip++;
+                    if (len > SIZE_MAX - v) return -1;
+                    len += v;
+                } while (v == 255);
+            }
+            if (len > (size_t)(iend - ip) || len > (size_t)(oend - op)) return -1;
+            if ((size_t)(iend - ip) >= len + 16 && (size_t)(oend - op) >= len + 16) {
+                uint8_t *e = op + len;
+                do { cp16(op, ip); op += 16; ip += 16; } while (op < e);
+                ip -= op - e;
+                op = e;
+            } else {
+                memcpy(op, ip, len);
+                op += len;
+                ip += len;
+            }
         }
-        if (len > n - i || len > cap - o) return -1;
-        memcpy(out + o, in + i, len); i += len; o += len;
-        if (i == n) return o == cap ? 0 : -1;
-        if (n - i < 2) return -1;
-        size_t off = in[i] | ((size_t)in[i + 1] << 8); i += 2;
-        if (!off || off > o) return -1;
+        if (ip == iend) return op == oend ? 0 : -1;
+        if (iend - ip < 2) return -1;
+        size_t off = ip[0] | ((size_t)ip[1] << 8);
+        ip += 2;
+        if (!off || off > (size_t)(op - out)) return -1;
         len = (token & 15) + 4;
         if ((token & 15) == 15) {
             unsigned v;
-            do { if (i == n) return -1; v = in[i++]; if (len > SIZE_MAX - v) return -1; len += v; } while (v == 255);
+            do {
+                if (ip == iend) return -1;
+                v = *ip++;
+                if (len > SIZE_MAX - v) return -1;
+                len += v;
+            } while (v == 255);
         }
-        if (len > cap - o) return -1;
-        if (off >= 8) {
-            /* A match may overlap what it writes: copy at most off bytes at
-               a time, each from bytes already written. */
-            while (len) {
-                size_t k = len < off ? len : off;
-                memcpy(out + o, out + o - off, k);
-                o += k;
-                len -= k;
+        if (len > (size_t)(oend - op)) return -1;
+        const uint8_t *m = op - off;
+        uint8_t *e = op + len;
+        if ((size_t)(oend - e) >= 16) {
+            if (off < 8) {
+                /* Short period: the first 8 bytes one by one, then copy from
+                   a whole number of periods back, at least 8 bytes away. */
+                for (int j = 0; j < 8; j++) op[j] = m[j];
+                size_t eff = off * ((8 + off - 1) / off);
+                op += 8;
+                m = op - eff;
+                while (op < e) { cp8(op, m); op += 8; m += 8; }
+            } else if (off < 16) {
+                do { cp8(op, m); op += 8; m += 8; } while (op < e);
+            } else {
+                do { cp16(op, m); op += 16; m += 16; } while (op < e);
             }
+            op = e;
         } else {
-            for (size_t j = 0; j < len; j++) out[o + j] = out[o + j - off];
-            o += len;
+            /* Near the end of the output: nothing written past e. */
+            if (off < 8) {
+                size_t k = len < 8 ? len : 8;
+                for (size_t j = 0; j < k; j++) op[j] = m[j];
+                op += k;
+                if (op < e)
+                    m = op - off * ((8 + off - 1) / off);
+            }
+            while (e - op >= 8) { cp8(op, m); op += 8; m += 8; }
+            while (op < e) *op++ = *m++;
         }
     }
-    return o == cap ? 0 : -1;
+    return op == oend ? 0 : -1;
 }

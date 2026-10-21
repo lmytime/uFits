@@ -699,13 +699,17 @@ static int select_target(fq_file *f, const fq_opts *o, imgdesc *d, int *table, c
 
 enum { F_U8, F_I16, F_I32, F_I64, F_F32, F_F64, F_F32N, F_NATIVE };
 /* F_NATIVE samples read directly: little-endian (the host's) formats. */
-enum { N_GENERIC, N_U8, N_I8, N_U16, N_I16, N_U32, N_I32, N_F16, N_F32, N_F64 };
+enum { N_GENERIC, N_U8, N_I8, N_U16, N_I16, N_U32, N_I32, N_F16, N_F32, N_F64,
+       N_SU16, N_SU32, N_SF32, N_SF64 };
 
 typedef struct {
     int fmt, bpp;
     int bitpix, sign, big_endian, stride; /* F_NATIVE (XISF, ASDF): sample format
                                              (signed integers: sign) and stride */
     int native;                     /* F_NATIVE: N_*, a format read directly */
+    int shuf;                       /* F_NATIVE: XISF bytes still shuffled: byte b of
+                                       item i at base[b * shuf_n + i] */
+    int64_t shuf_n;
     double scale, zero, ref;
     int has_blank;
     int64_t blank;
@@ -729,7 +733,7 @@ static inline const uint8_t *src_row(const src_t *s, int slot, int64_t y)
     int64_t used = (s->W - 1) * s->bpp * stride + s->bpp;
     if (off > s->avail || used > s->avail - off)
         return NULL;
-    return s->base + off;
+    return s->base + (s->shuf ? off / s->bpp : off);
 }
 
 static float half_float(uint16_t h)
@@ -758,6 +762,12 @@ static float half_float(uint16_t h)
 static double native_sample(const src_t *s, const uint8_t *p)
 {
     uint64_t u = 0;
+    uint8_t g[8];
+    if (s->shuf) {   /* p: the sample's byte in the first plane */
+        for (int i = 0; i < s->bpp; i++)
+            g[i] = p[(int64_t)i * s->shuf_n];
+        p = g;
+    }
     if (s->big_endian) {
         for (int i = 0; i < s->bpp; i++)
             u = (u << 8) | p[i];
@@ -784,22 +794,67 @@ static double native_sample(const src_t *s, const uint8_t *p)
     return (double)u;
 }
 
-/* One case of F_NATIVE: n samples of type T (SIZE bytes) at IDX, as VALUE. */
-#define NATIVE_RUN(CODE, T, SIZE, VALUE, IDX)                                    \
+/* Shuffled XISF data: n samples of type T, byte k of each from plane k. */
+#define SHUF_RUN(CODE, T, U, SIZE, VALUE, IDX)                                   \
         case CODE:                                                               \
+            if (contiguous && st == 1 && ref == 0) {                             \
+                const uint8_t *q_[SIZE];                                         \
+                for (int k_ = 0; k_ < SIZE; k_++)                                \
+                    q_[k_] = p + x0 + k_ * ps;                                   \
+                for (int64_t i = 0; i < n; i++) {                                \
+                    U u_ = 0;                                                    \
+                    for (int k_ = 0; k_ < SIZE; k_++)                            \
+                        u_ |= (U)q_[k_][i] << (8 * k_);                          \
+                    T v;                                                         \
+                    memcpy(&v, &u_, SIZE);                                       \
+                    out[i] = (float)(VALUE);                                     \
+                }                                                                \
+                break;                                                           \
+            }                                                                    \
             for (int64_t i = 0; i < n; i++) {                                    \
+                const uint8_t *q_ = p + (IDX) * st;                              \
+                U u_ = 0;                                                        \
+                for (int k_ = 0; k_ < SIZE; k_++)                                \
+                    u_ |= (U)q_[k_ * ps] << (8 * k_);                            \
                 T v;                                                             \
-                memcpy(&v, p + (IDX) * (SIZE) * st, SIZE);                       \
-                out[i] = (float)((double)(VALUE) - ref);                         \
+                memcpy(&v, &u_, SIZE);                                           \
+                out[i] = ref != 0 ? (float)((double)(VALUE) - ref) : (float)(VALUE); \
             }                                                                    \
             break;
 
-/* Convert n pixels at indices IDX (an expression of x0, i, step) to floats. */
-#define DECODE_FN(NAME, IDX)                                                     \
+/* One case of F_NATIVE: n samples of type T (SIZE bytes) at IDX, as VALUE. */
+#define NATIVE_RUN(CODE, T, SIZE, VALUE, IDX)                                    \
+        case CODE:                                                               \
+            if (ref != 0) {                                                      \
+                for (int64_t i = 0; i < n; i++) {                                \
+                    T v;                                                         \
+                    memcpy(&v, p + (IDX) * (SIZE) * st, SIZE);                   \
+                    out[i] = (float)((double)(VALUE) - ref);                     \
+                }                                                                \
+            } else if (st == 1) {                                                \
+                for (int64_t i = 0; i < n; i++) {                                \
+                    T v;                                                         \
+                    memcpy(&v, p + (IDX) * (SIZE), SIZE);                        \
+                    out[i] = (float)(VALUE);                                     \
+                }                                                                \
+            } else {                                                             \
+                for (int64_t i = 0; i < n; i++) {                                \
+                    T v;                                                         \
+                    memcpy(&v, p + (IDX) * (SIZE) * st, SIZE);                   \
+                    out[i] = (float)(VALUE);                                     \
+                }                                                                \
+            }                                                                    \
+            break;
+
+/* Convert n pixels at indices IDX (an expression of x0, i, step) to floats;
+   CONTIG: IDX is x0 + i. */
+#define DECODE_FN(NAME, IDX, CONTIG)                                             \
 static void NAME(const src_t *s, const uint8_t *row, int64_t x0, int64_t step,  \
                  int64_t n, float *out)                                          \
 {                                                                                \
     (void)step;                                                                  \
+    const int contiguous = CONTIG;                                               \
+    (void)contiguous;                                                            \
     const uint8_t *p = row;                                                      \
     const double dsc = s->scale, dzo = s->zero - s->ref;                         \
     const float fsc = (float)dsc, fzo = (float)dzo;                              \
@@ -808,6 +863,8 @@ static void NAME(const src_t *s, const uint8_t *row, int64_t x0, int64_t step,  
     switch (s->fmt) {                                                            \
     case F_NATIVE: {                                                            \
         const int64_t st = s->stride;                                            \
+        const int64_t ps = s->shuf_n;                                            \
+        (void)ps;                                                                \
         const double ref = s->ref;                                               \
         switch (s->native) {                                                     \
         NATIVE_RUN(N_U8, uint8_t, 1, v, IDX) \
@@ -819,9 +876,13 @@ static void NAME(const src_t *s, const uint8_t *row, int64_t x0, int64_t step,  
         NATIVE_RUN(N_F16, uint16_t, 2, half_float(v), IDX)                            \
         NATIVE_RUN(N_F32, float, 4, v, IDX) \
         NATIVE_RUN(N_F64, double, 8, v, IDX) \
+        SHUF_RUN(N_SU16, uint16_t, uint16_t, 2, v, IDX) \
+        SHUF_RUN(N_SU32, uint32_t, uint32_t, 4, v, IDX) \
+        SHUF_RUN(N_SF32, float, uint32_t, 4, v, IDX) \
+        SHUF_RUN(N_SF64, double, uint64_t, 8, v, IDX) \
         default:                                                                 \
             for (int64_t i = 0; i < n; i++)                                      \
-                out[i] = (float)(native_sample(s, p + (IDX) * s->bpp * st) - ref); \
+                out[i] = (float)(native_sample(s, p + (IDX) * (s->shuf ? 1 : s->bpp) * st) - ref); \
         }                                                                        \
         break;                                                                   \
     }                                                                            \
@@ -888,8 +949,8 @@ static void NAME(const src_t *s, const uint8_t *row, int64_t x0, int64_t step,  
     }                                                                            \
 }
 
-DECODE_FN(decode_run, x0 + i)
-DECODE_FN(decode_step, x0 + i * step)
+DECODE_FN(decode_run, x0 + i, 1)
+DECODE_FN(decode_step, x0 + i * step, 0)
 
 /* ----------------------------------------------------------- the plan */
 
@@ -1272,8 +1333,9 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
         s->bpp = abs(h->bitpix) / 8;
         s->avail = h->data_len;
         if (h->xisf) {
-            if (fqi_xisf_load(f, h, &s->base, &s->big_endian, &s->stride, err, errlen))
+            if (fqi_xisf_load(f, h, o->threads, &s->base, &s->big_endian, &s->stride, &s->shuf, err, errlen))
                 return -1;
+            s->shuf_n = s->shuf ? s->avail / s->bpp : 0;
         } else {
             /* Only the plane shown is read (and decompressed). */
             s->sign = fqi_asdf_signed(h);
@@ -1283,7 +1345,14 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
                 s->plane[slot] = 0;
         }
         s->native = N_GENERIC;
-        if (!s->big_endian) {
+        if (!s->big_endian && s->shuf) {
+            switch (s->bitpix) {
+            case 16: s->native = s->sign ? N_GENERIC : N_SU16; break;
+            case 32: s->native = s->sign ? N_GENERIC : N_SU32; break;
+            case -32: s->native = N_SF32; break;
+            case -64: s->native = N_SF64; break;
+            }
+        } else if (!s->big_endian) {
             switch (s->bitpix) {
             case 8: s->native = s->sign ? N_I8 : N_U8; break;
             case 16: s->native = s->sign ? N_I16 : N_U16; break;
@@ -1296,7 +1365,7 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
         if (!o->exact && (s->bpp >= 4)) {
             const uint8_t *r = src_row(s, 0, P->H / 2);
             if (r) {
-                double v = native_sample(s, r + (P->W / 2) * s->bpp * s->stride);
+                double v = native_sample(s, r + (P->W / 2) * (s->shuf ? 1 : s->bpp) * s->stride);
                 if (isfinite(v) && fabs(v) > 1e5)
                     s->ref = v;
             }
@@ -1348,8 +1417,10 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
         }
     }
     /* Every row of the part shown is read: each chunk of the binning asks
-       for read-ahead of its rows (advise_rows). */
-    if (P->k == P->f && !P->stat_only && f->map && f->maplen && !f->z)
+       for read-ahead of its rows (advise_rows), when they are in the mapped
+       file (not decompressed into memory). */
+    uintptr_t map = (uintptr_t)f->map, base = (uintptr_t)P->src.base;
+    if (P->k == P->f && !P->stat_only && f->map && base >= map && base - map < f->maplen)
         P->advise = sysconf(_SC_PAGESIZE);
     return 0;
 }
@@ -1377,11 +1448,196 @@ static inline void accumulate(const float *v, float *acc, float *cnt, int n)
     }
 }
 
+/* One row of n values from x0 added to the column sums csum (and counts
+   ccnt), in one pass: the same sums as decode_run then accumulate.
+   Returns 0 when the format has no such path, 1 for integers (always
+   finite: ccnt is not touched), 2 for floats (NaN and infinities are left
+   out, and counted in ccnt as accumulate does). */
+#define ADD_INT(EXPR)                                                    \
+    do {                                                                 \
+        if (first)                                                       \
+            for (int64_t i = 0; i < n; i++)                              \
+                csum[i] = 0.0f + (EXPR);                                 \
+        else                                                             \
+            for (int64_t i = 0; i < n; i++)                              \
+                csum[i] += (EXPR);                                       \
+    } while (0)
+#define ADD_FLT(EXPR)                                                    \
+    do {                                                                 \
+        if (first)                                                       \
+            for (int64_t i = 0; i < n; i++) {                            \
+                float v = (EXPR);                                        \
+                int ok = fqi_finite(v);                                  \
+                csum[i] = 0.0f + (ok ? v : 0.0f);                        \
+                ccnt[i] = 0.0f + (ok ? 1.0f : 0.0f);                     \
+            }                                                            \
+        else                                                             \
+            for (int64_t i = 0; i < n; i++) {                            \
+                float v = (EXPR);                                        \
+                int ok = fqi_finite(v);                                  \
+                csum[i] += ok ? v : 0.0f;                                \
+                ccnt[i] += ok ? 1.0f : 0.0f;                             \
+            }                                                            \
+    } while (0)
+
+static inline float f32_be(const uint8_t *p)
+{
+    uint32_t u = fq_be32(p);
+    float v;
+    memcpy(&v, &u, 4);
+    return v;
+}
+
+static inline float f32_le(const uint8_t *p)
+{
+    float v;
+    memcpy(&v, p, 4);
+    return v;
+}
+
+/* 16-bit samples in the host's order, wherever they are in the row. */
+static inline uint16_t u16_ne(const uint8_t *p)
+{
+    uint16_t v;
+    memcpy(&v, p, 2);
+    return v;
+}
+
+static inline int16_t i16_ne(const uint8_t *p)
+{
+    int16_t v;
+    memcpy(&v, p, 2);
+    return v;
+}
+
+static int add_run(const src_t *s, const uint8_t *row, int64_t x0, int64_t n, float *csum,
+                   float *ccnt, int first)
+{
+    const uint8_t *p = row;
+    const double dsc = s->scale, dzo = s->zero - s->ref, ref = s->ref;
+    const float fsc = (float)dsc, fzo = (float)dzo;
+    switch (s->fmt) {
+    case F_U8:
+        if (s->has_blank)
+            return 0;
+        ADD_INT(p[x0 + i] * fsc + fzo);
+        return 1;
+    case F_I16:
+        if (s->has_blank)
+            return 0;
+        ADD_INT((int16_t)fq_be16(p + 2 * (x0 + i)) * fsc + fzo);
+        return 1;
+    case F_F32:
+        if (dsc == 1.0 && dzo == 0.0)
+            ADD_FLT(f32_be(p + 4 * (x0 + i)));
+        else
+            ADD_FLT((float)(f32_be(p + 4 * (x0 + i)) * dsc + dzo));
+        return 2;
+    case F_F32N:
+        ADD_FLT(f32_le(p + 4 * (x0 + i)));
+        return 2;
+    case F_NATIVE:
+        if (s->stride != 1)
+            return 0;
+        switch (s->native) {
+        case N_F32:
+            if (ref == 0)
+                ADD_FLT(f32_le(p + 4 * (x0 + i)));
+            else
+                ADD_FLT((float)((double)f32_le(p + 4 * (x0 + i)) - ref));
+            return 2;
+        case N_U16:
+            ADD_INT((float)((double)u16_ne(p + 2 * (x0 + i)) - ref));
+            return 1;
+        case N_I16:
+            ADD_INT((float)((double)i16_ne(p + 2 * (x0 + i)) - ref));
+            return 1;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+/* acc[ox] (and cnt[ox]) = the sum of block ox of f values of v, added left
+   to right from 0 as the general loop does; f of 2 to 4 (the 4x4 preview)
+   spelled out so that they vectorize. 0 when f is another. */
+static int block_sums(const float *v, float *out, int64_t nb, int f)
+{
+    switch (f) {
+    case 2:
+        for (int64_t o = 0; o < nb; o++)
+            out[o] = (0.0f + v[2 * o]) + v[2 * o + 1];
+        return 1;
+    case 3:
+        for (int64_t o = 0; o < nb; o++)
+            out[o] = ((0.0f + v[3 * o]) + v[3 * o + 1]) + v[3 * o + 2];
+        return 1;
+    case 4:
+        for (int64_t o = 0; o < nb; o++)
+            out[o] = (((0.0f + v[4 * o]) + v[4 * o + 1]) + v[4 * o + 2]) + v[4 * o + 3];
+        return 1;
+    }
+    return 0;
+}
+
 static void bin_plane_row(const plan_t *P, int slot, int oy, float *tmp, float *col,
                           float *acc, float *cnt)
 {
     const src_t *s = &P->src;
     const int w = P->w, f = P->f;
+    if (P->k == f && f > 1 && f <= 4 && (int64_t)w * f <= P->rw) {
+        /* Every pixel, in one pass a row (decoded and added together),
+           then the blocks' sums. */
+        int64_t n = (int64_t)w * f;
+        float *csum = col, *ccnt = col + n;
+        int rows = 0, kind = 1;
+        for (int j = 0; j < f && kind; j++) {
+            const uint8_t *row = src_row(s, slot, P->ry + (int64_t)oy * f + j);
+            if (row)
+                kind = add_run(s, row, P->rx, n, csum, ccnt, rows++ == 0);
+        }
+        if (kind && !rows) {
+            memset(acc, 0, (size_t)w * sizeof(float));
+            memset(cnt, 0, (size_t)w * sizeof(float));
+            return;
+        }
+        if (kind == 2) {
+            block_sums(csum, acc, w, f);
+            block_sums(ccnt, cnt, w, f);
+            return;
+        }
+        if (kind == 1) {
+            /* Integers are finite, unless scaled past the float range:
+               such a block is added up again the general way. */
+            block_sums(csum, acc, w, f);
+            const float cf = (float)(rows * f);
+            int bad = 0;
+            for (int ox = 0; ox < w; ox++) {
+                cnt[ox] = cf;
+                bad |= !fqi_finite(acc[ox]);
+            }
+            for (int ox = 0; bad && ox < w; ox++) {
+                if (fqi_finite(acc[ox]))
+                    continue;
+                float bs[4] = { 0 }, bc[4] = { 0 };
+                for (int j = 0; j < f; j++) {
+                    const uint8_t *row = src_row(s, slot, P->ry + (int64_t)oy * f + j);
+                    if (!row)
+                        continue;
+                    decode_run(s, row, P->rx + (int64_t)ox * f, 1, f, tmp);
+                    accumulate(tmp, bs, bc, f);
+                }
+                float a = 0, c = 0;
+                for (int x = 0; x < f; x++) {
+                    a += bs[x];
+                    c += bc[x];
+                }
+                acc[ox] = a;
+                cnt[ox] = c;
+            }
+            return;
+        }
+    }
     memset(acc, 0, (size_t)w * sizeof(float));
     memset(cnt, 0, (size_t)w * sizeof(float));
     if (P->k == f) {
@@ -1575,14 +1831,14 @@ static void bin_task(void *ctx, size_t ci)
             const float *a = P->color == FQ_COLOR_BAYER ? acc + c * w : acc;
             const float *n = P->color == FQ_COLOR_BAYER ? cnt + c * w : cnt;
             float *o = J->out + c * plane + (size_t)i * w;
+            /* Branch free, so that it vectorizes. */
+            int none = 0;
             for (int ox = 0; ox < w; ox++) {
-                if (n[ox] > 0) {
-                    o[ox] = a[ox] / n[ox];
-                } else {
-                    o[ox] = NAN;
-                    hasnan = 1;
-                }
+                int e = !(n[ox] > 0);
+                none |= e;
+                o[ox] = e ? NAN : a[ox] / n[ox];
             }
+            hasnan |= none;
         }
     }
     J->nan_flag[ci] = hasnan;
@@ -1642,7 +1898,76 @@ static void samples_free(samples_t *S)
 }
 
 /* k-th smallest of a[0..n) (reorders a). All values must be finite. */
+static float select_kth_qs(float *a, int64_t n, int64_t k);
+
+/* Order-preserving 32-bit keys of floats. */
+static inline uint32_t fkey(float x)
+{
+    uint32_t u;
+    memcpy(&u, &x, 4);
+    return u ^ (uint32_t)(((int32_t)u >> 31) | (int32_t)0x80000000);
+}
+
+static inline float funkey(uint32_t k)
+{
+    uint32_t u = k ^ ((k >> 31) ? 0x80000000u : 0xffffffffu);
+    float x;
+    memcpy(&x, &u, 4);
+    return x;
+}
+
+/* The same value as the quickselect, by three counting passes over the
+   keys (11, 11 and 10 bits): no data dependent branches, no allocation. */
 static float select_kth(float *a, int64_t n, int64_t k)
+{
+    if (n < 2048)
+        return select_kth_qs(a, n, k);
+    /* Four histograms filled in turn, so that runs of equal digits do not
+       wait on each other's counts. */
+    uint32_t hist[4][2048];
+    uint32_t prefix = 0;   /* key bits found so far */
+    static const int shift[3] = { 21, 10, 0 }, bits[3] = { 11, 11, 10 };
+    for (int lvl = 0; lvl < 3; lvl++) {
+        int sh = shift[lvl], nb = 1 << bits[lvl];
+        uint32_t mask = (uint32_t)(nb - 1);
+        memset(hist, 0, sizeof hist);
+        int psh = sh + bits[lvl];  /* bits above this digit must match prefix */
+        int64_t i = 0;
+        if (lvl == 0) {
+            for (; i + 4 <= n; i += 4) {
+                hist[0][fkey(a[i]) >> 21]++;
+                hist[1][fkey(a[i + 1]) >> 21]++;
+                hist[2][fkey(a[i + 2]) >> 21]++;
+                hist[3][fkey(a[i + 3]) >> 21]++;
+            }
+            for (; i < n; i++)
+                hist[0][fkey(a[i]) >> 21]++;
+        } else {
+            for (; i + 4 <= n; i += 4)
+                for (int j = 0; j < 4; j++) {
+                    uint32_t key = fkey(a[i + j]);
+                    hist[j][(key >> sh) & mask] += (key >> psh) == prefix;
+                }
+            for (; i < n; i++) {
+                uint32_t key = fkey(a[i]);
+                hist[0][(key >> sh) & mask] += (key >> psh) == prefix;
+            }
+        }
+        uint32_t d = 0;
+        int64_t below = 0;
+        for (; d < mask; d++) {   /* the last digit when all others are below */
+            int64_t c = (int64_t)hist[0][d] + hist[1][d] + hist[2][d] + hist[3][d];
+            if (below + c > k)
+                break;
+            below += c;
+        }
+        k -= below;
+        prefix = prefix << bits[lvl] | d;
+    }
+    return funkey(prefix);
+}
+
+static float select_kth_qs(float *a, int64_t n, int64_t k)
 {
     int64_t lo = 0, hi = n - 1;
     while (hi > lo) {
@@ -1690,14 +2015,18 @@ static int64_t gather(const float *pl, int w, int h, int grid_rows, float *buf)
     int nr, nc;
     stat_grid(w, h, &nr, &nc);
     int64_t n = 0;
+    int *cols = malloc((size_t)nc * sizeof *cols);
+    for (int j = 0; cols && j < nc; j++)
+        cols[j] = grid_pos(j, nc, w);
     for (int i = 0; i < nr; i++) {
         const float *row = pl + (size_t)(grid_rows ? i : grid_pos(i, nr, h)) * w;
         for (int j = 0; j < nc; j++) {
-            float v = row[grid_pos(j, nc, w)];
-            if (fqi_finite(v))
-                buf[n++] = v;
+            float v = row[cols ? cols[j] : grid_pos(j, nc, w)];
+            buf[n] = v;
+            n += fqi_finite(v);
         }
     }
+    free(cols);
     if (n < 1000 && (int64_t)nr * nc < (int64_t)w * h) {
         if (grid_rows && nr < h)
             return -1;
@@ -1821,6 +2150,13 @@ static inline uint8_t stretch_byte(const stretch_t *st, float v)
     return (uint8_t)(y * 255.0f + 0.5f);
 }
 
+/* A pixel's bytes R, G, B, A (in that order in memory) as one word. */
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define RGBA_WORD(r, g, b, a) ((uint32_t)(r) << 24 | (uint32_t)(g) << 16 | (uint32_t)(b) << 8 | (uint32_t)(a))
+#else
+#define RGBA_WORD(r, g, b, a) ((uint32_t)(r) | (uint32_t)(g) << 8 | (uint32_t)(b) << 16 | (uint32_t)(a) << 24)
+#endif
+
 static void map_task(void *ctx, size_t ci)
 {
     mapjob *J = ctx;
@@ -1837,29 +2173,27 @@ static void map_task(void *ctx, size_t ci)
             for (int x = 0; x < w; x++)
                 o[x] = stretch_byte(&st, b0[x]);
         } else if (J->nch == 1) {
+            /* Branch free (a pixel's four bytes as one word), so that it
+               vectorizes; a missing value is mapped as c0, then dropped. */
             const stretch_t st = J->st[0];
             for (int x = 0; x < w; x++) {
                 float v = b0[x];
-                if (fqi_finite(v)) {
-                    uint8_t g = stretch_byte(&st, v);
-                    o[4 * x] = o[4 * x + 1] = o[4 * x + 2] = g;
-                    o[4 * x + 3] = 255;
-                } else {
-                    o[4 * x] = o[4 * x + 1] = o[4 * x + 2] = o[4 * x + 3] = 0;
-                }
+                uint32_t ok = (uint32_t)0 - (uint32_t)fqi_finite(v);
+                uint32_t g = stretch_byte(&st, ok ? v : st.c0);
+                uint32_t px = RGBA_WORD(g, g, g, 255) & ok;
+                memcpy(o + 4 * x, &px, 4);
             }
         } else {
             const float *b1 = b0 + plane, *b2 = b0 + 2 * plane;
+            const stretch_t s0 = J->st[0], s1 = J->st[1], s2 = J->st[2];
             for (int x = 0; x < w; x++) {
                 float r_ = b0[x], g_ = b1[x], bl = b2[x];
-                if (fqi_finite(r_) && fqi_finite(g_) && fqi_finite(bl)) {
-                    o[4 * x] = stretch_byte(&J->st[0], r_);
-                    o[4 * x + 1] = stretch_byte(&J->st[1], g_);
-                    o[4 * x + 2] = stretch_byte(&J->st[2], bl);
-                    o[4 * x + 3] = 255;
-                } else {
-                    o[4 * x] = o[4 * x + 1] = o[4 * x + 2] = o[4 * x + 3] = 0;
-                }
+                uint32_t ok = (uint32_t)0 - (uint32_t)(fqi_finite(r_) & fqi_finite(g_) & fqi_finite(bl));
+                uint32_t R = stretch_byte(&s0, ok ? r_ : s0.c0);
+                uint32_t G = stretch_byte(&s1, ok ? g_ : s1.c0);
+                uint32_t B = stretch_byte(&s2, ok ? bl : s2.c0);
+                uint32_t px = RGBA_WORD(R, G, B, 255) & ok;
+                memcpy(o + 4 * x, &px, 4);
             }
         }
     }

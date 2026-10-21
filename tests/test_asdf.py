@@ -137,6 +137,23 @@ class AsdfTests(unittest.TestCase):
         for plane in range(6):
             self.check(path, hyper.reshape(6, 4, 5)[plane], "--plane", plane)
 
+    def test_zlib_planes_in_any_order(self):
+        # Of a zlib block, inflating goes on from where planes shown before
+        # were reached (the next one, one before, far away), the file open
+        # once; small planes, planes larger than the 64 KiB steps, and more
+        # places kept than there is room for (the oldest are dropped).
+        rng = np.random.default_rng(3)
+        for shape, order in (((300, 8, 10), [150, 151, 149, 0, 299, 298, 1, 200, 100, 101, 150, 3, 2]
+                              + list(rng.integers(0, 300, 60))),
+                             ((40, 90, 200), [20, 21, 19, 39, 0, 38, 1, 20, 33, 7])):
+            with self.subTest(shape=shape):
+                cube = rng.normal(size=shape).astype(np.float32)
+                path = write(self.scratch / "zlib_cube.asdf", {"cube": cube}, all_array_compression="zlib")
+                output = self.scratch / "planes.f32"
+                self.success("dump", path, output, "--max", "100000", "--planes", ",".join(map(str, order)))
+                np.testing.assert_array_equal(np.fromfile(output, np.float32).reshape(len(order), *shape[1:]),
+                                              cube[order])
+
     def test_views(self):
         base = np.arange(40 * 30, dtype=">i4").reshape(40, 30)
         tree = {"base": base, "rows": base[::2], "flipped": base[::-1], "transposed": base.T,

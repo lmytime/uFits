@@ -79,9 +79,9 @@ def image(values, sample="Float32", byte_order="little", storage="Planar",
     return element, b""
 
 
-def write_xisf(path, *images, xml_encoding="utf-8"):
+def write_xisf(path, *images, xml_encoding="utf-8", data_offset=32768):
     root = ET.Element("xisf", version="1.0", xmlns="http://www.pixinsight.com/xisf")
-    offset, attachments = 32768, []
+    offset, attachments = data_offset, []
     for element, data in images:
         root.append(element)
         if "location" not in element.attrib:
@@ -89,9 +89,9 @@ def write_xisf(path, *images, xml_encoding="utf-8"):
             offset += len(data)
             attachments.append(data)
     header = ET.tostring(root, encoding=xml_encoding, xml_declaration=True)
-    assert len(header) + 16 <= 32768
+    assert len(header) + 16 <= data_offset
     path.write_bytes(struct.pack("<8sII", b"XISF0100", len(header), 0) + header
-                     + bytes(32768 - 16 - len(header)) + b"".join(attachments))
+                     + bytes(data_offset - 16 - len(header)) + b"".join(attachments))
     return path
 
 
@@ -189,6 +189,38 @@ class XisfTests(unittest.TestCase):
                                           image(expected, sample, byte_order, storage))
                         self.check_values(path, expected)
 
+    def test_shuffled_sample_formats(self):
+        # Shuffled bytes are read where they lie: the same values, binned
+        # values and pictures as the image stored plainly, in every layout
+        # (and around a large value for the wide types, which the picture
+        # is drawn relative to).
+        y, x = np.indices((8, 10))
+        offsets = {"UInt32": 3_000_000_000, "UInt64": 10**12, "Float32": 1e6, "Float64": 1e9}
+        for sample, code in FORMATS.items():
+            dtype = np.dtype(code)
+            if dtype.kind == "u":
+                maximum = np.iinfo(dtype).max
+                edge = np.array([0, 1, 3, maximum // 2, maximum // 2 + 1, maximum - 1, maximum], dtype=dtype)
+            else:
+                edge = np.array([-0.75, -0.01, 0, 0.01, 0.25, 0.75, 1.5], dtype=dtype)
+            for byte_order in ("little", "big"):
+                for channels, storage in ((1, "Planar"), (3, "Planar"), (3, "Normal")):
+                    with self.subTest(sample=sample, byte_order=byte_order, channels=channels, storage=storage):
+                        expected = np.resize(edge, (channels, 8, 10))
+                        path = write_xisf(self.scratch / "edge.xisf", image(expected, sample, byte_order, storage,
+                                                                           codec="lz4", shuffle=True))
+                        self.check_values(path, expected)
+                        values = np.stack([x + 3 * y + 7 * c for c in range(channels)]) + offsets.get(sample, 0)
+                        plain = write_xisf(self.scratch / "plain.xisf", image(values, sample, byte_order, storage))
+                        packed = write_xisf(self.scratch / "packed.xisf", image(values, sample, byte_order, storage,
+                                                                               codec="zstd", shuffle=True))
+                        for opts in ((), ("--max", "5", "--samples", "2"), ("--max", "3", "--samples", "1")):
+                            np.testing.assert_allclose(self.dump(packed, *opts)[0], self.dump(plain, *opts)[0],
+                                                       rtol=1e-6)
+                            a = self.render(packed, *opts)[0].astype(int)
+                            b = self.render(plain, *opts)[0].astype(int)
+                            self.assertLessEqual(np.abs(a - b).max(), 1, opts)
+
     def test_compression_shuffle_and_subblocks(self):
         for codec in ("zlib", "lz4", "lz4hc", "zstd"):
             for shuffle in (False, True):
@@ -217,6 +249,17 @@ class XisfTests(unittest.TestCase):
         header = self.success("header", path)
         self.assertIn("Object:Name", header)
         self.assertIn("M42", header)
+
+    def test_long_property_text(self):
+        # Only the first MiB of a property's text is kept, and the file opens.
+        item = image(self.mono)
+        ET.SubElement(item[0], "Property", id="Processing:History", type="String").text = "step; " * 400_000
+        path = write_xisf(self.scratch / "long_property.xisf", item, data_offset=4 << 20)
+        self.check_values(path, self.mono)
+        line = next(l for l in self.success("header", path).splitlines() if "Processing:History" in l)
+        self.assertIn("step; step;", line)
+        self.assertIn("its first 1 MiB", line)
+        self.assertLess(len(line), (1 << 20) + 200)
 
     def test_uppercase_embedded_hex(self):
         values = np.resize(np.array([0xabcd, 0xef01, 0x2345, 0x6789], np.uint16), (1, 8, 10))

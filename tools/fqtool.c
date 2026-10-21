@@ -18,6 +18,8 @@
  * Options: --max N  --samples K  --stretch auto|linear|minmax  --hdu N
  *          --plane P  --mono  --threads T  --repeat R
  *          --then auto|linear|minmax   restretch after rendering (tests)
+ *          --planes P,Q,...  dump: these planes one after another, from
+ *                            the file opened once (tests)
  *          --region X,Y,W,H  render: only these pixels (from the first of
  *                            the first row), with the whole image's stretch
  *                            as the preview's zoom does
@@ -176,6 +178,7 @@ static int stretch_named(const char *v)
 }
 
 static int then_stretch = -1;   /* --then: restretch after rendering */
+static const char *planes;      /* --planes: dump these, in this order */
 
 static int parse_opts(int argc, char **argv, int start, fq_opts *o, int *repeat)
 {
@@ -207,6 +210,8 @@ static int parse_opts(int argc, char **argv, int start, fq_opts *o, int *repeat)
             o->stretch = stretch_named(v);
         else if (!strcmp(a, "--then"))
             then_stretch = stretch_named(v);
+        else if (!strcmp(a, "--planes"))
+            planes = v;
         else if (!strcmp(a, "--region")) {
             long long r[4];
             if (sscanf(v, "%lld,%lld,%lld,%lld", &r[0], &r[1], &r[2], &r[3]) != 4) {
@@ -390,17 +395,29 @@ int main(int argc, char **argv)
             o.exact = 1;
             int w, h, nch;
             fq_info info;
-            float *v = fq_decode_float(f, &o, &w, &h, &nch, &info, err, sizeof err);
-            if (!v) {
-                fprintf(stderr, "%s: %s\n", path, err);
-                rc = 1;
-            } else {
-                FILE *fp = fopen(argv[3], "wb");
-                fwrite(v, sizeof(float), (size_t)w * h * nch, fp);
+            FILE *fp = fopen(argv[3], "wb");
+            const char *next = planes;
+            do {
+                if (next) {
+                    o.plane = atoi(next);
+                    next = strchr(next, ',');
+                    next = next ? next + 1 : NULL;
+                }
+                float *v = fq_decode_float(f, &o, &w, &h, &nch, &info, err, sizeof err);
+                if (!v) {
+                    fprintf(stderr, "%s: %s\n", path, err);
+                    rc = 1;
+                    break;
+                }
+                if (fp)
+                    fwrite(v, sizeof(float), (size_t)w * h * nch, fp);
+                free(v);
+            } while (next);
+            if (fp)
                 fclose(fp);
+            if (!rc) {
                 printf("%d %d %d\n", w, h, nch);
                 print_info(&info);
-                free(v);
             }
         } else {
             double best = 1e30, t_open = now_ms() - t0;

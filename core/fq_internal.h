@@ -123,8 +123,8 @@ int fqi_xisf_keyword(const hdu_t *h, const char *key, char *out, size_t n);
 char *fqi_xisf_cards(const hdu_t *h, size_t *len);
 const char *fqi_xisf_type(const hdu_t *h);
 const char *fqi_xisf_error(const hdu_t *h);
-int fqi_xisf_load(fq_file *f, hdu_t *h, const uint8_t **data,
-                  int *big_endian, int *stride, char *err, size_t errlen);
+int fqi_xisf_load(fq_file *f, hdu_t *h, int threads, const uint8_t **data,
+                  int *big_endian, int *stride, int *shuffled, char *err, size_t errlen);
 
 /* fq_asdf.c: each array of an ASDF tree is an HDU; the tree is their
    header. fqi_asdf_load gives one plane (of a cube) in C order. */

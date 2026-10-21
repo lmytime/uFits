@@ -19,9 +19,9 @@ uFits is built to be small and fast:
   whole range before it returns, so a hint over the whole data unit would read all of a
   cube to show one plane (`tests/macos/bigfile_check.sh` times that). For tile-compressed
   files only the tiles under the sampled rows are decompressed. XISF compression is
-  block based: the selected image is decompressed in full and cached until another
-  image is selected or the file is closed. Of a compressed ASDF array only the plane
-  shown is decompressed (see [ASDF](#asdf)).
+  block based: the selected image is decompressed in full (its subblocks on every
+  core) and cached until another image is selected or the file is closed. Of a
+  compressed ASDF array only the plane shown is decompressed (see [ASDF](#asdf)).
 - **Uses every core.** Binning, tile decompression and the final mapping run in parallel
   (Grand Central Dispatch).
 
@@ -33,10 +33,11 @@ Time spent in the core alone, measured on a 4-core Linux VM:
 
 | file | thumbnail (512 px) | preview (2560 px) |
 | --- | --- | --- |
-| 4096×4096 int16 (32 MB) | 7 ms | 17 ms |
-| 8192×8192 float32 (256 MB) | 9 ms | 43 ms |
-| 4096×4096 Rice-compressed `.fz` | 21 ms | 53 ms |
-| 4088×4088 float32, Roman's L2 (ASDF, LZ4, 70 MB) | 25 ms | 41 ms |
+| 4096×4096 int16 (32 MB) | 3 ms | 7 ms |
+| 8192×8192 float32 (256 MB) | 4 ms | 21 ms |
+| 4096×4096 Rice-compressed `.fz` | 15 ms | 34 ms |
+| 4088×4088 float32, Roman's L2 (ASDF, LZ4, 70 MB) | 17 ms | 21 ms |
+| 8000×6000 float32 XISF, zstd and byte shuffled (143 MB) | 210 ms | 226 ms |
 
 ## What the core handles
 
@@ -110,9 +111,11 @@ keywords and scalar properties are available in Header.
 
 Raw attachments are sampled directly from the mapped file. Compressed XISF images
 must be decompressed in full before sampling, so large compressed files take longer.
-Only the selected decoded image is cached. Byte unshuffling temporarily needs a
-second image-sized buffer. XML headers are limited to 16 MiB and decoded
-compressed/embedded images to 512 MiB.
+Only the selected decoded image is cached. Shuffled bytes are sampled where they lie,
+a byte from each byte plane, so they need no second image-sized buffer (unless the
+shuffle's item size is not the sample size). XML headers are limited to 16 MiB,
+a property's text to its first 1 MiB, and decoded compressed/embedded images to
+512 MiB.
 
 Complex samples, alpha channels, other color spaces, higher-dimensional images and
 explicit non-default orientation transforms are not rendered. Other CFA patterns
@@ -140,8 +143,10 @@ Blocks may be stored as they are, and are then read straight from the mapped fil
 like FITS images, or compressed with LZ4 (in pieces of 4 MiB, as Python's asdf
 frames it; Roman's pipeline compresses every array so), zlib or bzip2. Of a compressed
 block only the part with the plane shown is decompressed (LZ4 pieces on every core;
-zlib and bzip2 from the start of the block), and kept until another plane or array is
-shown; a plane may take up to 512 MiB decompressed. Streamed blocks and blocks counted
+zlib from the nearest plane already passed, as the inflater's state is kept where
+planes start, so stepping through a cube does not start over each time; bzip2 from
+the start of the block), and kept until another plane or array is shown; a plane may
+take up to 512 MiB decompressed. Streamed blocks and blocks counted
 from the end (`source: -1`) work.
 
 Not shown: arrays written inline in the tree (they are small; the tree has their

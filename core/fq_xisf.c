@@ -25,6 +25,7 @@ struct fqi_xisf_image {
     char type[24], compression[24], bayer[8], error[160];
     fqi_sbuf cards, encoded;
     uint8_t *decoded;
+    int decoded_shuffled;         /* decoded holds byte planes (item size) */
 };
 typedef struct {
     fq_file *f;
@@ -33,6 +34,7 @@ typedef struct {
     hdu_t *h;
     char property[256];
     fqi_sbuf text;
+    int text_cut;                 /* the property's text went past X_TEXT_LIMIT */
     char *err;
     size_t errlen, header_end;
 } xparser;
@@ -323,6 +325,7 @@ static void XMLCALL start(void *ctx, const XML_Char *name, const XML_Char **a)
             p->property_depth = p->depth;
             free(p->text.s);
             memset(&p->text, 0, sizeof p->text);
+            p->text_cut = 0;
         }
     } else if (!strcmp(tag, "ColorFilterArray")) {
         x->have_cfa = 1;
@@ -345,7 +348,11 @@ static void XMLCALL chars(void *ctx, const XML_Char *s, int n)
         fqi_sb_add(b, s, (size_t)n);
         if (b->oom) fail(p, "out of memory");
     } else if (p->property_depth && p->depth == p->property_depth) {
-        if ((size_t)n > X_TEXT_LIMIT - p->text.len) { fail(p, "property text is too large"); return; }
+        /* Only the start of a long text is kept: the file still opens. */
+        if ((size_t)n > X_TEXT_LIMIT - p->text.len) {
+            n = (int)(X_TEXT_LIMIT - p->text.len);
+            p->text_cut = 1;
+        }
         fqi_sb_add(&p->text, s, (size_t)n);
         if (p->text.oom) fail(p, "out of memory");
     }
@@ -356,7 +363,8 @@ static void XMLCALL end(void *ctx, const XML_Char *name)
     (void)name;
     xparser *p = ctx;
     if (p->property_depth == p->depth) {
-        card(p->h->xisf, p->property, p->text.s, "XISF Property");
+        card(p->h->xisf, p->property, p->text.s,
+             p->text_cut ? "XISF Property (its first 1 MiB)" : "XISF Property");
         p->property_depth = 0;
     }
     if (p->data_depth == p->depth)
@@ -553,15 +561,32 @@ static int decompress(const fqi_xisf_image *x, const uint8_t *in, size_t n, uint
     return -1;
 }
 
-int fqi_xisf_load(fq_file *f, hdu_t *h, const uint8_t **data,
-                  int *big_endian, int *stride, char *err, size_t errlen)
+typedef struct {
+    const fqi_xisf_image *x;
+    const uint8_t *in;
+    uint8_t *out;
+    size_t *cin, *uout;
+    int failed;
+} sbjob;
+
+static void sb_task(void *ctx, size_t i)
+{
+    sbjob *J = ctx;
+    xblock b = J->x->blocks[i];
+    if (decompress(J->x, J->in + J->cin[i], b.stored, J->out + J->uout[i], b.raw))
+        __atomic_store_n(&J->failed, 1, __ATOMIC_RELAXED);
+}
+
+int fqi_xisf_load(fq_file *f, hdu_t *h, int threads, const uint8_t **data,
+                  int *big_endian, int *stride, int *shuffled, char *err, size_t errlen)
 {
     fqi_xisf_image *x = h->xisf;
     *big_endian = x->big;
     *stride = x->normal ? x->channels : 1;
+    *shuffled = 0;
     if (x->error[0]) { fqi_seterr(err, errlen, "%s", x->error); return -1; }
     if (!x->embedded && !x->compression[0]) { *data = f->data + x->offset; return 0; }
-    if (x->decoded) { *data = x->decoded; return 0; }
+    if (x->decoded) { *data = x->decoded; *shuffled = x->decoded_shuffled; return 0; }
     if (!x->raw || x->raw > X_DECODE_LIMIT || x->stored > X_DECODE_LIMIT + X_HEADER_LIMIT) {
         fqi_seterr(err, errlen, "XISF image exceeds the 512 MiB decompression limit"); return -1;
     }
@@ -569,6 +594,7 @@ int fqi_xisf_load(fq_file *f, hdu_t *h, const uint8_t **data,
     for (int i = 0; i < f->nhdu; i++) {
         free(f->hdu[i].xisf->decoded);
         f->hdu[i].xisf->decoded = NULL;
+        f->hdu[i].xisf->decoded_shuffled = 0;
     }
     uint8_t *encoded = NULL, *buf = NULL;
     size_t n = x->stored;
@@ -587,16 +613,33 @@ int fqi_xisf_load(fq_file *f, hdu_t *h, const uint8_t **data,
     buf = malloc(x->raw);
     if (!buf) goto bad;
     if (x->nblocks) {
+        /* Subblocks are independent: check where each goes, then decode
+           them on every core. */
         size_t ci = 0, ui = 0;
+        sbjob J = { x, in, buf, NULL, NULL, 0 };
+        J.cin = malloc(x->nblocks * sizeof *J.cin);
+        J.uout = malloc(x->nblocks * sizeof *J.uout);
+        if (!J.cin || !J.uout) { free(J.cin); free(J.uout); goto bad; }
         for (size_t i = 0; i < x->nblocks; i++) {
             xblock b = x->blocks[i];
-            if (b.stored > n - ci || b.raw > x->raw - ui ||
-                decompress(x, in + ci, b.stored, buf + ui, b.raw)) goto bad;
+            if (b.stored > n - ci || b.raw > x->raw - ui) { free(J.cin); free(J.uout); goto bad; }
+            J.cin[i] = ci; J.uout[i] = ui;
             ci += b.stored; ui += b.raw;
         }
-        if (ci != n || ui != x->raw) goto bad;
+        if (ci != n || ui != x->raw) { free(J.cin); free(J.uout); goto bad; }
+        fqi_par_for(x->nblocks, threads, &J, sb_task);
+        free(J.cin); free(J.uout);
+        if (J.failed) goto bad;
     } else if (decompress(x, in, n, buf, x->raw)) goto bad;
     free(encoded); encoded = NULL;
+    if (x->shuffle > 1 && x->shuffle == abs(h->bitpix) / 8 && x->raw % (size_t)x->shuffle == 0) {
+        /* The sampler reads the byte planes as they are. */
+        x->decoded = buf;
+        x->decoded_shuffled = x->shuffle;
+        *data = buf;
+        *shuffled = x->shuffle;
+        return 0;
+    }
     if (x->shuffle > 1) {
         uint8_t *unshuffled = malloc(x->raw);
         if (!unshuffled) goto bad;

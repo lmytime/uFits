@@ -45,7 +45,17 @@ struct fqi_asdf_array {
     int inline_data, external, masked, mask, filtered, listed, bad_field;
 };
 
+/* Where inflating a zlib block got to: resumed instead of starting over. */
+typedef struct {
+    const void *block;              /* NULL: unused */
+    int64_t pos, fed;
+    z_stream z;
+} zmark;
+#define A_ZMARKS 64                 /* about 40 KB each */
+
 struct fqi_asdf {
+    zmark *zmarks;
+    int nzmarks, zoldest;           /* when all are used, the oldest goes */
     fqi_asdf_array *arrays, tree_only;
     int narrays, cap;
     ablock *blocks;
@@ -86,6 +96,7 @@ typedef struct {
     fqi_sbuf collect;               /* a flow sequence, as written */
     int64_t item_at[1000];          /* where its items start in collect */
     int nitems;
+    fqi_sbuf scratch;               /* a key or tag as shown, kept for the next */
     char problem[200];
 } actx;
 
@@ -94,11 +105,20 @@ typedef struct {
 static void put_text(fqi_sbuf *b, const char *s, size_t n, size_t limit)
 {
     size_t shown = 0, i = 0;
-    for (; i < n && shown < limit; i++) {
-        unsigned char ch = (unsigned char)s[i];
+    while (i < n && shown < limit) {
+        size_t j = i;   /* a run of printable ASCII, appended at once */
+        while (j < n && j - i < limit - shown && (unsigned char)s[j] >= 32 && (unsigned char)s[j] < 127)
+            j++;
+        if (j > i) {
+            fqi_sb_add(b, s + i, j - i);
+            shown += j - i;
+            i = j;
+            continue;
+        }
+        unsigned char ch = (unsigned char)s[i++];
         if (ch >= 0x80 && ch < 0xc0)
             continue;   /* the rest of a UTF-8 character */
-        char out = ch == '\t' || ch == '\n' || ch == '\r' ? ' ' : ch < 32 || ch >= 127 ? '?' : (char)ch;
+        char out = ch == '\t' || ch == '\n' || ch == '\r' ? ' ' : '?';
         fqi_sb_add(b, &out, 1);
         shown++;
     }
@@ -119,10 +139,12 @@ static void line(actx *c, char kind, int indent, const char *key, const char *va
         return;
     }
     c->lines++;
-    fqi_sb_add(b, &kind, 1);
-    fqi_sb_add(b, "\t", 1);
-    for (int i = 0; i < indent && i < 2 * A_DEPTH_LIMIT; i++)
-        fqi_sb_add(b, " ", 1);
+    char head[2 + 2 * A_DEPTH_LIMIT];
+    int hn = indent < 2 * A_DEPTH_LIMIT ? (indent > 0 ? indent : 0) : 2 * A_DEPTH_LIMIT;
+    head[0] = kind;
+    head[1] = '\t';
+    memset(head + 2, ' ', (size_t)hn);
+    fqi_sb_add(b, head, (size_t)hn + 2);
     put_text(b, key, strlen(key), A_KEY_LIMIT);
     fqi_sb_add(b, "\t", 1);
     if (val)
@@ -133,9 +155,17 @@ static void line(actx *c, char kind, int indent, const char *key, const char *va
     fqi_sb_add(b, "\n", 1);
 }
 
+/* c->scratch, emptied: its memory is used again for each key and tag. */
+static fqi_sbuf *scratch(actx *c)
+{
+    c->scratch.len = 0;
+    c->scratch.oom = 0;
+    return &c->scratch;
+}
+
 /* A tag as shown: its last part ("time-1.4.0", "wfi_image-2.2.0"); none
    for YAML's own types. */
-static void tag_name(const yaml_char_t *tag, char *out, size_t n)
+static void tag_name(actx *c, const yaml_char_t *tag, char *out, size_t n)
 {
     out[0] = 0;
     if (!tag)
@@ -147,10 +177,9 @@ static void tag_name(const yaml_char_t *tag, char *out, size_t n)
     if (!s || !s[1])
         s = strrchr(t, ':');
     s = s && s[1] ? s + 1 : t;
-    fqi_sbuf b = { 0 };
-    put_text(&b, s, strlen(s), n > 4 ? n - 4 : 1);
-    fqi_scopy(out, n, b.s ? b.s : "");
-    free(b.s);
+    fqi_sbuf *b = scratch(c);
+    put_text(b, s, strlen(s), n > 4 ? n - 4 : 1);
+    fqi_scopy(out, n, b->s && b->len ? b->s : "");
 }
 
 static int has_tag(const yaml_char_t *tag, const char *part)
@@ -344,12 +373,11 @@ static void node(actx *c, const yaml_event_t *e)
             push(c, FR_IGNORE, map);
             return;
         }
-        fqi_sbuf k = { 0 };
+        fqi_sbuf *k = scratch(c);
         if (alias)
-            fqi_sb_add(&k, "*", 1);
-        put_text(&k, text, tlen, A_KEY_LIMIT - 1);
-        fqi_scopy(p->key, sizeof p->key, k.s ? k.s : "");
-        free(k.s);
+            fqi_sb_add(k, "*", 1);
+        put_text(k, text, tlen, A_KEY_LIMIT - 1);
+        fqi_scopy(p->key, sizeof p->key, k->s && k->len ? k->s : "");
         done_node(p);
         return;
     }
@@ -429,7 +457,7 @@ static void node(actx *c, const yaml_event_t *e)
     int indent = p ? p->indent + (p->root ? 0 : 2) : 0;
     int tail = p && p->root && (!strcmp(label, "asdf_library") || !strcmp(label, "history"));
     char tname[64];
-    tag_name(tag, tname, sizeof tname);
+    tag_name(c, tag, tname, sizeof tname);
     if (tail)
         c->tail = 1;
     if (scalar || alias) {
@@ -783,6 +811,7 @@ int fqi_asdf_open(fq_file *f, char *err, size_t errlen)
         yaml_parser_t parser;
         yaml_event_t ev;
         if (!yaml_parser_initialize(&parser)) {
+            free(c->tail_lines.s);
             free(c);
             fqi_seterr(err, errlen, "out of memory");
             return -1;
@@ -831,6 +860,7 @@ int fqi_asdf_open(fq_file *f, char *err, size_t errlen)
         a->cards.oom = 1;
     free(c->tail_lines.s);
     free(c->collect.s);
+    free(c->scratch.s);
     free(c);
     if (a->cards.oom) {
         fqi_seterr(err, errlen, "out of memory");
@@ -879,6 +909,9 @@ void fqi_asdf_free(fqi_asdf *a)
 {
     if (!a)
         return;
+    for (int i = 0; i < a->nzmarks; i++)
+        inflateEnd(&a->zmarks[i].z);
+    free(a->zmarks);
     free(a->arrays);
     free(a->blocks);
     free(a->cards.s);
@@ -1020,22 +1053,66 @@ static int lz4_range(const uint8_t *in, int64_t n, int64_t start, int64_t len, u
     return rc;
 }
 
-static int zlib_range(const uint8_t *in, int64_t n, int64_t start, int64_t len, uint8_t *out)
+static void zmark_save(fqi_asdf *a, const void *block, int64_t pos, int64_t fed, z_stream *z)
 {
+    for (int i = 0; i < a->nzmarks; i++)
+        if (a->zmarks[i].block == block && a->zmarks[i].pos == pos)
+            return;
+    if (!a->zmarks && !(a->zmarks = calloc(A_ZMARKS, sizeof *a->zmarks)))
+        return;
+    zmark *m;
+    if (a->nzmarks < A_ZMARKS) {
+        m = &a->zmarks[a->nzmarks++];
+    } else {
+        m = &a->zmarks[a->zoldest];
+        a->zoldest = (a->zoldest + 1) % A_ZMARKS;
+        inflateEnd(&m->z);
+    }
+    memset(m, 0, sizeof *m);
+    if (inflateCopy(&m->z, z) != Z_OK) {
+        memset(m, 0, sizeof *m);
+        return;
+    }
+    m->block = block;
+    m->pos = pos;
+    m->fed = fed;
+}
+
+static int zlib_range(fqi_asdf *a, const void *block, const uint8_t *in, int64_t n, int64_t start, int64_t len,
+                      uint8_t *out)
+{
+    if (len <= 0)
+        return 0;
     z_stream z;
     memset(&z, 0, sizeof z);
-    if (inflateInit2(&z, 15 + 32) != Z_OK)
-        return -1;
-    uint8_t *scratch = malloc(1 << 16);
     int64_t pos = 0, end = start + len, fed = 0;
+    const zmark *best = NULL;
+    for (int i = 0; i < a->nzmarks; i++)
+        if (a->zmarks[i].block == block && a->zmarks[i].pos <= start && (!best || a->zmarks[i].pos > best->pos))
+            best = &a->zmarks[i];
+    if (best) {
+        if (inflateCopy(&z, (z_streamp)&best->z) != Z_OK)
+            return -1;
+        pos = best->pos;
+        fed = best->fed;
+    } else if (inflateInit2(&z, 15 + 32) != Z_OK) {
+        return -1;
+    }
+    /* Marks are kept where this plane starts and ends (where the next one
+       starts), and at up to 16 planes on the way to it, so that the planes
+       around one shown are reached without starting over. */
+    int64_t step = (start - pos) / len / 16 + 1;
+    uint8_t *scratch = malloc(1 << 16);
     while (scratch && pos < end) {
+        if (pos == start || (pos < start && (start - pos) % len == 0 && (start - pos) / len % step == 0))
+            zmark_save(a, block, pos, fed, &z);
         if (z.avail_in == 0 && fed < n) {
             int64_t k = n - fed < (1 << 30) ? n - fed : (1 << 30);
             z.next_in = (Bytef *)(in + fed);
             z.avail_in = (uInt)k;
             fed += k;
         }
-        int64_t room = pos < start ? start - pos : end - pos;
+        int64_t room = pos < start ? (start - pos) % len ? (start - pos) % len : len : end - pos;
         if (pos < start && room > (1 << 16))
             room = 1 << 16;
         if (room > (1 << 30))
@@ -1044,9 +1121,11 @@ static int zlib_range(const uint8_t *in, int64_t n, int64_t start, int64_t len, 
         z.avail_out = (uInt)room;
         int rc = inflate(&z, Z_NO_FLUSH);
         pos += room - (int64_t)z.avail_out;
-        if (rc != Z_OK)
+        if (rc != Z_OK && !(rc == Z_STREAM_END && pos >= end))
             break;
     }
+    if (pos >= end)
+        zmark_save(a, block, pos, fed, &z);
     inflateEnd(&z);
     free(scratch);
     return pos >= end ? 0 : -1;
@@ -1096,7 +1175,7 @@ static int block_range(const fq_file *f, const ablock *b, int64_t start, int64_t
     if (!strcmp(b->comp, "lz4"))
         return lz4_range(in, b->used, start, len, out, threads);
     if (!strcmp(b->comp, "zlib"))
-        return zlib_range(in, b->used, start, len, out);
+        return zlib_range(f->asdf, b, in, b->used, start, len, out);
     return bzip2_range(in, b->used, start, len, out);
 }
 
