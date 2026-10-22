@@ -124,6 +124,7 @@ static NSImage *FQCurrentIcon(void)
     BOOL _openedFiles, _launched;
     NSString *_updateAsked;   // ufits://update before the launch was done
     NSWindow *_updating;      // while an update runs
+    NSInteger _statusToken;   // the status asked for last
 }
 
 #pragma mark Launch
@@ -526,7 +527,38 @@ static BOOL FQInApplications(void)
            [path hasPrefix:[NSHomeDirectory() stringByAppendingPathComponent:@"Applications/"]];
 }
 
+/// The status lines: pluginkit, which says how Quick Look uses uFits, takes
+/// a moment each time it is asked (0.1–0.5 s in all), so it is asked in the
+/// background and the window shows meanwhile.
 - (void)refreshStatus
+{
+    NSInteger token = ++_statusToken;
+    if (!_status.stringValue.length) {
+        _status.stringValue = @"Looking up how Quick Look uses uFits…";
+        [self fitWelcome];
+    }
+    NSString *bundleID = NSBundle.mainBundle.bundleIdentifier ?: @"";
+    BOOL inApplications = FQInApplications();
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        // The copy of each extension that Quick Look uses.
+        NSMutableDictionary<NSString *, NSString *> *used = [NSMutableDictionary dictionary];
+        for (NSString *suffix in @[ @"Preview", @"Thumbnail" ]) {
+            NSString *ext = [NSString stringWithFormat:@"%@.%@", bundleID, suffix];
+            used[suffix] = [RunTool(@"/usr/bin/pluginkit", @[ @"-m", @"-v", @"-i", ext ])
+                stringByTrimmingCharactersInSet:NSCharacterSet.newlineCharacterSet];
+        }
+        // Other copies of uFits that macOS knows (from the copy in
+        // Applications only: opened from elsewhere, this is the other copy).
+        NSDictionary<NSString *, NSString *> *others = inApplications ? FQOtherCopies() : @{};
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (token == self->_statusToken)
+                [self showStatusWithExtensions:used others:others];
+        });
+    });
+}
+
+- (void)showStatusWithExtensions:(NSDictionary<NSString *, NSString *> *)used
+                          others:(NSDictionary<NSString *, NSString *> *)others
 {
     NSMutableArray<NSString *> *lines = [NSMutableArray array];
     NSString *ident = [UTType typeWithFilenameExtension:@"fits"].identifier ?: @"?";
@@ -545,12 +577,8 @@ static BOOL FQInApplications(void)
                                                     [names componentsJoinedByString:@", "]]];
     }
 
-    NSString *bundleID = NSBundle.mainBundle.bundleIdentifier ?: @"";
     for (NSString *suffix in @[ @"Preview", @"Thumbnail" ]) {
-        NSString *ext = [NSString stringWithFormat:@"%@.%@", bundleID, suffix];
-        // The copy of the extension that Quick Look uses.
-        NSString *out = [RunTool(@"/usr/bin/pluginkit", @[ @"-m", @"-v", @"-i", ext ])
-            stringByTrimmingCharactersInSet:NSCharacterSet.newlineCharacterSet];
+        NSString *out = used[suffix] ?: @"";
         NSString *version, *path, *state;
         if (!out.length)
             state = @"not registered";
@@ -571,14 +599,10 @@ static BOOL FQInApplications(void)
     }
     // Other copies of uFits that macOS knows (an old build, a copy in
     // Downloads): Quick Look may use them instead of this one. Say where
-    // they are and offer to move them to the Trash (from the copy in
-    // Applications only: opened from elsewhere, this is the other copy).
+    // they are and offer to move them to the Trash.
     NSMutableDictionary<NSString *, NSString *> *apps = [NSMutableDictionary dictionary];
-    if (FQInApplications()) {
-        NSDictionary<NSString *, NSString *> *others = FQOtherCopies();
-        for (NSString *appex in others)
-            apps[FQAppOf(appex)] = others[appex];
-    }
+    for (NSString *appex in others)
+        apps[FQAppOf(appex)] = others[appex];
     if (apps.count) {
         NSMutableArray<NSString *> *names = [NSMutableArray array];
         for (NSString *app in [apps.allKeys sortedArrayUsingSelector:@selector(compare:)])
@@ -610,26 +634,40 @@ static BOOL FQInApplications(void)
     [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:pane]];
 }
 
+/// Runs the command line tools (each a path, then its arguments) one after
+/// another in the background, then shows the status again.
+- (void)runTools:(NSArray<NSArray<NSString *> *> *)tools
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        for (NSArray<NSString *> *tool in tools)
+            RunTool(tool.firstObject, [tool subarrayWithRange:NSMakeRange(1, tool.count - 1)]);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self refreshStatus];
+        });
+    });
+}
+
 - (void)resetQuickLook:(id)sender
 {
     (void)sender;
     NSURL *plugins = NSBundle.mainBundle.builtInPlugInsURL;
+    NSMutableArray<NSArray<NSString *> *> *tools = [NSMutableArray array];
     for (NSString *name in @[ @"uFitsPreview.appex", @"uFitsThumbnail.appex" ])
-        RunTool(@"/usr/bin/pluginkit", @[ @"-a", [plugins URLByAppendingPathComponent:name].path ]);
-    RunTool(@"/usr/bin/qlmanage", @[ @"-r" ]);
-    RunTool(@"/usr/bin/qlmanage", @[ @"-r", @"cache" ]);
-    [self refreshStatus];
+        [tools addObject:@[ @"/usr/bin/pluginkit", @"-a", [plugins URLByAppendingPathComponent:name].path ]];
+    [tools addObject:@[ @"/usr/bin/qlmanage", @"-r" ]];
+    [tools addObject:@[ @"/usr/bin/qlmanage", @"-r", @"cache" ]];
+    [self runTools:tools];
 }
 
 /// Finder's thumbnails on or off: the thumbnail extension's election.
 - (void)thumbnailsChanged:(NSButton *)sender
 {
     NSString *ident = [NSBundle.mainBundle.bundleIdentifier stringByAppendingString:@".Thumbnail"];
-    RunTool(@"/usr/bin/pluginkit",
-            @[ @"-e", sender.state == NSControlStateValueOn ? @"use" : @"ignore", @"-i", ident ]);
-    RunTool(@"/usr/bin/qlmanage", @[ @"-r" ]);
-    RunTool(@"/usr/bin/qlmanage", @[ @"-r", @"cache" ]);   // Finder draws its icons again
-    [self refreshStatus];
+    [self runTools:@[
+        @[ @"/usr/bin/pluginkit", @"-e", sender.state == NSControlStateValueOn ? @"use" : @"ignore", @"-i", ident ],
+        @[ @"/usr/bin/qlmanage", @"-r" ],
+        @[ @"/usr/bin/qlmanage", @"-r", @"cache" ],   // Finder draws its icons again
+    ]];
 }
 
 /// The stretch previews open with, in Quick Look and in the app (a

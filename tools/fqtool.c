@@ -23,6 +23,9 @@
  *          --region X,Y,W,H  render: only these pixels (from the first of
  *                            the first row), with the whole image's stretch
  *                            as the preview's zoom does
+ *          --reopen  render: open the file again for each repeat, as Quick
+ *                    Look does for each thumbnail (--trim: and free the
+ *                    buffer the core keeps for the next file)
  */
 #define _POSIX_C_SOURCE 200809L
 #include "fq.h"
@@ -166,7 +169,7 @@ static void usage(void)
             "       fqtool table FILE HDU [ROWS]\n"
             "       fqtool render FILE OUT.png [--max N] [--samples K] [--stretch auto|linear|minmax]\n"
             "                                 [--hdu N] [--plane P] [--mono] [--threads T] [--repeat R]\n"
-            "                                 [--region X,Y,W,H]\n"
+            "                                 [--region X,Y,W,H] [--reopen [--trim]]\n"
             "       fqtool dump FILE OUT.f32 [same options]\n"
             "       fqtool plot FILE OUT.f32 [same options]\n"
             "       fqtool rows FILE HDU FIRST COUNT\n");
@@ -179,6 +182,7 @@ static int stretch_named(const char *v)
 
 static int then_stretch = -1;   /* --then: restretch after rendering */
 static const char *planes;      /* --planes: dump these, in this order */
+static int reopen, trim;        /* --reopen, --trim: each repeat opens anew */
 
 static int parse_opts(int argc, char **argv, int start, fq_opts *o, int *repeat)
 {
@@ -187,6 +191,14 @@ static int parse_opts(int argc, char **argv, int start, fq_opts *o, int *repeat)
         const char *v = i + 1 < argc ? argv[i + 1] : NULL;
         if (!strcmp(a, "--mono")) {
             o->mono = 1;
+            continue;
+        }
+        if (!strcmp(a, "--reopen")) {
+            reopen = 1;
+            continue;
+        }
+        if (!strcmp(a, "--trim")) {
+            trim = 1;
             continue;
         }
         if (!v) {
@@ -430,6 +442,14 @@ int main(int argc, char **argv)
             for (int r = 0; r < (repeat < 1 ? 1 : repeat); r++) {
                 if (img)
                     fq_image_free(img);
+                img = NULL;
+                if (reopen && r > 0) {
+                    fq_close(f);
+                    if (trim)
+                        fq_trim(0);
+                    if (!(f = fq_open(path, err, sizeof err)))
+                        break;
+                }
                 double t1 = now_ms();
                 img = fq_render(f, &o, err, sizeof err);
                 if (img && detail && img->info.kind == FQ_KIND_IMAGE) {

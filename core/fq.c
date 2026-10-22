@@ -17,12 +17,14 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #include <zlib.h>
 
@@ -100,6 +102,76 @@ void fqi_scopy(char *dst, size_t n, const char *src)
     dst[i] = 0;
 }
 
+
+/* ------------------------------------------------ the big buffer kept */
+
+/* A decoded image (or the tile bands of a render) is written to memory the
+   system hands over a page at a time, zeroed, on first touch: for 64 MiB
+   about as long as decoding it from LZ4. So the last such buffer freed is
+   kept for the next file instead: thumbnails of a folder of images of one
+   size decode into the memory of the one before. fq_trim frees it. */
+#define SPARE_MIN ((size_t)1 << 20)
+
+static pthread_mutex_t spare_lock = PTHREAD_MUTEX_INITIALIZER;
+static void *spare;
+static size_t spare_len;
+static double spare_time;       /* when a big buffer was last freed */
+
+static double seconds(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (double)t.tv_sec + t.tv_nsec * 1e-9;
+}
+
+void *fqi_big_alloc(size_t n, size_t *len)
+{
+    void *p = NULL, *small = NULL;
+    *len = n;
+    if (n >= SPARE_MIN) {
+        /* The buffer kept, or else it makes room for the new one. */
+        pthread_mutex_lock(&spare_lock);
+        if (spare && spare_len >= n) {
+            p = spare;
+            *len = spare_len;
+        } else {
+            small = spare;
+        }
+        spare = NULL;
+        pthread_mutex_unlock(&spare_lock);
+        free(small);
+    }
+    return p ? p : malloc(n ? n : 1);
+}
+
+void fqi_big_free(void *p, size_t len)
+{
+    if (p && len >= SPARE_MIN && len <= FQI_BIG_KEPT) {
+        /* The bigger of the two is kept. */
+        pthread_mutex_lock(&spare_lock);
+        if (!spare || spare_len <= len) {
+            void *old = spare;
+            spare = p;
+            spare_len = len;
+            p = old;
+        }
+        spare_time = seconds();
+        pthread_mutex_unlock(&spare_lock);
+    }
+    free(p);
+}
+
+void fq_trim(double idle)
+{
+    void *p = NULL;
+    pthread_mutex_lock(&spare_lock);
+    if (spare && seconds() - spare_time >= idle) {
+        p = spare;
+        spare = NULL;
+    }
+    pthread_mutex_unlock(&spare_lock);
+    free(p);
+}
 
 /* ------------------------------------------------------------- the file */
 
@@ -294,6 +366,11 @@ void fq_close(fq_file *f)
 int fq_format(const fq_file *f)
 {
     return f->asdf ? FQ_FORMAT_ASDF : f->xisf ? FQ_FORMAT_XISF : FQ_FORMAT_FITS;
+}
+
+int fq_settled(const fq_file *f)
+{
+    return f && (!f->z || f->gz_done);
 }
 
 /* ------------------------------------------------------- header cards */

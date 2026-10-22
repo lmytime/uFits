@@ -681,6 +681,40 @@ static void timeJump(NSString *name, NSInteger row)
            name.UTF8String, ms, (unsigned long)rows.location + 1, (unsigned long)NSMaxRange(rows), draw, ink * 100);
 }
 
+/// Selects the first rows rows of the table on show and copies them: the
+/// window must answer at once (the rows are read in the background), then
+/// the pasteboard holds the column names and every row.
+static void timeCopy(FQPreviewController *vc, NSString *name, NSInteger rows)
+{
+    NSTableView *tv = findView(gWindow.contentView, NSTableView.class, nil);
+    if (!tv || tv.numberOfRows < rows) {
+        printf("FAIL %s: no table of %ld rows on show\n", name.UTF8String, (long)rows);
+        gFailures++;
+        return;
+    }
+    NSPasteboard *pb = NSPasteboard.generalPasteboard;
+    [pb clearContents];
+    NSInteger before = pb.changeCount;
+    [tv selectRowIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, (NSUInteger)rows)]
+        byExtendingSelection:NO];
+    [gWindow displayIfNeeded];
+    CFTimeInterval t0 = CACurrentMediaTime();
+    [NSApp sendAction:@selector(copy:) to:vc from:nil];
+    [gWindow displayIfNeeded];
+    double busy = msSince(t0);
+    while (pb.changeCount == before && msSince(t0) < 20000)
+        spin(0.005);
+    double done = msSince(t0);
+    // The names, then a line a row, each ending in a newline.
+    NSUInteger lines = [[pb stringForType:NSPasteboardTypeString] componentsSeparatedByString:@"\n"].count;
+    BOOL ok = busy < 100 && lines == (NSUInteger)rows + 2;
+    if (!ok)
+        gFailures++;
+    printf("%s time %-31s busy %7.1f ms   on the pasteboard after %7.1f ms (%lu lines)\n", ok ? "ok  " : "FAIL",
+           name.UTF8String, busy, done, (unsigned long)lines);
+    [tv deselectAll:nil];
+}
+
 /// Opens path and reports how long until what it opens on is on screen (a
 /// file with only tables opens on one, read in the background).
 static void timeLoad(FQPreviewController *vc, NSString *name, NSString *path)
@@ -866,6 +900,7 @@ int main(int argc, const char *argv[])
             timeSwitch(@"catalog: Table -> Header again", 2);
             timeSwitch(@"catalog: Header -> Table again", 1);
             capture(@"big-catalog", nil);
+            timeCopy(vc, @"catalog: copy 100000 rows", 100000);
             timeLoad(vc, @"open 300-column table", [data stringByAppendingPathComponent:@"wide_table.fits"]);
             timeScroll(@"wide table: scroll right", YES, 40);
             timeScroll(@"wide table: scroll down", NO, 50);

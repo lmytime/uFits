@@ -62,6 +62,7 @@ struct fqi_asdf {
     int nblocks;
     fqi_sbuf cards;
     uint8_t *decoded;               /* one plane, decompressed or gathered */
+    size_t decoded_len;             /* (fqi_big_alloc) */
     const fqi_asdf_array *decoded_array;
     int64_t decoded_plane;
 };
@@ -915,7 +916,7 @@ void fqi_asdf_free(fqi_asdf *a)
     free(a->arrays);
     free(a->blocks);
     free(a->cards.s);
-    free(a->decoded);
+    fqi_big_free(a->decoded, a->decoded_len);
     free(a);
 }
 
@@ -1210,20 +1211,21 @@ int fqi_asdf_load(fq_file *f, hdu_t *h, int64_t plane, int threads, const uint8_
         *data = a->decoded;
         return 0;
     }
-    free(a->decoded);
+    fqi_big_free(a->decoded, a->decoded_len);
     a->decoded = NULL;
     if (bytes > A_DECODE_LIMIT) {
         fqi_seterr(err, errlen, "ASDF plane exceeds the 512 MiB decompression limit");
         return -1;
     }
-    uint8_t *buf = malloc((size_t)bytes);
+    size_t len;
+    uint8_t *buf = fqi_big_alloc((size_t)bytes, &len);
     if (!buf) {
         fqi_seterr(err, errlen, "out of memory");
         return -1;
     }
     if (dense) {
         if (block_range(f, b, base, bytes, buf, threads)) {
-            free(buf);
+            fqi_big_free(buf, len);
             fqi_seterr(err, errlen, "ASDF: invalid or truncated compressed block %lld", (long long)nd->source);
             return -1;
         }
@@ -1243,7 +1245,7 @@ int fqi_asdf_load(fq_file *f, hdu_t *h, int64_t plane, int threads, const uint8_
             if (hi - lo > A_DECODE_LIMIT || !(span = malloc((size_t)(hi - lo))) ||
                 block_range(f, b, lo, hi - lo, span, threads)) {
                 free(span);
-                free(buf);
+                fqi_big_free(buf, len);
                 fqi_seterr(err, errlen, "ASDF: cannot read block %lld for this view", (long long)nd->source);
                 return -1;
             }
@@ -1256,6 +1258,7 @@ int fqi_asdf_load(fq_file *f, hdu_t *h, int64_t plane, int threads, const uint8_
         free(span);
     }
     a->decoded = buf;
+    a->decoded_len = len;
     a->decoded_array = nd;
     a->decoded_plane = plane;
     *data = buf;

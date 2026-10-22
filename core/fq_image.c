@@ -43,6 +43,7 @@
 #define REF_BOX 2560
 #define REF_SAMPLES 4
 #define STAT_ROWS 128
+#define ROWS_READ_LIMIT ((int64_t)2 << 30)
 
 /* --------------------------------------------------------- parallel for */
 
@@ -972,17 +973,23 @@ typedef struct plan_s {
     src_t src;
     float **bands;            /* compressed: allocated band buffers */
     int64_t nbands_alloc;
+    float *band_mem;          /* compressed: the bands one after another, or
+                                 NULL (each allocated on its own) */
+    size_t band_len;          /* (fqi_big_alloc) */
+    int64_t tx0, tx1;         /* compressed: the tile columns decoded */
 } plan_t;
 
 static void plan_free(plan_t *P)
 {
     if (P->bands) {
-        for (int64_t i = 0; i < P->nbands_alloc; i++)
+        for (int64_t i = 0; i < P->nbands_alloc && !P->band_mem; i++)
             free(P->bands[i]);
         free(P->bands);
     }
+    fqi_big_free(P->band_mem, P->band_len);
     free(P->src.rows);
     P->bands = NULL;
+    P->band_mem = NULL;
     P->src.rows = NULL;
 }
 
@@ -1085,17 +1092,19 @@ static void band_task(void *ctx, size_t ji)
         smult *= td;
     }
 
-    float *band = malloc((size_t)(W * bh) * sizeof(float));
+    float *band = P->band_mem ? P->band_mem + (int64_t)ji * J->band_h * W
+                              : malloc((size_t)(W * bh) * sizeof(float));
     tscratch s;
     s.ibuf = malloc((size_t)c->maxtile * sizeof(int32_t));
     s.bbuf = malloc((size_t)c->maxtile * 16);
     float *tile = malloc((size_t)c->maxtile * sizeof(float));
     if (!band || !s.ibuf || !s.bbuf || !tile) {
-        free(band);
+        if (!P->band_mem)
+            free(band);
         band = NULL;
         goto out;
     }
-    for (int64_t tx = 0; tx < c->ntile[0]; tx++) {
+    for (int64_t tx = P->tx0; tx < P->tx1; tx++) {
         int64_t x0 = tx * c->ztile[0];
         int64_t tw = c->ztile[0];
         if (x0 + tw > W)
@@ -1173,6 +1182,15 @@ static int load_compressed(fq_file *f, plan_t *P, int threads, char *err, size_t
     int nslots = P->color == FQ_COLOR_RGB ? 3 : 1;
     int64_t band_h = c.ztile[1];
     int64_t nbands = c.ntile[1];
+    /* Of each band, only the tiles under the part shown (the others are
+       not read: the band's memory there is never touched). */
+    int64_t cell = P->color == FQ_COLOR_BAYER ? 2 : 1;
+    P->tx0 = P->rx * cell / c.ztile[0];
+    P->tx1 = ((P->rx + P->rw) * cell - 1) / c.ztile[0] + 1;
+    if (P->tx1 > c.ntile[0] || P->tx1 <= P->tx0)
+        P->tx1 = c.ntile[0];
+    if (P->tx0 >= P->tx1)
+        P->tx0 = 0;
     P->src.rows = calloc((size_t)(P->H * nslots), sizeof(float *));
     P->nbands_alloc = nbands * nslots;
     P->bands = calloc((size_t)P->nbands_alloc, sizeof(float *));
@@ -1186,7 +1204,8 @@ static int load_compressed(fq_file *f, plan_t *P, int threads, char *err, size_t
     }
     /* Bands the plan these statistics are for decoded already are shared. */
     const plan_t *D = P->donor;
-    if (D && !(D->bands && D->src.rows && D->H == P->H && D->nbands_alloc == P->nbands_alloc))
+    if (D && !(D->bands && D->src.rows && D->H == P->H && D->nbands_alloc == P->nbands_alloc &&
+               D->tx0 <= P->tx0 && D->tx1 >= P->tx1))
         D = NULL;
     int64_t njobs = 0;
     for (int slot = 0; slot < nslots; slot++)
@@ -1202,6 +1221,11 @@ static int load_compressed(fq_file *f, plan_t *P, int threads, char *err, size_t
             }
         }
     free(need_r);
+    /* All in one buffer, unless very big: the one the last render freed,
+       when it was as big, its memory already there. */
+    int64_t all = fqi_mul_sat(fqi_mul_sat(njobs, band_h), fqi_mul_sat(P->W, sizeof(float)));
+    if (all > 0 && (uint64_t)all <= FQI_BIG_KEPT)
+        P->band_mem = fqi_big_alloc((size_t)all, &P->band_len);
     bandjob J = { &c, P, band_h, nbands, jobs, P->src.ref, 0 };
     par_for((size_t)njobs, threads, &J, band_task);
     free(jobs);
@@ -1315,6 +1339,16 @@ static int plan_image(fq_file *f, const fq_opts *o, plan_t *P, int force_image,
     P->w = (int)(w < 1 ? 1 : w);
     P->h = (int)(hh < 1 ? 1 : hh);
     int k = P->k = bin_samples(o->max_samples, P->f);
+    /* Of a giant image, fewer samples a bin: each sample row is read whole
+       (its samples are closer than a page), and k of them for each row
+       shown would read more than ROWS_READ_LIMIT (one row each, a 1 TB
+       image's preview reads 5 GB rather than 20). */
+    if (!P->stat_only) {
+        int64_t row = fqi_mul_sat(P->W * (P->color == FQ_COLOR_BAYER ? 2 : 1), abs(P->d.bitpix) / 8);
+        while (k > 1 && fqi_mul_sat(fqi_mul_sat(P->h, k), row) > ROWS_READ_LIMIT)
+            k--;
+        P->k = k;
+    }
     for (int i = 0; i < k; i++)
         P->offs[i] = (int)(((2 * (int64_t)i + 1) * P->f) / (2 * k));
 

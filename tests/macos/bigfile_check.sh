@@ -5,7 +5,8 @@
 # the catalog (sampled in windows) must each be quick. Then,
 # for the record, how long macOS takes to answer a read-ahead hint over the
 # 2 GiB image: since macOS 15.4 it faults in every page of the range, which
-# is why the core hints only the rows it reads.
+# is why the core hints only the rows it reads. And how long a thumbnail of
+# a Roman-sized ASDF image takes with and without the buffer kept.
 #
 #   tests/macos/bigfile_check.sh FQTOOL OUTDIR
 set -u
@@ -86,5 +87,22 @@ int main(int argc, char **argv)
 }
 EOF
 echo "info read-ahead hint over 2 GiB on macOS $(sw_vers -productVersion 2> /dev/null): $("$out/willneed" "$wide")"
-rm -f "$cube" "$wide" "$cat"
+
+# Also for the record: thumbnails of a folder of images of one size, each
+# file opened anew as Quick Look does, decode into the buffer the one before
+# left (--trim: into memory never used, as the first file does).
+roman=$out/roman_lz4.asdf
+python3 - "$roman" << 'EOF'
+import sys
+
+import asdf
+import numpy as np
+
+data = np.random.default_rng(1).normal(100, 10, (4088, 4088)).astype(np.float32)
+asdf.AsdfFile({"data": data}).write_to(sys.argv[1], all_array_compression="lz4")
+EOF
+kept=$(render "$roman" /dev/null --max 512 --samples 2 --repeat 8 --reopen)
+fresh=$(render "$roman" /dev/null --max 512 --samples 2 --repeat 8 --reopen --trim)
+echo "info thumbnail of a 4088x4088 float32 LZ4 ASDF, file after file: $kept ms (into new memory: $fresh ms)"
+rm -f "$cube" "$wide" "$cat" "$roman"
 exit $fail

@@ -118,4 +118,8 @@ void FQDrawSpectrum(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat 
 /// NSString from a C string that may not be valid UTF-8. Never nil.
 NSString *FQString(const char *_Nullable s);
 
+/// fq_close; the big buffer the core then keeps for the next file is freed
+/// once no file has been closed for a while, or at once if memory is short.
+void FQCloseFile(fq_file *_Nullable file);
+
 NS_ASSUME_NONNULL_END

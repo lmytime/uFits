@@ -17,6 +17,30 @@ NSString *FQString(const char *s)
     return r ?: @"";
 }
 
+void FQCloseFile(fq_file *file)
+{
+    static const double idle = 20;   // seconds
+    static dispatch_source_t pressure;
+    static dispatch_once_t once;
+    dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
+    dispatch_once(&once, ^{
+        pressure = dispatch_source_create(DISPATCH_SOURCE_TYPE_MEMORYPRESSURE, 0,
+                                          DISPATCH_MEMORYPRESSURE_WARN | DISPATCH_MEMORYPRESSURE_CRITICAL, queue);
+        if (pressure) {
+            dispatch_source_set_event_handler(pressure, ^{
+                fq_trim(0);
+            });
+            dispatch_resume(pressure);
+        }
+    });
+    if (!file)
+        return;
+    fq_close(file);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(idle * NSEC_PER_SEC)), queue, ^{
+        fq_trim(idle);
+    });
+}
+
 static void FQReleasePixels(void *info, const void *data, size_t size)
 {
     (void)info;
@@ -171,7 +195,7 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
 
 - (void)dealloc
 {
-    fq_close(_file);
+    FQCloseFile(_file);
 }
 
 - (void)perform:(void (^)(fq_file *, NSString *))block
@@ -257,7 +281,7 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
                                      hdus:hdus
                                   catalog:catalog
                                     error:error];
-    fq_close(f);
+    FQCloseFile(f);
     return r;
 }
 
@@ -483,8 +507,8 @@ static void FQDrawDots(CGContextRef ctx, CGRect rect, const fq_image *img, CGFlo
         FQDrawDensity(ctx, rect, img, peak);
         return;
     }
-    const BOOL ellipses = count <= 20000;
-    CGMutablePathRef path = CGPathCreateMutable();
+    // Squares: at a few pixels they look as round dots do, and fill far
+    // quicker than as many ellipses.
     CGRect batch[256];
     int nb = 0;
     for (int c = 0; c < n; c++) {
@@ -495,23 +519,15 @@ static void FQDrawDots(CGContextRef ctx, CGRect rect, const fq_image *img, CGFlo
                 continue;
             CGFloat k = ((CGFloat)r + 0.5) / (CGFloat)rows * rect.size.height;
             CGFloat y = img->y_flip ? CGRectGetMaxY(rect) - k : CGRectGetMinY(rect) + k;
-            CGRect dot = CGRectMake(x - size / 2, y - size / 2, size, size);
-            if (ellipses) {
-                CGPathAddEllipseInRect(path, NULL, dot);
-            } else {
-                batch[nb++] = dot;
-                if (nb == 256) {
-                    CGContextFillRects(ctx, batch, (size_t)nb);
-                    nb = 0;
-                }
+            batch[nb++] = CGRectMake(x - size / 2, y - size / 2, size, size);
+            if (nb == 256) {
+                CGContextFillRects(ctx, batch, (size_t)nb);
+                nb = 0;
             }
         }
     }
     if (nb)
         CGContextFillRects(ctx, batch, (size_t)nb);
-    CGContextAddPath(ctx, path);
-    CGContextFillPath(ctx);
-    CGPathRelease(path);
 }
 
 void FQDrawSpectrum(CGContextRef ctx, CGRect rect, const fq_image *img, CGFloat lineWidth,

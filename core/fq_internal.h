@@ -103,6 +103,13 @@ void fqi_scopy(char *dst, size_t n, const char *src);
 int64_t fqi_mul_sat(int64_t a, int64_t b);
 int64_t fqi_add_sat(int64_t a, int64_t b);
 int64_t fqi_need(fq_file *f, int64_t end);
+/* Big buffers (a decoded image, the tile bands of a render): the last one
+   freed of 1 to 256 MiB is kept for the next, its pages already in memory.
+   Its old bytes stay: everything read must be written first. *len gets
+   what the buffer holds (n or more), which fqi_big_free wants back. */
+void *fqi_big_alloc(size_t n, size_t *len);
+void fqi_big_free(void *p, size_t len);
+#define FQI_BIG_KEPT ((size_t)256 << 20)
 hdu_t *fqi_get_hdu(fq_file *f, int idx);
 int fqi_kw_str(const fq_file *f, const hdu_t *h, const char *key, char *out, size_t n);
 int fqi_kw_int(const fq_file *f, const hdu_t *h, const char *key, int64_t *v);

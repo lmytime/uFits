@@ -434,20 +434,37 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
 @interface FQOpenTable : NSObject
 @property(nonatomic, readonly) fq_table *table;   // NULL if it could not be opened
 @property(nonatomic, readonly) int ncols;         // columns shown (at most 1000)
+/// The table of the file shared by the preview, opened on its queue: the
+/// file must be settled (fq_settled), as the table view reads its cells on
+/// the main thread. The table keeps the file open.
+- (instancetype)initWithShared:(FQFile *)shared file:(fq_file *)file hdu:(int)hdu;
+/// The table of a file of its own.
+- (instancetype)initWithPath:(NSString *)path hdu:(int)hdu;
 - (int)charsOfColumn:(int)c;
 @end
 
 @implementation FQOpenTable {
-    fq_file *_file;
+    fq_file *_file;    // its own, or NULL
+    FQFile *_shared;   // the file shared, kept open while the table is
     int *_chars;
 }
 
 - (instancetype)initWithPath:(NSString *)path hdu:(int)hdu
 {
+    char err[256] = "";
+    fq_file *f = fq_open(path.fileSystemRepresentation, err, sizeof err);
+    if ((self = [self initWithShared:nil file:f hdu:hdu]))
+        _file = f;
+    else
+        FQCloseFile(f);
+    return self;
+}
+
+- (instancetype)initWithShared:(FQFile *)shared file:(fq_file *)file hdu:(int)hdu
+{
     if ((self = [super init])) {
-        char err[256] = "";
-        _file = fq_open(path.fileSystemRepresentation, err, sizeof err);
-        _table = _file ? fq_table_open(_file, hdu) : NULL;
+        _shared = shared;
+        _table = file ? fq_table_open(file, hdu) : NULL;
         int nc = _table ? MIN(fq_table_ncols(_table), 1000) : 0;
         _chars = nc ? calloc((size_t)nc, sizeof *_chars) : NULL;
         _ncols = _chars ? nc : 0;
@@ -474,7 +491,7 @@ static NSString *FQAxisTitle(const char *label, const char *unit)
 - (void)dealloc
 {
     fq_table_close(_table);
-    fq_close(_file);
+    FQCloseFile(_file);
     free(_chars);
 }
 
@@ -576,9 +593,9 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     int _tableHDU;        // HDU in the table view (opened or not), -1 = none
     int _tableOpening;    // HDU being opened in the background, -1 = none
     NSInteger _tableGeneration;
-    NSMutableDictionary<NSNumber *, NSAttributedString *> *_headers;   // built, by HDU
+    NSMutableDictionary<NSNumber *, NSTextStorage *> *_headers;   // built, by -headerKey:
     NSMutableIndexSet *_headersBuilding;
-    int _headerShown;     // HDU whose header is in the text view, -1 = none
+    int _headerShown;     // -headerKey: of the header in the text view, -1 = none
     NSInteger _fileGeneration;
     BOOL _busy, _again;   // a render is running; another one is wanted after it
     NSInteger _generation;
@@ -1440,16 +1457,23 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
         if (perPixel <= 1.001 || zoom * scale * perPixel <= 1.25)
             return;
     }
+    // The part on view and a margin around it, so that a short pan stays in
+    // the detail: a quarter of the view on each side, less where the
+    // detail would pass 4096 pixels across.
+    CGFloat px = zoom * scale;   // detail pixels per image pixel
+    CGFloat mx = MAX(0, MIN(0.25 * NSWidth(vis), (4096 / px - NSWidth(vis)) / 2));
+    CGFloat my = MAX(0, MIN(0.25 * NSHeight(vis), (4096 / px - NSHeight(vis)) / 2));
+    NSRect want = NSIntersectionRect(NSInsetRect(vis, -mx, -my), _imageView.bounds);
     // The view's y grows from the first row of the file when the image is
     // flipped (the FITS way: first row at the bottom).
     CGFloat height = NSHeight(_imageView.bounds), ox = in.region[0], oy = in.region[1];
     BOOL flipped = in.flipped != 0;
-    NSRect part = vis;
+    NSRect part = want;
     if (!flipped)
-        part.origin.y = height - NSMaxY(vis);
+        part.origin.y = height - NSMaxY(want);
     part = NSOffsetRect(part, ox, oy);
-    int maxWidth = (int)MAX(1, MIN(4096, ceil(NSWidth(vis) * zoom * scale)));
-    int maxHeight = (int)MAX(1, MIN(4096, ceil(NSHeight(vis) * zoom * scale)));
+    int maxWidth = (int)MAX(1, MIN(4096, ceil(NSWidth(want) * px)));
+    int maxHeight = (int)MAX(1, MIN(4096, ceil(NSHeight(want) * px)));
     NSInteger generation = ++_detailGeneration;
     FQWanted *wanted = _detailWanted;
     wanted.wanted = generation;
@@ -1524,21 +1548,31 @@ static NSAttributedString *FQHeaderListing(fq_file *f, NSString *error, int hdu)
     return out;
 }
 
+/// What the header listing of hdu is kept as: the HDU, or for every array
+/// of an ASDF file the same, as their header is the file's tree.
+- (int)headerKey:(int)hdu
+{
+    return _hdus.firstObject.isArray ? 0 : hdu;
+}
+
 /// Puts the header of hdu in the text view if it has been read (YES), or
 /// starts reading it.
 - (BOOL)prepareHeader:(int)hdu
 {
-    if (_headerShown == hdu)
+    int key = [self headerKey:hdu];
+    if (_headerShown == key)
         return YES;
-    NSAttributedString *text = _headers[@(hdu)];
+    NSTextStorage *text = _headers[@(key)];
     if (!text) {
         [self buildHeader:hdu];
         return NO;
     }
+    // The text made in the background goes in as it is: set as the text
+    // view's string, a big header was copied on the main thread.
     [self makeHeaderView];
-    [_headerText.textStorage setAttributedString:text];
+    [_headerText.layoutManager replaceTextStorage:text];
     [_headerText scrollPoint:NSZeroPoint];
-    _headerShown = hdu;
+    _headerShown = key;
     return YES;
 }
 
@@ -1546,22 +1580,23 @@ static NSAttributedString *FQHeaderListing(fq_file *f, NSString *error, int hdu)
 /// still the one wanted.
 - (void)buildHeader:(int)hdu
 {
-    if (!_file || _headers[@(hdu)] || [_headersBuilding containsIndex:(NSUInteger)hdu])
+    int key = [self headerKey:hdu];
+    if (!_file || _headers[@(key)] || [_headersBuilding containsIndex:(NSUInteger)key])
         return;
-    [_headersBuilding addIndex:(NSUInteger)hdu];
+    [_headersBuilding addIndex:(NSUInteger)key];
     NSInteger generation = _fileGeneration;
     __weak FQPreviewController *weakSelf = self;
     [_file perform:^(fq_file *f, NSString *error) {
         if (!f && !error)
             return;   // another file was loaded since
-        NSAttributedString *text = FQHeaderListing(f, error, hdu);
+        NSTextStorage *text = [[NSTextStorage alloc] initWithAttributedString:FQHeaderListing(f, error, hdu)];
         dispatch_async(dispatch_get_main_queue(), ^{
             FQPreviewController *me = weakSelf;
             if (!me || generation != me->_fileGeneration)
                 return;
-            [me->_headersBuilding removeIndex:(NSUInteger)hdu];
-            me->_headers[@(hdu)] = text;
-            if (me->_mode.selectedSegment == kModeHeader && [me shownHDU] == hdu)
+            [me->_headersBuilding removeIndex:(NSUInteger)key];
+            me->_headers[@(key)] = text;
+            if (me->_mode.selectedSegment == kModeHeader && [me headerKey:[me shownHDU]] == key)
                 [me showMode:kModeHeader];
         });
     }];
@@ -1587,17 +1622,14 @@ static NSAttributedString *FQHeaderListing(fq_file *f, NSString *error, int hdu)
 {
     if (_tableHDU == hdu)
         return YES;
-    if (_tableOpening == hdu || !_path)
+    if (_tableOpening == hdu || !_file)
         return NO;
     _tableOpening = hdu;
     NSInteger generation = ++_tableGeneration;
     NSString *path = _path;
+    FQFile *shared = _file;
     __weak FQPreviewController *weakSelf = self;
-    // A file of its own: the table view reads its cells on the main thread,
-    // while the file shared by the rest may be read on another (and the
-    // bytes of a gzip file move as more of it is inflated).
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        FQOpenTable *t = [[FQOpenTable alloc] initWithPath:path hdu:hdu];
+    void (^install)(FQOpenTable *) = ^(FQOpenTable *t) {
         dispatch_async(dispatch_get_main_queue(), ^{
             FQPreviewController *me = weakSelf;
             if (!me || generation != me->_tableGeneration)
@@ -1605,7 +1637,22 @@ static NSAttributedString *FQHeaderListing(fq_file *f, NSString *error, int hdu)
             [me installTable:t hdu:hdu];
             [me showMode:me->_mode.selectedSegment];
         });
-    });
+    };
+    // The table view reads its cells on the main thread while the shared
+    // file may be read on its queue: that is safe once the file's bytes
+    // stay where they are. The bytes of a gzip file move until it is
+    // inflated to its end; then the table opens a file of its own.
+    [shared perform:^(fq_file *f, NSString *error) {
+        if (!f && !error)
+            return;   // another file was loaded since
+        if (f && fq_settled(f)) {
+            install([[FQOpenTable alloc] initWithShared:shared file:f hdu:hdu]);
+            return;
+        }
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            install([[FQOpenTable alloc] initWithPath:path hdu:hdu]);
+        });
+    }];
     return NO;
 }
 
@@ -1699,27 +1746,35 @@ static NSAttributedString *FQHeaderListing(fq_file *f, NSString *error, int hdu)
 - (void)copy:(id)sender
 {
     (void)sender;
-    NSIndexSet *rows = _tableView.selectedRowIndexes;
+    NSIndexSet *rows = [_tableView.selectedRowIndexes copy];
     if (!_tableScroll || _tableScroll.hidden || !_table || !rows.count)
         return;
-    NSMutableString *text = [NSMutableString string];
-    int nc = fq_table_ncols(_table);
-    for (int c = 0; c < nc; c++)
-        [text appendFormat:@"%@%@", c ? @"\t" : @"", FQString(fq_table_column(_table, c)->name)];
-    [text appendString:@"\n"];
-    __block NSUInteger left = 100000;
-    [rows enumerateIndexesUsingBlock:^(NSUInteger row, BOOL *stop) {
-        char cell[200];
-        for (int c = 0; c < nc; c++) {
-            fq_table_cell(self->_table, (int64_t)row, c, cell, sizeof cell);
-            [text appendFormat:@"%@%@", c ? @"\t" : @"", FQString(cell)];
-        }
+    // Read in the background (a big selection takes a moment); the table
+    // stays open until it is done.
+    FQOpenTable *t = _tableData;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        fq_table *table = t.table;
+        NSMutableString *text = [NSMutableString string];
+        int nc = fq_table_ncols(table);
+        for (int c = 0; c < nc; c++)
+            [text appendFormat:@"%@%@", c ? @"\t" : @"", FQString(fq_table_column(table, c)->name)];
         [text appendString:@"\n"];
-        if (--left == 0)
-            *stop = YES;
-    }];
-    [NSPasteboard.generalPasteboard clearContents];
-    [NSPasteboard.generalPasteboard setString:text forType:NSPasteboardTypeString];
+        __block NSUInteger left = 100000;
+        [rows enumerateIndexesUsingBlock:^(NSUInteger row, BOOL *stop) {
+            char cell[200];
+            for (int c = 0; c < nc; c++) {
+                fq_table_cell(table, (int64_t)row, c, cell, sizeof cell);
+                [text appendFormat:@"%@%@", c ? @"\t" : @"", FQString(cell)];
+            }
+            [text appendString:@"\n"];
+            if (--left == 0)
+                *stop = YES;
+        }];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [NSPasteboard.generalPasteboard clearContents];
+            [NSPasteboard.generalPasteboard setString:text forType:NSPasteboardTypeString];
+        });
+    });
 }
 
 #pragma mark Actions
@@ -1772,14 +1827,6 @@ static NSAttributedString *FQHeaderListing(fq_file *f, NSString *error, int hdu)
     FQHDUItem *item = [self selectedItem];
     if (!item)
         return;
-    // An image or a plot is drawn in the background, whatever is on show; a
-    // catalog's map only when Plot is picked.
-    BOOL drawable = item.kind == FQ_KIND_IMAGE || (item.kind == FQ_KIND_PLOT && !item.isCatalog);
-    if (drawable && _selected != _hdu && !(_hdu < 0 && _rendering && _selected == _rendering.info.hdu)) {
-        _hdu = _selected;
-        _plane = -1;
-        [self requestRender];
-    }
     // The same mode when this HDU has it (a header always), or what it has:
     // its picture, else its rows, else its header. A catalog shows its rows
     // rather than a map not drawn yet.
@@ -1787,7 +1834,20 @@ static NSAttributedString *FQHeaderListing(fq_file *f, NSString *error, int hdu)
     if (mode == kModePicture && item.isCatalog && ![self shownRendering])
         mode = kModeTable;
     _focusOnReady = YES;
+    // An image or a plot is drawn in the background, whatever is on show; a
+    // catalog's map only when Plot is picked. Asked for after what is on
+    // show (its header, say), which the file's queue then reads first.
+    BOOL drawable = item.kind == FQ_KIND_IMAGE || (item.kind == FQ_KIND_PLOT && !item.isCatalog);
+    BOOL draw = drawable && _selected != _hdu && !(_hdu < 0 && _rendering && _selected == _rendering.info.hdu);
+    if (draw) {
+        _hdu = _selected;
+        _plane = -1;
+    }
+    if (draw && mode == kModePicture)
+        [self requestRender];
     [self showMode:mode];
+    if (draw && mode != kModePicture)
+        [self requestRender];
 }
 
 - (void)planeChanged:(id)sender

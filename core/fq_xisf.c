@@ -25,6 +25,7 @@ struct fqi_xisf_image {
     char type[24], compression[24], bayer[8], error[160];
     fqi_sbuf cards, encoded;
     uint8_t *decoded;
+    size_t decoded_len;           /* (fqi_big_alloc) */
     int decoded_shuffled;         /* decoded holds byte planes (item size) */
 };
 typedef struct {
@@ -428,7 +429,7 @@ void fqi_xisf_free(fqi_xisf_image *x)
     free(x->blocks);
     free(x->cards.s);
     free(x->encoded.s);
-    free(x->decoded);
+    fqi_big_free(x->decoded, x->decoded_len);
     free(x);
 }
 
@@ -592,12 +593,12 @@ int fqi_xisf_load(fq_file *f, hdu_t *h, int threads, const uint8_t **data,
     }
     /* Keep at most one decoded image, even when browsing a multi-image file. */
     for (int i = 0; i < f->nhdu; i++) {
-        free(f->hdu[i].xisf->decoded);
+        fqi_big_free(f->hdu[i].xisf->decoded, f->hdu[i].xisf->decoded_len);
         f->hdu[i].xisf->decoded = NULL;
         f->hdu[i].xisf->decoded_shuffled = 0;
     }
     uint8_t *encoded = NULL, *buf = NULL;
-    size_t n = x->stored;
+    size_t n = x->stored, len = 0;
     const uint8_t *in = f->data + x->offset;
     if (x->embedded) {
         encoded = embedded(x, &n);
@@ -607,10 +608,11 @@ int fqi_xisf_load(fq_file *f, hdu_t *h, int threads, const uint8_t **data,
     if (!x->compression[0]) {
         if (n != x->raw) goto bad;
         x->decoded = encoded;
+        x->decoded_len = n;
         *data = x->decoded;
         return 0;
     }
-    buf = malloc(x->raw);
+    buf = fqi_big_alloc(x->raw, &len);
     if (!buf) goto bad;
     if (x->nblocks) {
         /* Subblocks are independent: check where each goes, then decode
@@ -635,27 +637,31 @@ int fqi_xisf_load(fq_file *f, hdu_t *h, int threads, const uint8_t **data,
     if (x->shuffle > 1 && x->shuffle == abs(h->bitpix) / 8 && x->raw % (size_t)x->shuffle == 0) {
         /* The sampler reads the byte planes as they are. */
         x->decoded = buf;
+        x->decoded_len = len;
         x->decoded_shuffled = x->shuffle;
         *data = buf;
         *shuffled = x->shuffle;
         return 0;
     }
     if (x->shuffle > 1) {
-        uint8_t *unshuffled = malloc(x->raw);
+        size_t ulen;
+        uint8_t *unshuffled = fqi_big_alloc(x->raw, &ulen);
         if (!unshuffled) goto bad;
         size_t items = x->raw / (size_t)x->shuffle;
         fq_unshuffle(buf, unshuffled, (int64_t)items, x->shuffle);
         size_t tail = items * (size_t)x->shuffle;
         memcpy(unshuffled + tail, buf + tail, x->raw - tail);
-        free(buf);
+        fqi_big_free(buf, len);
         buf = unshuffled;
+        len = ulen;
     }
     x->decoded = buf;
+    x->decoded_len = len;
     *data = buf;
     return 0;
  bad:
     free(encoded);
-    free(buf);
+    fqi_big_free(buf, len);
     fqi_seterr(err, errlen, "XISF: invalid, truncated, or oversized image data block");
     return -1;
 }

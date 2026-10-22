@@ -17,22 +17,33 @@ uFits is built to be small and fast:
   the part shown is read (a cube's plane, a zoomed-in part), each chunk of the binning
   asks for read-ahead of its own rows only: since macOS 15.4 the hint faults in its
   whole range before it returns, so a hint over the whole data unit would read all of a
-  cube to show one plane (`tests/macos/bigfile_check.sh` times that). For tile-compressed
-  files only the tiles under the sampled rows are decompressed. XISF compression is
-  block based: the selected image is decompressed in full (its subblocks on every
-  core) and cached until another image is selected or the file is closed. Of a
-  compressed ASDF array only the plane shown is decompressed (see [ASDF](#asdf)).
+  cube to show one plane (`tests/macos/bigfile_check.sh` times that). An image so big
+  that the rows sampled would add up to more than 2 GiB (a terabyte mosaic) is sampled
+  on fewer rows, down to one per output row. For tile-compressed files only the tiles
+  under the sampled rows, and of a zoomed-in part only those under it, are decompressed.
+  XISF compression is block based: the selected image is decompressed in full (its
+  subblocks on every core) and cached until another image is selected or the file is
+  closed. Of a compressed ASDF array only the plane shown is decompressed (see
+  [ASDF](#asdf)).
 - **Uses every core.** Binning, tile decompression and the final mapping run in parallel
   (Grand Central Dispatch).
+- **Reuses its biggest buffer.** Memory written for the first time costs a page fault
+  a page: for 64 MB about as long as decompressing LZ4. A decompressed XISF image or
+  ASDF plane, or the tile bands of a render, go into the buffer the last one left
+  (`fqi_big_alloc`: up to 256 MiB, kept for the next file), so thumbnails of a folder
+  of images of one size decode into memory already there. It is freed 20 s after the
+  last file is closed, or at once when memory is short (`fq_trim`).
 - **Opens a file once.** A preview's renders, zoomed-in details and headers share one
   open file (`FQFile`), and with it what the core keeps of it: the HDUs found, a
   decompressed XISF image or ASDF plane, where inflating a zlib block got to, a gzip
   file inflated so far. They take turns on a queue of the file's own; work that is no
   longer wanted when its turn comes (the detail of a part scrolled past, anything of a
-  preview closed) is dropped. The table view opens the file again: it reads cells on
-  the main thread. A preview starts reading its file before it makes its views, and
-  makes the header and table views only when they are first shown. Thumbnails go to
-  Quick Look as uncompressed TIFF files, quicker to write and to read than PNG.
+  preview closed) is dropped. The table view reads cells on the main thread, from the
+  same open file once its bytes stay where they are (mapped, or a gzip file inflated to
+  its end), else from the file opened again. A preview starts reading its file before it
+  makes its views, and makes the header and table views only when they are first shown.
+  Thumbnails go to Quick Look as uncompressed TIFF files, quicker to write and to read
+  than PNG.
 
 On an Apple Silicon CI runner, a Finder-style thumbnail request (through
 `QLThumbnailGenerator`, including the round trip to the extension) takes 10–25 ms per
@@ -47,6 +58,10 @@ Time spent in the core alone, measured on a 4-core Linux VM:
 | 4096×4096 Rice-compressed `.fz` | 15 ms | 34 ms |
 | 4088×4088 float32, Roman's L2 (ASDF, LZ4, 70 MB) | 17 ms | 21 ms |
 | 8000×6000 float32 XISF, zstd and byte shuffled (143 MB) | 210 ms | 226 ms |
+
+Those are of a file on its own. In a folder of images of one size (`fqtool render …
+--repeat 8 --reopen`), every file after the first decodes into the buffer the one before
+left: the Roman thumbnail then takes 8 ms, the XISF one 115 ms, the `.fz` preview 30 ms.
 
 ## What the core handles
 
@@ -96,15 +111,16 @@ Time spent in the core alone, measured on a 4-core Linux VM:
   rows opens at once. The table draws its cells itself (a cell-based `NSTableView`),
   with no view per cell, which keeps scrolling smooth, also inside Quick Look. Binary
   and ASCII tables, with array, string, logical, bit, complex and variable-length
-  columns. ⌘C copies the selected rows as tab-separated text. Files whose tables have
-  nothing to plot, and catalogs, open on it.
+  columns. ⌘C copies the selected rows as tab-separated text, read in the background.
+  Files whose tables have nothing to plot, and catalogs, open on it.
 - **Header** shows the header of the HDU picked, its cards in columns: keywords in
   bold at a fixed width, values and comments lined up, long strings (`CONTINUE`) joined
   into one line, `HIERARCH` keywords in full, `COMMENT`/`HISTORY` text under the
   values. ⌘F searches it.
 - Switching between picture, rows and header is immediate: tables are opened and
-  headers read in the background (right after the file opens, for the HDU on show),
-  with "Loading…" shown if that takes more than a moment.
+  headers read and styled in the background (right after the file opens, for the HDU on
+  show; for ASDF once, since its arrays share one tree), with "Loading…" shown if that
+  takes more than a moment.
 - Changing the stretch only remaps the image already binned, so it is instant even for
   big or compressed files.
 - Zoom (pinch, ⌥-click, ⌘- or ⌥-scroll; ⌘+ ⌘− ⌘0 where keys reach the preview) goes up
@@ -112,7 +128,8 @@ Time spent in the core alone, measured on a 4-core Linux VM:
   image (an ⌥-click without a drag still zooms; a middle-click centres the view there). Once an image shown binned is zoomed in past its binned
   pixels, the part on view is read again at full resolution in the background
   (`fq_render_detail`: a region, mapped with the stretch of the whole image) and laid
-  over it.
+  over it, with a margin of up to a quarter of the view on each side so that small
+  moves need no new read.
 
 ## XISF
 

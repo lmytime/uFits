@@ -140,10 +140,18 @@ fq_file *fq_open(const char *path, char *err, size_t errlen);
 fq_file *fq_open_memory(const void *data, size_t size, int copy,
                         char *err, size_t errlen);
 void fq_close(fq_file *f);
+/* The core keeps the last big buffer it freed (a decoded image, say) for
+   the next file. Free it if it has not been used for idle seconds (0: now):
+   once the viewer has been idle a while, or when memory is short. */
+void fq_trim(double idle);
 
 enum { FQ_FORMAT_FITS = 0, FQ_FORMAT_XISF = 1, FQ_FORMAT_ASDF = 2 };
 /* Which of them the file is. */
 int fq_format(const fq_file *f);
+/* 1 when the file's bytes stay where they are from now on: a mapped file,
+   or a gzip file inflated to its end. A table of such a file can be read
+   on one thread while the file is used on another. */
+int fq_settled(const fq_file *f);
 
 /* Render the first image (or opts->hdu) for display. */
 fq_image *fq_render(fq_file *f, const fq_opts *opts, char *err, size_t errlen);

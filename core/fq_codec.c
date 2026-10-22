@@ -235,13 +235,51 @@ int fq_plio_decode(const int16_t *ll, size_t nwords, int32_t *out, int64_t npix)
 
 /* ---- GZIP ----------------------------------------------------------------- */
 
+/* Bytes of the gzip or zlib header at in, or 0 when there is none. */
+static size_t deflate_header(const uint8_t *in, size_t n)
+{
+    if (n >= 10 && in[0] == 0x1f && in[1] == 0x8b && in[2] == 8) {
+        unsigned flags = in[3];
+        size_t p = 10;
+        if (flags & 4) {   /* FEXTRA */
+            if (n - p < 2)
+                return 0;
+            size_t xlen = in[p] | (size_t)in[p + 1] << 8;
+            if (n - p - 2 < xlen)
+                return 0;
+            p += 2 + xlen;
+        }
+        for (unsigned f = 8; f <= 16; f <<= 1)   /* FNAME, FCOMMENT */
+            if (flags & f) {
+                const uint8_t *e = memchr(in + p, 0, n - p);
+                if (!e)
+                    return 0;
+                p = (size_t)(e - in) + 1;
+            }
+        if (flags & 2)   /* FHCRC */
+            p += 2;
+        return p <= n ? p : 0;
+    }
+    if (n >= 2 && (in[0] & 0x0f) == 8 && (in[0] >> 4) <= 7 && !(in[1] & 0x20) &&
+        (in[0] << 8 | in[1]) % 31 == 0)
+        return 2;
+    return 0;
+}
+
+/* Inflates the gzip or zlib stream in (concatenated gzip members too) into
+   out, without its checksums (a tile is checked by its size): their sums
+   took a sixth of the time. Returns the bytes written, or -1. */
 int64_t fq_inflate(const uint8_t *in, size_t inlen, uint8_t *out, size_t outcap)
 {
+    size_t hdr = deflate_header(in, inlen);
+    if (!hdr)
+        return -1;
+    int gzip = in[0] == 0x1f;
     z_stream z;
     memset(&z, 0, sizeof z);
-    if (inflateInit2(&z, 15 + 32) != Z_OK) /* accept gzip and zlib headers */
+    if (inflateInit2(&z, -15) != Z_OK) /* raw deflate: no checksum */
         return -1;
-    size_t inpos = 0, outpos = 0;
+    size_t inpos = hdr, outpos = 0;
     int rc = Z_OK;
     for (;;) {
         size_t inchunk = inlen - inpos, outchunk = outcap - outpos;
@@ -255,9 +293,12 @@ int64_t fq_inflate(const uint8_t *in, size_t inlen, uint8_t *out, size_t outcap)
         inpos += inchunk - z.avail_in;
         outpos += outchunk - z.avail_out;
         if (rc == Z_STREAM_END) {
-            /* Concatenated gzip members continue the stream. */
-            if (inlen - inpos >= 2 && in[inpos] == 0x1f && in[inpos + 1] == 0x8b &&
-                outpos < outcap) {
+            /* Concatenated gzip members continue the stream (after the
+               trailer: the CRC and the size). */
+            size_t next = gzip && inlen - inpos >= 8 ? inpos + 8 : inlen;
+            size_t h2 = gzip && outpos < outcap ? deflate_header(in + next, inlen - next) : 0;
+            if (h2 && in[next] == 0x1f) {
+                inpos = next + h2;
                 inflateReset(&z);
                 continue;
             }
@@ -274,6 +315,30 @@ int64_t fq_inflate(const uint8_t *in, size_t inlen, uint8_t *out, size_t outcap)
 
 void fq_unshuffle(const uint8_t *in, uint8_t *out, int64_t n, int itemsize)
 {
+    /* The usual sizes in one pass, each item written whole. */
+    const uint8_t *p0 = in, *p1 = in + n, *p2 = in + 2 * n, *p3 = in + 3 * n;
+    switch (itemsize) {
+    case 2:
+        for (int64_t i = 0; i < n; i++) {
+            out[2 * i] = p0[i];
+            out[2 * i + 1] = p1[i];
+        }
+        return;
+    case 4:
+        for (int64_t i = 0; i < n; i++) {
+            uint8_t v[4] = { p0[i], p1[i], p2[i], p3[i] };
+            memcpy(out + 4 * i, v, 4);
+        }
+        return;
+    case 8:
+        for (int64_t i = 0; i < n; i++) {
+            uint8_t v[8];
+            for (int b = 0; b < 8; b++)
+                v[b] = in[b * n + i];
+            memcpy(out + 8 * i, v, 8);
+        }
+        return;
+    }
     for (int b = 0; b < itemsize; b++) {
         const uint8_t *src = in + (int64_t)b * n;
         uint8_t *dst = out + b;
