@@ -2,20 +2,26 @@ uFits shows FITS, XISF and ASDF files in Finder: Quick Look previews (select a f
 press Space) and thumbnails for images, cubes, tile-compressed `.fz` files, spectra, light
 curves, catalogs and tables, with every header.
 
-**New in 0.0.9**
+**New in 0.0.10**
 
-- **ASDF files**, such as those of the Nancy Grace Roman Space Telescope: every array in a
-  file (images, cubes such as Roman's raw ramps, and 1-D arrays) is shown, named by its
-  place in the file's tree (`roman.data`, `roman.dq`, ...), the science image first.
-  Arrays compressed with LZ4 (as Roman's pipeline writes them), zlib or bzip2 work too;
-  of a cube, only the plane on show is decompressed. **Header** shows the whole tree, and
-  Finder shows thumbnails of `.asdf` files.
-- XISF previews draw several times faster.
+- **Faster**, above all with big files. On macOS 15.4 and later, a plane of a big cube or
+  a zoomed-in part of a big image no longer reads the whole file. Previews and
+  thumbnails draw faster, many about twice as fast; compressed XISF images two to three
+  times as fast; and the next plane of a zlib-compressed ASDF cube no longer
+  decompresses the planes before it. The map of a huge catalog takes under a second,
+  whatever its size, and copying many rows of a table no longer holds up the preview.
+- **Catalogs open on their rows**: click **Plot** for the map of the sky. Light curves and
+  spectra still open on their plot, and Finder's thumbnails of catalogs are still maps.
+- **No more "Background Items Added"**: uFits looks for updates when you open it (at most
+  once a day) instead of from a background job, which this version removes.
+- XISF files with more than 1 MiB of text in a property (a long processing history, say)
+  now open.
 
 From 0.0.3 on, uFits says when a newer version is out (**Update available** in the
 preview's bar) and updates itself when you open it. From 0.0.2 or earlier, update once
-with the command below. See [0.0.8](https://github.com/lmytime/uFits/releases/tag/v0.0.8)
-for moving around a zoomed-in image,
+with the command below. See [0.0.9](https://github.com/lmytime/uFits/releases/tag/v0.0.9)
+for ASDF files, [0.0.8](https://github.com/lmytime/uFits/releases/tag/v0.0.8) for moving
+around a zoomed-in image,
 [0.0.7](https://github.com/lmytime/uFits/releases/tag/v0.0.7)
 for the pixel galaxy icon and the App icon setting,
 [0.0.6](https://github.com/lmytime/uFits/releases/tag/v0.0.6) for thumbnails that fill
