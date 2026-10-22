@@ -180,6 +180,7 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
     NSString *_error;     // on _queue: why the file could not be opened
     BOOL _opened;         // on _queue
     int _closed;          // read and written atomically
+    int _settled;         // the same
 }
 
 - (instancetype)initWithPath:(NSString *)path
@@ -212,14 +213,27 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
             self->_file = fq_open(self->_path.fileSystemRepresentation, err, sizeof err);
             if (!self->_file)
                 self->_error = FQString(err);
+            [self noteSettled];   // a mapped file: before the block tells anyone
         }
         block(self->_file, self->_error);
+        [self noteSettled];       // a gzip file the block inflated to its end
     });
+}
+
+/// On the queue.
+- (void)noteSettled
+{
+    __atomic_store_n(&_settled, _file && fq_settled(_file), __ATOMIC_RELEASE);
 }
 
 - (void)close
 {
     __atomic_store_n(&_closed, 1, __ATOMIC_RELEASE);
+}
+
+- (BOOL)settled
+{
+    return __atomic_load_n(&_settled, __ATOMIC_ACQUIRE) != 0;
 }
 
 @end

@@ -370,8 +370,9 @@ static double placement(CGImageRef image, CGImageRef detail, NSRect frame, NSSiz
 }
 
 /// Zoom: Command + and - zoom in and out, Command 0 shows the whole image;
-/// zoomed in on an image shown binned, the part on view is drawn pixel for
-/// pixel over it, in its place; another cube plane keeps the zoom.
+/// zoomed in on an image shown binned, the part on view and a margin of up
+/// to a quarter of it on each side are drawn pixel for pixel over it, in
+/// their place; another cube plane keeps the zoom.
 static void checkZoom(FQPreviewController *vc, NSString *data)
 {
     NSString *big = [data stringByAppendingPathComponent:@"zoom_image.fits"];
@@ -404,7 +405,7 @@ static void checkZoom(FQPreviewController *vc, NSString *data)
     BOOL fine = detail && CGImageGetWidth(detail) == (size_t)NSWidth(df) &&
                 CGImageGetHeight(detail) == (size_t)NSHeight(df) &&
                 NSContainsRect(NSInsetRect(df, 1, 1), NSInsetRect(vis, 2, 2)) &&
-                NSWidth(df) <= NSWidth(vis) + 4 && NSHeight(df) <= NSHeight(vis) + 4;
+                NSWidth(df) <= 1.5 * NSWidth(vis) + 4 && NSHeight(df) <= 1.5 * NSHeight(vis) + 4;
     double match = detail ? placement(iv.image, detail, df, iv.bounds.size) : 0;
     report(@"zoom-in", took && fabs(sv.magnification / (8 * fit) - 1) < 1e-3 && fine && match > 0.8,
            [NSString stringWithFormat:@"Command + three times: %.4f points per pixel; detail %zux%zu over %@, "

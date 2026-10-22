@@ -39,6 +39,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Drops the work not started yet. The file itself is closed once the work
 /// running is done.
 - (void)close;
+/// YES once the file's bytes stay where they are (fq_settled: a mapped file,
+/// or a gzip file inflated to its end), as of the last work done with it.
+@property(nonatomic, readonly) BOOL settled;
 @end
 
 /// Work that can be dropped before it starts: whoever asked for it moves

@@ -1641,17 +1641,18 @@ static NSAttributedString *FQHeaderListing(fq_file *f, NSString *error, int hdu)
     // The table view reads its cells on the main thread while the shared
     // file may be read on its queue: that is safe once the file's bytes
     // stay where they are. The bytes of a gzip file move until it is
-    // inflated to its end; then the table opens a file of its own.
-    [shared perform:^(fq_file *f, NSString *error) {
-        if (!f && !error)
-            return;   // another file was loaded since
-        if (f && fq_settled(f)) {
-            install([[FQOpenTable alloc] initWithShared:shared file:f hdu:hdu]);
-            return;
-        }
+    // inflated to its end; until then the table opens a file of its own,
+    // at once rather than after the work queued for the shared one.
+    if (!shared.settled) {
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
             install([[FQOpenTable alloc] initWithPath:path hdu:hdu]);
         });
+        return NO;
+    }
+    [shared perform:^(fq_file *f, NSString *error) {
+        (void)error;
+        if (f)   // else another file was loaded since
+            install([[FQOpenTable alloc] initWithShared:shared file:f hdu:hdu]);
     }];
     return NO;
 }
