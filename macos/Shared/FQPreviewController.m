@@ -538,9 +538,9 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     FQImageView *_imageView;
     CGFloat _fitZoom;             // magnification that shows the whole image
     int _pictureHDU;
-    FQDetailSource *_detailSource;
-    dispatch_queue_t _detailQueue;
+    FQFile *_file;                // the file shown, open once for all that shows it
     NSInteger _detailGeneration, _detailToken;
+    FQWanted *_detailWanted;      // the detail asked for last (_detailGeneration)
     FQSpectrumView *_spectrumView;
     NSScrollView *_headerScroll;
     NSTextView *_headerText;
@@ -600,12 +600,14 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
         _headers = [NSMutableDictionary dictionary];
         _headersBuilding = [NSMutableIndexSet indexSet];
         _selected = -1;
+        _detailWanted = [FQWanted new];
     }
     return self;
 }
 
 - (void)dealloc
 {
+    [_file close];   // what was asked of it and not started is dropped
     [NSNotificationCenter.defaultCenter removeObserver:self];
     if (_clickMonitor)
         [NSEvent removeMonitor:_clickMonitor];
@@ -667,57 +669,14 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
                                              object:_imageScroll.contentView];
     _imageScroll.hidden = YES;
     [root addSubview:_imageScroll];
-    _detailQueue = dispatch_queue_create("io.github.lmytime.uFits.detail",
-                                         dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,
-                                                                                 QOS_CLASS_USER_INITIATED, 0));
 
     _spectrumView = [[FQSpectrumView alloc] initWithFrame:content];
     _spectrumView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _spectrumView.hidden = YES;
     [root addSubview:_spectrumView];
 
-    // Header of the HDU picked. Non-contiguous layout keeps big ones quick.
-    _headerScroll = [self scrollViewWithFrame:content];
-    NSSize cs = _headerScroll.contentSize;
-    _headerText = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, cs.width, cs.height)];
-    _headerText.editable = NO;
-    _headerText.selectable = YES;
-    _headerText.richText = YES;   // keys in bold, comments dimmed
-    _headerText.usesFindBar = YES;
-    _headerText.incrementalSearchingEnabled = YES;
-    _headerText.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
-    _headerText.textColor = NSColor.textColor;
-    _headerText.backgroundColor = NSColor.textBackgroundColor;
-    _headerText.textContainerInset = NSMakeSize(8, 8);
-    _headerText.minSize = NSMakeSize(0, cs.height);
-    _headerText.maxSize = NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX);
-    _headerText.verticallyResizable = YES;
-    _headerText.horizontallyResizable = YES;
-    _headerText.autoresizingMask = NSViewWidthSizable;
-    _headerText.textContainer.containerSize = NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX);
-    _headerText.textContainer.widthTracksTextView = NO;
-    _headerText.layoutManager.allowsNonContiguousLayout = YES;
-    _headerScroll.documentView = _headerText;
-    [root addSubview:_headerScroll];
-
-    // Table view: every row of a table, formatted only as it scrolls in,
-    // its cells drawn by the table itself (see FQGridCell).
-    _cellFont = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
-    _digitWidth = [@"0" sizeWithAttributes:@{NSFontAttributeName : _cellFont}].width;
-    _textHeight = [[NSLayoutManager new] defaultLineHeightForFont:_cellFont];
-    _tableScroll = [self scrollViewWithFrame:content];
-    _tableView = [[NSTableView alloc] initWithFrame:_tableScroll.bounds];
-    _tableView.style = NSTableViewStylePlain;
-    _tableView.usesAlternatingRowBackgroundColors = YES;
-    _tableView.gridStyleMask = NSTableViewSolidVerticalGridLineMask;
-    _tableView.columnAutoresizingStyle = NSTableViewNoColumnAutoresizing;
-    _tableView.allowsMultipleSelection = YES;
-    _tableView.rowHeight = 17;
-    _tableView.dataSource = self;
-    _tableView.delegate = self;
-    _tableScroll.documentView = _tableView;
-    [root addSubview:_tableScroll];
-
+    // The header and the table views are made when first wanted
+    // (-makeHeaderView, -makeTableView), below the message.
     _message = [NSTextField wrappingLabelWithString:@""];
     _message.frame = NSInsetRect(content, 40, 40);
     _message.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -830,6 +789,66 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
                                                           }];
 }
 
+/// The content area of the view as it is now: all but the bar.
+- (NSRect)contentFrame
+{
+    NSRect b = self.view.bounds;
+    return NSMakeRect(0, kBarHeight, NSWidth(b), MAX(NSHeight(b) - kBarHeight, 1));
+}
+
+/// The header listing of the HDU picked. Non-contiguous layout keeps big
+/// ones quick.
+- (void)makeHeaderView
+{
+    if (_headerScroll)
+        return;
+    _headerScroll = [self scrollViewWithFrame:[self contentFrame]];
+    NSSize cs = _headerScroll.contentSize;
+    _headerText = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, cs.width, cs.height)];
+    _headerText.editable = NO;
+    _headerText.selectable = YES;
+    _headerText.richText = YES;   // keys in bold, comments dimmed
+    _headerText.usesFindBar = YES;
+    _headerText.incrementalSearchingEnabled = YES;
+    _headerText.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
+    _headerText.textColor = NSColor.textColor;
+    _headerText.backgroundColor = NSColor.textBackgroundColor;
+    _headerText.textContainerInset = NSMakeSize(8, 8);
+    _headerText.minSize = NSMakeSize(0, cs.height);
+    _headerText.maxSize = NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX);
+    _headerText.verticallyResizable = YES;
+    _headerText.horizontallyResizable = YES;
+    _headerText.autoresizingMask = NSViewWidthSizable;
+    _headerText.textContainer.containerSize = NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX);
+    _headerText.textContainer.widthTracksTextView = NO;
+    _headerText.layoutManager.allowsNonContiguousLayout = YES;
+    _headerScroll.documentView = _headerText;
+    [self.view addSubview:_headerScroll positioned:NSWindowBelow relativeTo:_message];
+}
+
+/// The table view: every row of a table, formatted only as it scrolls in,
+/// its cells drawn by the table itself (see FQGridCell).
+- (void)makeTableView
+{
+    if (_tableScroll)
+        return;
+    _cellFont = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
+    _digitWidth = [@"0" sizeWithAttributes:@{NSFontAttributeName : _cellFont}].width;
+    _textHeight = [[NSLayoutManager new] defaultLineHeightForFont:_cellFont];
+    _tableScroll = [self scrollViewWithFrame:[self contentFrame]];
+    _tableView = [[NSTableView alloc] initWithFrame:_tableScroll.bounds];
+    _tableView.style = NSTableViewStylePlain;
+    _tableView.usesAlternatingRowBackgroundColors = YES;
+    _tableView.gridStyleMask = NSTableViewSolidVerticalGridLineMask;
+    _tableView.columnAutoresizingStyle = NSTableViewNoColumnAutoresizing;
+    _tableView.allowsMultipleSelection = YES;
+    _tableView.rowHeight = 17;
+    _tableView.dataSource = self;
+    _tableView.delegate = self;
+    _tableScroll.documentView = _tableView;
+    [self.view addSubview:_tableScroll positioned:NSWindowBelow relativeTo:_message];
+}
+
 - (void)viewDidAppear
 {
     [super viewDidAppear];
@@ -855,31 +874,35 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 
 - (void)loadFile:(NSString *)path completion:(void (^)(void))completion
 {
-    (void)self.view;
+    [_file close];   // what was asked of the last file and not started is dropped
+    _file = [[FQFile alloc] initWithPath:path];
     _path = [path copy];
     _fileGeneration++;
     [_headers removeAllObjects];
     [_headersBuilding removeAllIndexes];
     _headerShown = -1;
-    _headerText.string = @"";
     _hdu = -1;
     _plane = -1;
     _hdus = nil;
     _selected = -1;
-    [self closeTable];
     _rendering = nil;
-    _detailSource = [[FQDetailSource alloc] initWithPath:path];
+    _renderInfo = nil;
+    // The file is read while the views are made.
+    [self render:YES completion:completion];
+    (void)self.view;
+    _headerText.string = @"";
+    [self closeTable];
     [self setPicture:nil];
     _spectrumView.rendering = nil;
     _imageScroll.hidden = _spectrumView.hidden = _tableScroll.hidden = _headerScroll.hidden = YES;
     _message.hidden = YES;
-    _renderInfo = nil;
     _info.stringValue = @"";
     _stretchMenu.toolTip = nil;
+    [_stretchMenu selectItemAtIndex:[self currentStretch]];
     _hduTitle.title = @"";
     [_hduMenu removeAllItems];
     [self layoutBar];
-    [self render:YES completion:completion];
+    [self setLoading:YES];
 }
 
 /// Renders _path with the current HDU, plane and stretch, keeping the
@@ -897,50 +920,55 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     _again = NO;
     if (first || _mode.selectedSegment == kModePicture)
         [self setLoading:YES];
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSString *error = nil;
+    __weak FQPreviewController *weakSelf = self;
+    [_file perform:^(fq_file *f, NSString *openError) {
+        NSString *error = openError;
         NSArray<FQHDUItem *> *hdus = nil;
         int catalog = -1;   // a file opens on a catalog's rows, not its map
-        FQRendering *r;
-        if (first)
-            r = [FQRendering renderFile:path
-                              maxPixels:maxPixels
-                                samples:4
-                                stretch:stretch
-                                    hdu:hdu
-                                  plane:plane
-                                   keep:YES
-                                   hdus:&hdus
-                                catalog:&catalog
-                                  error:&error];
-        else
-            r = [FQRendering renderFile:path
-                              maxPixels:maxPixels
-                                samples:4
-                                stretch:stretch
-                                    hdu:hdu
-                                  plane:plane
-                                   keep:YES
-                                   hdus:NULL
-                                catalog:NULL
-                                  error:&error];
+        FQRendering *r = nil;
+        if (f && first)
+            r = [FQRendering renderOpenFile:f
+                                       path:path
+                                  maxPixels:maxPixels
+                                    samples:4
+                                    stretch:stretch
+                                        hdu:hdu
+                                      plane:plane
+                                       keep:YES
+                                       hdus:&hdus
+                                    catalog:&catalog
+                                      error:&error];
+        else if (f)
+            r = [FQRendering renderOpenFile:f
+                                       path:path
+                                  maxPixels:maxPixels
+                                    samples:4
+                                    stretch:stretch
+                                        hdu:hdu
+                                      plane:plane
+                                       keep:YES
+                                       hdus:NULL
+                                    catalog:NULL
+                                      error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (generation == self->_generation) {
-                self->_busy = NO;
+            FQPreviewController *me = weakSelf;
+            // Neither a file nor an error: another file was loaded since.
+            if (me && (f || error) && generation == me->_generation) {
+                me->_busy = NO;
                 if (first) {
-                    self->_hdus = hdus;
-                    self->_selected = catalog;
+                    me->_hdus = hdus;
+                    me->_selected = catalog;
                 }
-                [self showRendering:r error:error first:first];
+                [me showRendering:r error:error first:first];
                 if (first)
-                    [self checkForUpdate];
-                if (self->_again)
-                    [self render:NO completion:nil];
+                    [me checkForUpdate];
+                if (me->_again)
+                    [me render:NO completion:nil];
             }
             if (completion)
                 completion();
         });
-    });
+    }];
 }
 
 /// Renders again with new settings; while a render is running, waits for
@@ -1380,7 +1408,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 
 - (void)clearDetail
 {
-    _detailGeneration++;
+    _detailWanted.wanted = ++_detailGeneration;
     [_imageView setDetail:NULL frame:NSZeroRect];
 }
 
@@ -1390,7 +1418,7 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
 - (void)updateDetail
 {
     FQRendering *r = _rendering;
-    if (!r || r.kind != FQ_KIND_IMAGE || !_imageView.image || _imageScroll.hidden || !_detailSource) {
+    if (!r || r.kind != FQ_KIND_IMAGE || !_imageView.image || _imageScroll.hidden || !_file) {
         [self clearDetail];
         return;
     }
@@ -1423,37 +1451,38 @@ enum { kModePicture = 0, kModeTable = 1, kModeHeader = 2 };
     int maxWidth = (int)MAX(1, MIN(4096, ceil(NSWidth(vis) * zoom * scale)));
     int maxHeight = (int)MAX(1, MIN(4096, ceil(NSHeight(vis) * zoom * scale)));
     NSInteger generation = ++_detailGeneration;
-    FQDetailSource *source = _detailSource;
+    FQWanted *wanted = _detailWanted;
+    wanted.wanted = generation;
     fq_stretch stretch = r.stretch;
     int hdu = in.hdu;
     long long plane = in.color == FQ_COLOR_RGB ? -1 : in.plane;
-    dispatch_async(_detailQueue, ^{
+    __weak FQPreviewController *weakSelf = self;
+    [_file perform:^(fq_file *file, NSString *error) {
+        (void)error;
+        if (!file || wanted.wanted != generation)
+            return;   // another part (or none) is wanted now
         CGRect covered = CGRectZero;
-        CGImageRef cg = [source copyDetailOfHDU:hdu
-                                          plane:plane
-                                        stretch:stretch
-                                         region:part
-                                       maxWidth:maxWidth
-                                      maxHeight:maxHeight
-                                        covered:&covered];
+        CGImageRef cg = FQCopyDetail(file, hdu, plane, stretch, part, maxWidth, maxHeight, &covered);
+        if (!cg)
+            return;
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (cg && generation == self->_detailGeneration) {
+            FQPreviewController *me = weakSelf;
+            if (me && generation == me->_detailGeneration) {
                 NSRect f = NSOffsetRect(covered, -ox, -oy);
                 if (!flipped)
                     f.origin.y = height - NSMaxY(f);
-                [self->_imageView setDetail:cg frame:f];
+                [me->_imageView setDetail:cg frame:f];
             }
-            if (cg)
-                CGImageRelease(cg);
+            CGImageRelease(cg);
         });
-    });
+    }];
 }
 
 #pragma mark Header
 
 /// The header of one HDU for the Header view: a heading, then the cards
 /// with keys, values and comments in columns.
-static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
+static NSAttributedString *FQHeaderListing(fq_file *f, NSString *error, int hdu)
 {
     NSFont *font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
     NSFont *bold = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightSemibold];
@@ -1466,16 +1495,13 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
         [FQ_SPAN_COMMENT] = @{NSForegroundColorAttributeName : NSColor.secondaryLabelColor},
     };
     NSMutableAttributedString *out = [NSMutableAttributedString new];
-    char err[256] = "";
-    fq_file *f = fq_open(path.fileSystemRepresentation, err, sizeof err);
     fq_span *spans = NULL;
     size_t len = 0, nspans = 0;
     char *text = f ? fq_header_layout(f, hdu, &len, &spans, &nspans) : NULL;
     if (!text) {
         NSString *msg = f ? [NSString stringWithFormat:@"No HDU %d in this file.", hdu]
-                          : [NSString stringWithFormat:@"Cannot read this file: %@", FQString(err)];
+                          : [NSString stringWithFormat:@"Cannot read this file: %@", error ?: @"?"];
         [out appendAttributedString:[[NSAttributedString alloc] initWithString:msg attributes:plain]];
-        fq_close(f);
         return out;
     }
     char name[72] = "";
@@ -1495,7 +1521,6 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
     [out appendAttributedString:a];
     free(text);
     free(spans);
-    fq_close(f);
     return out;
 }
 
@@ -1510,6 +1535,7 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
         [self buildHeader:hdu];
         return NO;
     }
+    [self makeHeaderView];
     [_headerText.textStorage setAttributedString:text];
     [_headerText scrollPoint:NSZeroPoint];
     _headerShown = hdu;
@@ -1520,22 +1546,25 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
 /// still the one wanted.
 - (void)buildHeader:(int)hdu
 {
-    if (!_path || _headers[@(hdu)] || [_headersBuilding containsIndex:(NSUInteger)hdu])
+    if (!_file || _headers[@(hdu)] || [_headersBuilding containsIndex:(NSUInteger)hdu])
         return;
     [_headersBuilding addIndex:(NSUInteger)hdu];
-    NSString *path = _path;
     NSInteger generation = _fileGeneration;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSAttributedString *text = FQHeaderListing(path, hdu);
+    __weak FQPreviewController *weakSelf = self;
+    [_file perform:^(fq_file *f, NSString *error) {
+        if (!f && !error)
+            return;   // another file was loaded since
+        NSAttributedString *text = FQHeaderListing(f, error, hdu);
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (generation != self->_fileGeneration)
+            FQPreviewController *me = weakSelf;
+            if (!me || generation != me->_fileGeneration)
                 return;
-            [self->_headersBuilding removeIndex:(NSUInteger)hdu];
-            self->_headers[@(hdu)] = text;
-            if (self->_mode.selectedSegment == kModeHeader && [self shownHDU] == hdu)
-                [self showMode:kModeHeader];
+            [me->_headersBuilding removeIndex:(NSUInteger)hdu];
+            me->_headers[@(hdu)] = text;
+            if (me->_mode.selectedSegment == kModeHeader && [me shownHDU] == hdu)
+                [me showMode:kModeHeader];
         });
-    });
+    }];
 }
 
 #pragma mark Table view
@@ -1563,13 +1592,18 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
     _tableOpening = hdu;
     NSInteger generation = ++_tableGeneration;
     NSString *path = _path;
+    __weak FQPreviewController *weakSelf = self;
+    // A file of its own: the table view reads its cells on the main thread,
+    // while the file shared by the rest may be read on another (and the
+    // bytes of a gzip file move as more of it is inflated).
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         FQOpenTable *t = [[FQOpenTable alloc] initWithPath:path hdu:hdu];
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (generation != self->_tableGeneration)
+            FQPreviewController *me = weakSelf;
+            if (!me || generation != me->_tableGeneration)
                 return;   // another file or table was asked for since
-            [self installTable:t hdu:hdu];
-            [self showMode:self->_mode.selectedSegment];
+            [me installTable:t hdu:hdu];
+            [me showMode:me->_mode.selectedSegment];
         });
     });
     return NO;
@@ -1597,6 +1631,7 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
 /// then one per column of the table, as wide as its first rows need.
 - (void)installTable:(FQOpenTable *)t hdu:(int)hdu
 {
+    [self makeTableView];
     [self closeTable];
     _tableData = t;
     _table = t.table;
@@ -1665,7 +1700,7 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
 {
     (void)sender;
     NSIndexSet *rows = _tableView.selectedRowIndexes;
-    if (_tableScroll.hidden || !_table || !rows.count)
+    if (!_tableScroll || _tableScroll.hidden || !_table || !rows.count)
         return;
     NSMutableString *text = [NSMutableString string];
     int nc = fq_table_ncols(_table);
@@ -1791,7 +1826,7 @@ static NSAttributedString *FQHeaderListing(NSString *path, int hdu)
             return YES;
         }
     }
-    if (_headerScroll.hidden)
+    if (!_headerScroll || _headerScroll.hidden)
         return NO;
     NSInteger action = 0;
     if (mods == NSEventModifierFlagCommand && [key isEqualToString:@"f"])

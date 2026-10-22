@@ -23,6 +23,30 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly) BOOL isArray;          // of an ASDF file: "roman.data — ...", "roman.data"
 @end
 
+/// A file opened once for a preview, and shared by what it shows of it:
+/// renders, zoomed-in details and headers, and with them what the core keeps
+/// of the file (the HDUs found, a decompressed XISF image or ASDF plane,
+/// where inflating a zlib block got to, a gzip file inflated so far). The
+/// core reads a file on one thread at a time: work with it goes through
+/// -perform:, on a serial queue of the file's own, in the order asked.
+@interface FQFile : NSObject
+- (instancetype)initWithPath:(NSString *)path;
+@property(nonatomic, readonly, copy) NSString *path;
+/// Runs block on the file's queue with the file, opened the first time
+/// (NULL, and why, if it cannot be). When the file was closed before, block
+/// runs with neither, so that whoever waits for it hears.
+- (void)perform:(void (^)(fq_file *_Nullable file, NSString *_Nullable error))block;
+/// Drops the work not started yet. The file itself is closed once the work
+/// running is done.
+- (void)close;
+@end
+
+/// Work that can be dropped before it starts: whoever asked for it moves
+/// wanted on when something newer is asked for instead.
+@interface FQWanted : NSObject
+@property(atomic) NSInteger wanted;
+@end
+
 /// Wraps an image rendered by the core. Owns the fq_image.
 @interface FQRendering : NSObject
 @property(nonatomic, readonly) int kind;              // FQ_KIND_*
@@ -30,7 +54,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly, nullable) CGImageRef image;
 @property(nonatomic, readonly) CGSize pixelSize;      // image size, or a 4:3 plot box
 @property(nonatomic, readonly) const fq_image *raw;   // spectrum data
-/// How values became grey levels, for FQDetailSource (a copy).
+/// How values became grey levels, for FQCopyDetail (a copy).
 @property(nonatomic, readonly) fq_stretch stretch;
 /// What is shown, briefly: "4096 × 4096 · float32", "3600 rows".
 @property(nonatomic, readonly) NSString *summary;
@@ -59,27 +83,32 @@ NS_ASSUME_NONNULL_BEGIN
                             catalog:(int *_Nullable)catalog
                               error:(NSString *_Nullable *_Nullable)error;
 
+/// Same, with the file open (on its queue: see FQFile).
++ (nullable instancetype)renderOpenFile:(fq_file *)file
+                                   path:(NSString *)path
+                              maxPixels:(int)maxPixels
+                                samples:(int)samples
+                                stretch:(int)stretch
+                                    hdu:(int)hdu
+                                  plane:(long long)plane
+                                   keep:(BOOL)keep
+                                   hdus:(NSArray<FQHDUItem *> *_Nullable *_Nullable)hdus
+                                catalog:(int *_Nullable)catalog
+                                  error:(NSString *_Nullable *_Nullable)error;
+
 /// Stretches an image rendered with keep again, without reading the file
 /// (a few milliseconds). NO if that is not possible.
 - (BOOL)restretch:(int)stretch;
 @end
 
-/// Renders parts of an image in more detail than the whole-image rendering,
-/// for the zoom, with its stretch so that they can be laid over it. Keeps
-/// the file open from one part to the next. Use it from one thread at a time.
-@interface FQDetailSource : NSObject
-- (instancetype)initWithPath:(NSString *)path;
-/// The pixels region (x and y from the first pixel of the first row) of
-/// HDU hdu and cube plane plane (-1 for an RGB cube), fitted to maxWidth x
-/// maxHeight. *covered: the pixels it shows. NULL if it cannot be read.
-- (nullable CGImageRef)copyDetailOfHDU:(int)hdu
-                                 plane:(long long)plane
-                               stretch:(fq_stretch)stretch
-                                region:(CGRect)region
-                              maxWidth:(int)maxWidth
-                             maxHeight:(int)maxHeight
-                               covered:(CGRect *)covered CF_RETURNS_RETAINED;
-@end
+/// Part of an image in more detail than the whole-image rendering, for the
+/// zoom, with its stretch so that it can be laid over it: the pixels region
+/// (x and y from the first pixel of the first row) of HDU hdu and cube
+/// plane plane (-1 for an RGB cube), fitted to maxWidth x maxHeight, from a
+/// file open (on its queue: see FQFile). *covered: the pixels it shows.
+/// NULL if it cannot be read.
+CGImageRef _Nullable FQCopyDetail(fq_file *file, int hdu, long long plane, fq_stretch stretch, CGRect region,
+                                  int maxWidth, int maxHeight, CGRect *covered) CF_RETURNS_RETAINED;
 
 /// Draws a plot envelope inside rect (Core Graphics coordinates): a line,
 /// or dots for a time series; magnitudes run downwards.

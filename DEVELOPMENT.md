@@ -24,6 +24,15 @@ uFits is built to be small and fast:
   compressed ASDF array only the plane shown is decompressed (see [ASDF](#asdf)).
 - **Uses every core.** Binning, tile decompression and the final mapping run in parallel
   (Grand Central Dispatch).
+- **Opens a file once.** A preview's renders, zoomed-in details and headers share one
+  open file (`FQFile`), and with it what the core keeps of it: the HDUs found, a
+  decompressed XISF image or ASDF plane, where inflating a zlib block got to, a gzip
+  file inflated so far. They take turns on a queue of the file's own; work that is no
+  longer wanted when its turn comes (the detail of a part scrolled past, anything of a
+  preview closed) is dropped. The table view opens the file again: it reads cells on
+  the main thread. A preview starts reading its file before it makes its views, and
+  makes the header and table views only when they are first shown. Thumbnails go to
+  Quick Look as uncompressed TIFF files, quicker to write and to read than PNG.
 
 On an Apple Silicon CI runner, a Finder-style thumbnail request (through
 `QLThumbnailGenerator`, including the round trip to the extension) takes 10–25 ms per

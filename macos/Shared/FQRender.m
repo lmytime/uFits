@@ -150,6 +150,59 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
     return items;
 }
 
+@implementation FQFile {
+    dispatch_queue_t _queue;
+    fq_file *_file;       // on _queue
+    NSString *_error;     // on _queue: why the file could not be opened
+    BOOL _opened;         // on _queue
+    int _closed;          // read and written atomically
+}
+
+- (instancetype)initWithPath:(NSString *)path
+{
+    if ((self = [super init])) {
+        _path = [path copy];
+        _queue = dispatch_queue_create("io.github.lmytime.uFits.file",
+                                       dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,
+                                                                               QOS_CLASS_USER_INITIATED, 0));
+    }
+    return self;
+}
+
+- (void)dealloc
+{
+    fq_close(_file);
+}
+
+- (void)perform:(void (^)(fq_file *, NSString *))block
+{
+    // The block holds the file: it is closed after the last one has run.
+    dispatch_async(_queue, ^{
+        if (__atomic_load_n(&self->_closed, __ATOMIC_ACQUIRE)) {
+            block(NULL, nil);
+            return;
+        }
+        if (!self->_opened) {
+            self->_opened = YES;
+            char err[256] = "";
+            self->_file = fq_open(self->_path.fileSystemRepresentation, err, sizeof err);
+            if (!self->_file)
+                self->_error = FQString(err);
+        }
+        block(self->_file, self->_error);
+    });
+}
+
+- (void)close
+{
+    __atomic_store_n(&_closed, 1, __ATOMIC_RELEASE);
+}
+
+@end
+
+@implementation FQWanted
+@end
+
 @implementation FQRendering {
     fq_image *_img;
     CGImageRef _image;
@@ -193,6 +246,36 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
             *error = FQString(err);
         return nil;
     }
+    FQRendering *r = [self renderOpenFile:f
+                                     path:path
+                                maxPixels:maxPixels
+                                  samples:samples
+                                  stretch:stretch
+                                      hdu:hdu
+                                    plane:plane
+                                     keep:keep
+                                     hdus:hdus
+                                  catalog:catalog
+                                    error:error];
+    fq_close(f);
+    return r;
+}
+
++ (instancetype)renderOpenFile:(fq_file *)f
+                          path:(NSString *)path
+                     maxPixels:(int)maxPixels
+                       samples:(int)samples
+                       stretch:(int)stretch
+                           hdu:(int)hdu
+                         plane:(long long)plane
+                          keep:(BOOL)keep
+                          hdus:(NSArray<FQHDUItem *> **)hdus
+                       catalog:(int *)catalog
+                         error:(NSString **)error
+{
+    char err[256] = "";
+    if (catalog)
+        *catalog = -1;
     int sky = 0, shown = catalog && hdu < 0 ? fq_default_hdu(f, &sky) : -1;
     if (shown >= 0 && sky) {
         // Unless it has no rows to show: a big gzip file is not listed.
@@ -201,7 +284,6 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
             *catalog = shown;
             if (hdus)
                 *hdus = items;
-            fq_close(f);
             return nil;
         }
     }
@@ -216,7 +298,6 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
     fq_image *img = fq_render(f, &o, err, sizeof err);
     if (hdus)
         *hdus = FQListHDUs(f, path);
-    fq_close(f);
     if (!img) {
         if (error)
             *error = FQString(err);
@@ -312,36 +393,10 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
 
 @end
 
-@implementation FQDetailSource {
-    NSString *_path;
-    fq_file *_file;
-}
-
-- (instancetype)initWithPath:(NSString *)path
-{
-    if ((self = [super init]))
-        _path = [path copy];
-    return self;
-}
-
-- (void)dealloc
-{
-    fq_close(_file);
-}
-
-- (CGImageRef)copyDetailOfHDU:(int)hdu
-                        plane:(long long)plane
-                      stretch:(fq_stretch)stretch
-                       region:(CGRect)region
-                     maxWidth:(int)maxWidth
-                    maxHeight:(int)maxHeight
-                      covered:(CGRect *)covered
+CGImageRef FQCopyDetail(fq_file *f, int hdu, long long plane, fq_stretch stretch, CGRect region, int maxWidth,
+                        int maxHeight, CGRect *covered)
 {
     char err[256] = "";
-    if (!_file)
-        _file = fq_open(_path.fileSystemRepresentation, err, sizeof err);
-    if (!_file)
-        return NULL;
     fq_opts o;
     fq_opts_default(&o);
     o.max_width = maxWidth;
@@ -352,7 +407,7 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
     o.region[1] = (int64_t)floor(region.origin.y);
     o.region[2] = (int64_t)ceil(CGRectGetMaxX(region)) - o.region[0];
     o.region[3] = (int64_t)ceil(CGRectGetMaxY(region)) - o.region[1];
-    fq_image *img = fq_render_detail(_file, &o, &stretch, err, sizeof err);
+    fq_image *img = fq_render_detail(f, &o, &stretch, err, sizeof err);
     if (!img)
         return NULL;
     CGImageRef cg = FQCreateImage(img);
@@ -362,8 +417,6 @@ static NSArray<FQHDUItem *> *FQListHDUs(fq_file *f, NSString *path)
     fq_image_free(img);
     return cg;
 }
-
-@end
 
 /// Horizontal position of plot column c of n; x_flip puts the first
 /// column on the right (right ascension grows to the left).

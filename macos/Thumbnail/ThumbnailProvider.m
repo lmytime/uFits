@@ -43,30 +43,55 @@ static CGImageRef FQCreateSized(FQRendering *r, size_t w, size_t h) CF_RETURNS_R
     return sized;
 }
 
-/// A PNG file of image for Quick Look to read, in a folder of the
-/// extension's own; files from earlier thumbnails, read long ago, go.
-static NSURL *FQWritePNG(CGImageRef image)
+/// Files of earlier thumbnails in dir go, once Quick Look has long read
+/// them: looked for in the background, at most every half a minute.
+static void FQSweep(NSURL *dir)
+{
+    static dispatch_queue_t queue;
+    static dispatch_once_t once;
+    static CFAbsoluteTime last;   // on queue
+    dispatch_once(&once, ^{
+        queue = dispatch_queue_create("io.github.lmytime.uFits.sweep",
+                                      dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,
+                                                                              QOS_CLASS_UTILITY, 0));
+    });
+    dispatch_async(queue, ^{
+        CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+        if (now - last < 30)
+            return;
+        last = now;
+        NSFileManager *fm = NSFileManager.defaultManager;
+        NSDate *old = [NSDate dateWithTimeIntervalSinceNow:-120];
+        for (NSURL *f in [fm contentsOfDirectoryAtURL:dir
+                           includingPropertiesForKeys:@[ NSURLContentModificationDateKey ]
+                                              options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                error:nil]) {
+            NSDate *when = nil;
+            [f getResourceValue:&when forKey:NSURLContentModificationDateKey error:nil];
+            if (when && [when compare:old] == NSOrderedAscending)
+                [fm removeItemAtURL:f error:nil];
+        }
+    });
+}
+
+/// A file of image for Quick Look to read, in a folder of the extension's
+/// own: an uncompressed TIFF, quick to write and to read (a PNG took longer
+/// to compress than most thumbnails take to draw).
+static NSURL *FQWriteImage(CGImageRef image)
 {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSURL *dir = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:@"thumbnails"]
                             isDirectory:YES];
     [fm createDirectoryAtURL:dir withIntermediateDirectories:YES attributes:nil error:nil];
-    NSDate *old = [NSDate dateWithTimeIntervalSinceNow:-600];
-    for (NSURL *f in [fm contentsOfDirectoryAtURL:dir
-                       includingPropertiesForKeys:@[ NSURLContentModificationDateKey ]
-                                          options:NSDirectoryEnumerationSkipsHiddenFiles
-                                            error:nil]) {
-        NSDate *when = nil;
-        [f getResourceValue:&when forKey:NSURLContentModificationDateKey error:nil];
-        if (when && [when compare:old] == NSOrderedAscending)
-            [fm removeItemAtURL:f error:nil];
-    }
-    NSURL *url = [dir URLByAppendingPathComponent:[NSUUID.UUID.UUIDString stringByAppendingPathExtension:@"png"]];
+    FQSweep(dir);
+    NSURL *url = [dir URLByAppendingPathComponent:[NSUUID.UUID.UUIDString stringByAppendingPathExtension:@"tiff"]];
     CGImageDestinationRef dest =
-        CGImageDestinationCreateWithURL((__bridge CFURLRef)url, CFSTR("public.png"), 1, NULL);
+        CGImageDestinationCreateWithURL((__bridge CFURLRef)url, CFSTR("public.tiff"), 1, NULL);
     if (!dest)
         return nil;
-    CGImageDestinationAddImage(dest, image, NULL);
+    NSDictionary *props = @{(__bridge NSString *)kCGImagePropertyTIFFDictionary :
+                                @{(__bridge NSString *)kCGImagePropertyTIFFCompression : @1}};   // none
+    CGImageDestinationAddImage(dest, image, (__bridge CFDictionaryRef)props);
     BOOL ok = CGImageDestinationFinalize(dest);
     CFRelease(dest);
     return ok ? url : nil;
@@ -99,7 +124,7 @@ static NSURL *FQWritePNG(CGImageRef image)
                                      samples:2
                                      stretch:FQ_STRETCH_AUTO
                                        error:&error];
-    NSURL *png = nil;
+    NSURL *file = nil;
     if (r && r.kind != FQ_KIND_NONE && !r.info.empty) {
         // The thumbnail goes to Quick Look as a file of request.scale times
         // the size asked for, and Quick Look fits it in: in the context of a
@@ -110,13 +135,13 @@ static NSURL *FQWritePNG(CGImageRef image)
         size_t w = (size_t)MAX(1, round(px.width * s)), h = (size_t)MAX(1, round(px.height * s));
         CGImageRef sized = FQCreateSized(r, w, h);
         if (sized) {
-            png = FQWritePNG(sized);
+            file = FQWriteImage(sized);
             CGImageRelease(sized);
         }
-        if (!png)
+        if (!file)
             error = @"could not write the thumbnail";
     }
-    if (!png) {
+    if (!file) {
         handler(nil, [NSError errorWithDomain:@"uFits"
                                          code:1
                                      userInfo:@{
@@ -124,7 +149,7 @@ static NSURL *FQWritePNG(CGImageRef image)
                                      }]);
         return;
     }
-    QLThumbnailReply *reply = [QLThumbnailReply replyWithImageFileURL:png];
+    QLThumbnailReply *reply = [QLThumbnailReply replyWithImageFileURL:file];
     if (@available(macOS 12.0, *))
         reply.extensionBadge = [request.fileURL.pathExtension caseInsensitiveCompare:@"xisf"] == NSOrderedSame ? @"XISF"
                                : [request.fileURL.pathExtension caseInsensitiveCompare:@"asdf"] == NSOrderedSame ? @"ASDF"
