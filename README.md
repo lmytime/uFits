@@ -49,7 +49,8 @@ notarized by Apple), then open uFits once.
 
 Previews are fast even for huge files: uFits reads only the part of the file it shows
 (of a compressed XISF image, the whole image; of a compressed ASDF cube, only the
-plane on show).
+plane on show; for the map of a catalog bigger than 1 GiB, 256 MiB of its rows,
+sampled from all over it).
 
 ## Using the preview
 

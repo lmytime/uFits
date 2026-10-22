@@ -68,11 +68,16 @@ Time spent in the core alone, measured on a 4-core Linux VM:
 - Catalogs as a map of their sky positions: `RA`/`DEC` (also `ra`/`dec`,
   `RAJ2000`/`DEJ2000`, `ALPHA_J2000`/`DELTA_J2000`, `GLON`/`GLAT` and other common
   pairs), right ascension growing to the left, fields across RA = 0 kept in one piece,
-  placeholder values such as -999 skipped. Crowded catalogs are shaded by density. A
-  5-million-row catalog plots in about 0.15 s, but the map samples rows from all over the
-  table, so for a catalog of 100 GB it takes minutes: previews open a catalog on its rows
-  and draw the map only when **Plot** is picked (`fq_default_hdu` tells from the headers
-  what a file opens on). Finder's thumbnails of catalogs are still maps.
+  placeholder values such as -999 skipped. Crowded catalogs are shaded by density.
+  Plots of more than 4 million points are drawn on every core (a 5-million-row catalog
+  in about 0.04 s). Of a table bigger than 1 GiB only 16384 windows of 16 KiB are read,
+  256 MiB whatever its size: one at a fixed random place in each of as many equal parts
+  of the table, so that no regular step beats with the order of the rows, read on every
+  core and without the read-ahead meant for reading on. The rows of a catalog sorted by
+  position make each window a small patch of sky; then only the middle row of each
+  window is drawn. Previews open a catalog on its rows and draw the map only when
+  **Plot** is picked (`fq_default_hdu` tells from the headers what a file opens on).
+  Finder's thumbnails of catalogs are still maps.
 - Tile-compressed images (`fpack`, `.fz`): `RICE_1`, `GZIP_1`, `GZIP_2`, `PLIO_1`,
   `NOCOMPRESS`, with all three quantization/dithering modes.
 - Gzipped files (`.fits.gz`) when built with `GZIP=1` (see below).
@@ -303,7 +308,9 @@ and shuffling, multiple images, display orientation, metadata, and malformed inp
 `tests/test_asdf.py` writes ASDF files with Python's asdf (and Roman's own, with
 roman_datamodels, when it is installed) and checks every type and byte order, the
 three compressions, cubes plane by plane, views, streamed blocks, quantities, which
-arrays are listed, the header, and damaged files.
+arrays are listed, the header, and damaged files. `tests/test_tables.py` checks the
+plots of big tables against numpy: drawn on every core, and sampled in windows (it
+writes a table of 1.1 GB, then deletes it).
 On Linux install the zlib, bzip2 and Expat development packages before building the core.
 `tests/fuzz.py` feeds damaged files to an AddressSanitizer/UBSan build. CI runs both
 on Linux and on macOS 15 (and 26, when run by hand or for a release: see the top of

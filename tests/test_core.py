@@ -147,7 +147,7 @@ def check_plot(fn, path, h, idx, spec):
         with np.errstate(invalid="ignore"):
             ok &= (x >= -360) & (x <= 360) & (y >= -90) & (y <= 90)
         w = np.where(x[ok] > 180, x[ok] - 360, x[ok])
-        wrap = w.max() - w.min() < x[ok].max() - x[ok].min()
+        wrap = w.max() - w.min() < x[ok].max() - x[ok].min() - 1
     x, y = x[ok], y[ok]
     if wrap:
         x = np.where(x > 180, x - 360, x)

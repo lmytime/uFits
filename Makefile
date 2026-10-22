@@ -304,6 +304,7 @@ test: $(B)/fqtool
 	python3 tests/test_core.py $(B)/fqtool $(B)/testdata
 	python3 tests/test_xisf.py $(B)/fqtool $(B)/testdata
 	python3 tests/test_asdf.py $(B)/fqtool $(B)/testdata
+	python3 tests/test_tables.py $(B)/fqtool $(B)/bigtables
 
 # Checks used by CI: thumbnails through QLThumbnailGenerator and previews
 # through QLPreviewView, both served by the installed extensions, the

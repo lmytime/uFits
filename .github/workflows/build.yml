@@ -57,6 +57,7 @@ jobs:
           python3 tests/test_core.py build/fqtool-asan build/testdata > /dev/null
           python3 tests/test_xisf.py build/fqtool-asan build/testdata
           python3 tests/test_asdf.py build/fqtool-asan build/testdata
+          python3 tests/test_tables.py build/fqtool-asan build/bigtables
           python3 tests/fuzz.py build/fqtool-asan build/testdata 500
           # ASDF files alone, as the mix above has few of them.
           mkdir -p build/asdf-only && cp build/testdata/*.asdf build/asdf-only/
